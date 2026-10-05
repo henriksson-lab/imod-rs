@@ -557,6 +557,24 @@ impl ContextMenu for MinibuttonCell {
     }
 }
 
-// TODO(unit): needs etomo/type/FieldSettings.java - `implements FieldSettings`
-// (setSelected, isSelected, isEditable, setEditable, setEnabled, isEnabled); the
-// methods are the inherent ones above.
+/// The `etomo.type.FieldSettings` interface the Java class implements.
+impl crate::imod::etomo::r#type::field_settings::FieldSettings for MinibuttonCell {
+    fn set_selected(&self, selected: bool) {
+        MinibuttonCell::set_selected(self, selected)
+    }
+    fn is_selected(&self) -> bool {
+        MinibuttonCell::is_selected(self)
+    }
+    fn is_editable(&self) -> bool {
+        MinibuttonCell::is_editable(self)
+    }
+    fn set_editable(&self, editable: bool) {
+        MinibuttonCell::set_editable(self, editable)
+    }
+    fn set_enabled(&self, enabled: bool) {
+        MinibuttonCell::set_enabled(self, enabled)
+    }
+    fn is_enabled(&self) -> bool {
+        MinibuttonCell::is_enabled(self)
+    }
+}

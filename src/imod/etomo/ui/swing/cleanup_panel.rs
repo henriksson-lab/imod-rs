@@ -22,14 +22,8 @@ use super::ui_harness;
 use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::jdk::{ActionEvent, ActionListener, FileFilter, JComponent, JFileChooser};
-// TODO(unit): needs etomo/storage/FileFilterCollection.java - the chooser's
-// combined filter.
 use crate::imod::etomo::storage::file_filter_collection::FileFilterCollection;
-// TODO(unit): needs etomo/storage/IntermediateFileFilter.java - the intermediate
-// file filter.
 use crate::imod::etomo::storage::intermediate_file_filter::IntermediateFileFilter;
-// TODO(unit): needs etomo/storage/SirtOutputFileFilter.java - the SIRT output
-// file filter (already called by sirt_panel.rs the same way).
 use crate::imod::etomo::storage::sirt_output_file_filter::SirtOutputFileFilter;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;

@@ -332,22 +332,26 @@ impl CommandParam for SolvematchParam {
             Some(base.from_correspondence_list.clone()),
         )?
         .unwrap_or_else(StringList::new);
-        // SolvematchParam.java:305-308 calls the String overload of
-        // setParamIfPresent for these three and discards the returned value, so the
-        // fields are never read from the script, `aFiducialModel` is always null
-        // below, and MatchingAtoB is never parsed.  Fixed in translation: the
-        // returned values are assigned, as for every other String parameter here.
-        base.transfer_coordinate_file = param_utilities::set_param_if_present_string(
+        // SolvematchParam.java:103-106 call the String overload of
+        // setParamIfPresent for these three and discard the returned value, so the
+        // fields are never read from the script and `aFiducialModel` is always null
+        // below: the matching direction comes from `setMatchBToA(toFiducialFile)`.
+        // Kept native (BUGS.md, eTomo "SolvematchParam"): assigning the values
+        // instead routes every current script into the `MatchingAtoB` branch,
+        // whose presence-only boolean test reads setupcombine's
+        // `MatchingAtoB 0` as A-to-B and so rewrites solvematch.com with the
+        // matching direction reversed.
+        let _ = param_utilities::set_param_if_present_string(
             script_command,
             TRANSFER_COORDINATE_FILE,
             base.transfer_coordinate_file.as_deref(),
         )?;
-        base.a_fiducial_model = param_utilities::set_param_if_present_string(
+        let _ = param_utilities::set_param_if_present_string(
             script_command,
             A_FIDUCIAL_MODEL,
             base.a_fiducial_model.as_deref(),
         )?;
-        base.b_fiducial_model = param_utilities::set_param_if_present_string(
+        let _ = param_utilities::set_param_if_present_string(
             script_command,
             B_FIDUCIAL_MODEL,
             base.b_fiducial_model.as_deref(),

@@ -27,6 +27,7 @@ use super::param_utilities;
 use super::process_details::ProcessDetails;
 use super::string_list::StringList;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{ConstEtomoNumber, Type};
 use crate::imod::etomo::r#type::etomo_boolean2::EtomoBoolean2;
@@ -36,7 +37,6 @@ use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::script_parameter::ScriptParameter;
 use crate::imod::etomo::r#type::tilt_angle_spec::TiltAngleSpec;
 use crate::imod::etomo::r#type::x_tilt_option::XTiltOption;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 
 pub const SINGLE_OPTION: i32 = -1;
 pub const FIXED_OPTION: i32 = 0;
@@ -1173,7 +1173,10 @@ impl ProcessDetails for ConstTiltalignParam {
     }
 
     /// Java `getHashtable`: handles no field.
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
@@ -1183,7 +1186,10 @@ impl ProcessDetails for ConstTiltalignParam {
     }
 
     /// Java `getIntKeyList`: handles no field.
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -1198,7 +1204,10 @@ impl ProcessDetails for ConstTiltalignParam {
     }
 
     /// Java `getIteratorElementList`: handles no field.
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 }

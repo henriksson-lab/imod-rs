@@ -22,6 +22,7 @@ use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::etched_border::EtchedBorder;
 use super::final_aligned_stack_dialog::FinalAlignedStackDialog;
 use super::find_beads3d_display::FindBeads3dDisplay;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::global_expand_button::GlobalExpandButton;
 use super::newstack_display::NewstackDisplay;
 use super::radio_button::RadioButton;
@@ -110,10 +111,6 @@ impl EraseGoldPanel {
             let rb_model_use_find_beads3d =
                 RadioButton::new_string_button_group(Some("Use findbeads3d"), Some(&bg_model));
             // Constructor body.
-            // TODO(unit): needs etomo/ui/swing/XfModelPanel.java - the live
-            // xf_model_panel.rs is a generic state model; this assumes the faithful
-            // `get_instance(&'static ApplicationManager, AxisID, DialogType) ->
-            // Rc<XfModelPanel>`.
             let xf_model_panel = XfModelPanel::get_instance(manager, axis_id, dialog_type);
             let beads3d_find_panel = Beads3dFindPanel::get_instance(
                 manager,
@@ -165,10 +162,10 @@ impl EraseGoldPanel {
     }
 
     /// Java private `addListeners()`.
-    fn add_listeners(&self) {
-        // Swing mouse: pnlRoot.addMouseListener(new GenericMouseAdapter(this)) -
-        // mouse events are not modelled by jdk.rs; popUpContextMenu is the
-        // `ContextMenu` implementation below.
+    fn add_listeners(self: &Rc<Self>) {
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.pnl_root
+            .add_mouse_listener(GenericMouseAdapter::new(context_menu));
         self.rb_model_use_fid
             .add_action_listener(self.action_listener.clone());
         self.rb_model_use_find_beads3d

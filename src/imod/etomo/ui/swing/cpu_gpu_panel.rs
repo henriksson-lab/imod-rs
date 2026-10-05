@@ -24,8 +24,6 @@ use crate::imod::etomo::comscript::fortran_input_syntax_exception::FortranInputS
 use crate::imod::etomo::comscript::tilt_param::TiltParam;
 use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
-// TODO(unit): needs etomo/ProcessingMethodMediator.java - the mediator type and
-// its register/deregister/setMethod/getRunMethodForProcessInterface/addGpuListener.
 use crate::imod::etomo::processing_method_mediator::ProcessingMethodMediator;
 use crate::imod::etomo::storage::cpu_adoc;
 use crate::imod::etomo::storage::network::Network;

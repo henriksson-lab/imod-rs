@@ -21,9 +21,7 @@ use crate::imod::etomo::r#type::const_etomo_number::{
 use crate::imod::etomo::ui::swing::load_display::LoadDisplay;
 use crate::imod::etomo::util::event_queue::{EdtRef, invoke_later};
 use crate::imod::etomo::util::utilities::{self, java_lang_string_split};
-// TODO(unit): needs etomo/process/IntermittentBackgroundProcess.java.
 use crate::imod::etomo::process::intermittent_background_process::IntermittentBackgroundProcess;
-// TODO(unit): needs etomo/process/IntermittentProcessMonitor.java.
 use crate::imod::etomo::process::intermittent_process_monitor::IntermittentProcessMonitor;
 
 /// Java `rcsid`.

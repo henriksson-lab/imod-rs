@@ -978,3 +978,160 @@ impl super::action_target::ActionTarget for FieldCell {
         FieldCell::get_expanded_value(self)
     }
 }
+
+/// The `etomo.ui.Field` interface the Java class implements.
+impl Field for FieldCell {
+    fn is_debug(&self) -> bool {
+        InputCellVirtual::is_debug(self)
+    }
+    fn get_name(&self) -> Option<String> {
+        FieldCell::get_name(self)
+    }
+    fn is_boolean(&self) -> bool {
+        FieldCell::is_boolean(self)
+    }
+    fn is_text(&self) -> bool {
+        FieldCell::is_text(self)
+    }
+    fn get_quoted_label(&self) -> Option<String> {
+        FieldCell::get_quoted_label(self)
+    }
+    fn is_enabled(&self) -> bool {
+        FieldCell::is_enabled(self)
+    }
+    fn clear(&self) {
+        FieldCell::clear(self)
+    }
+    fn set_value_field(&self, from: Option<&dyn Field>) {
+        FieldCell::set_value_field(self, from)
+    }
+    fn set_value_string(&self, text: Option<&str>) {
+        FieldCell::set_value_string(self, text)
+    }
+    fn set_value_boolean(&self, bool_: bool) {
+        FieldCell::set_value_boolean(self, bool_)
+    }
+    fn is_empty(&self) -> bool {
+        FieldCell::is_empty(self)
+    }
+    fn is_selected(&self) -> bool {
+        FieldCell::is_selected(self)
+    }
+    fn is_required(&self) -> bool {
+        FieldCell::is_required(self)
+    }
+    fn get_text_void(&self) -> Option<String> {
+        FieldCell::get_text_void(self)
+    }
+    fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        FieldCell::get_text_boolean_field_displayer(self, do_validation, field_displayer1.as_deref())
+    }
+    fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+        field_displayer2: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        FieldCell::get_text_boolean_field_displayer_field_displayer(
+            self,
+            do_validation,
+            field_displayer1.as_deref(),
+            field_displayer2.as_deref(),
+        )
+    }
+    fn get_directive_def(&self) -> Option<DirectiveDef> {
+        FieldCell::get_directive_def(self)
+    }
+    fn use_default_value(&self) {
+        FieldCell::use_default_value(self)
+    }
+    fn equals_default_value_void(&self) -> bool {
+        FieldCell::equals_default_value_void(self)
+    }
+    fn equals_default_value_string(&self, value: Option<&str>) -> bool {
+        FieldCell::equals_default_value_string(self, value)
+    }
+    fn backup(&self) {
+        FieldCell::backup(self)
+    }
+    fn restore_from_backup(&self) {
+        FieldCell::restore_from_backup(self)
+    }
+    fn checkpoint(&self) {
+        FieldCell::checkpoint(self)
+    }
+    fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        FieldCell::set_checkpoint(self, input)
+    }
+    fn get_checkpoint(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        FieldCell::get_checkpoint(self).map(Rc::from)
+    }
+    fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
+        FieldCell::is_different_from_checkpoint(self, always_check)
+    }
+    fn is_field_highlight_set(&self) -> bool {
+        FieldCell::is_field_highlight_set(self)
+    }
+    fn clear_field_highlight(&self) {
+        FieldCell::clear_field_highlight(self)
+    }
+    fn set_field_highlight_field_setting_interface(&self, input: Option<&dyn FieldSettingInterface>) {
+        FieldCell::set_field_highlight_field_setting_interface(self, input)
+    }
+    fn set_field_highlight_string(&self, input: Option<&str>) {
+        FieldCell::set_field_highlight_string(self, input)
+    }
+    fn set_field_highlight_boolean(&self, input: bool) {
+        FieldCell::set_field_highlight_boolean(self, input)
+    }
+    fn get_field_highlight(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        FieldCell::get_field_highlight(self).map(Rc::from)
+    }
+    fn equals_field_highlight_void(&self) -> bool {
+        FieldCell::equals_field_highlight_void(self)
+    }
+    fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
+        FieldCell::equals_field_highlight_string(self, value)
+    }
+    fn set_tool_tip_text(&self, tooltip: Option<&str>) {
+        FieldCell::set_tool_tip_text(self, tooltip)
+    }
+    fn set_tooltip(&self, field: Option<&dyn Field>) {
+        FieldCell::set_tooltip(self, field)
+    }
+    fn get_tooltip(&self) -> Option<String> {
+        FieldCell::get_tooltip(self)
+    }
+    fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
+        InputCellVirtual::equals_selected_string_value(self, value)
+    }
+    fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        FieldCell::set_directive_def(self, directive_def)
+    }
+    fn get_description(&self) -> String {
+        FieldCell::get_description(self)
+            .unwrap_or_else(|| "null".to_owned())
+    }
+    fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        FieldCell::set_unformatted_tooltip(self, text)
+    }
+    fn has_unformatted_tooltip(&self) -> bool {
+        FieldCell::has_unformatted_tooltip(self)
+    }
+    fn use_unformatted_tooltip(&self, param_descr: Option<&str>, directive_descr: Option<&str>) {
+        FieldCell::use_unformatted_tooltip(self, param_descr, directive_descr)
+    }
+}
+
+impl crate::imod::etomo::ui::text_field_interface::TextFieldInterface for FieldCell {}
+
+/// The `etomo.ui.TableComponent` interface the Java class implements.
+impl crate::imod::etomo::ui::table_component::TableComponent for FieldCell {
+    fn get_preferred_width(&self) -> i32 {
+        FieldCell::get_preferred_width(self)
+    }
+}

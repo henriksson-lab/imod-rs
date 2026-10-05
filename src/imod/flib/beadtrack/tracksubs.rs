@@ -418,8 +418,21 @@ pub fn find_piece(
     nx_good = nx_box;
     ny_good = ny_box;
     if if_xfs != 0 {
-        let dx = (prexf[(iz_next * 6 + 4) as usize] as f64 + 0.5).floor() as i32;
-        let dy = (prexf[(iz_next * 6 + 5) as usize] as f64 + 0.5).floor() as i32;
+        // Fixed in translation (2026-10-03, `BUGS.md`): a point whose Z is not a
+        // view of the transform list (`transferfid` hands beadtrack a model with
+        // points at Z -1 for its two-view stack) makes the source read
+        // `prexf[-2]`/`prexf[-1]`, before the array.  Such a shift is taken as
+        // 0; no piece lies at that Z, so the bead is not found there either way.
+        let shift = |k: i32| -> i32 {
+            let ind = iz_next.wrapping_mul(6).wrapping_add(k);
+            if iz_next < 0 || ind < 0 || ind as usize >= prexf.len() {
+                0
+            } else {
+                (prexf[ind as usize] as f64 + 0.5).floor() as i32
+            }
+        };
+        let dx = shift(4);
+        let dy = shift(5);
         ind_good0 = b3d_i_max(&[indx0, 0, dx]);
         ind_good1 = b3d_i_min(&[indx1, nx - 1, nx + dx - 1]);
         nx_good = if 0 > ind_good1.wrapping_add(1).wrapping_sub(ind_good0) {
@@ -1921,5 +1934,21 @@ mod fixed_tests {
             &mut fill,
         );
         assert_eq!((ipcz, ix0, ix1, iy0, iy1), (0, 22, 37, 12, 27));
+    }
+
+    /// `BUGS.md` "A point at a Z outside the transform list": native reads
+    /// `prexf[-2]`; the defined shift is 0 and no piece is found at Z -1.
+    #[test]
+    fn find_piece_at_negative_z_with_transforms_finds_nothing() {
+        let (ixl, iyl, izl) = ([0, 0], [0, 0], [0, 1]);
+        let (mut ix0, mut ix1, mut iy0, mut iy1, mut ipcz) = (0, 0, 0, 0, 7);
+        let (mut taper, mut fill) = (true, true);
+        let prexf = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        find_piece(
+            &ixl, &iyl, &izl, 2, 64, 64, 16, 16, 30.0, 20.0, -1, &mut ix0, &mut ix1, &mut iy0,
+            &mut iy1, &mut ipcz, 1, &prexf, &mut taper, &mut fill,
+        );
+        assert_eq!(ipcz, -1);
+        assert!(!fill);
     }
 }

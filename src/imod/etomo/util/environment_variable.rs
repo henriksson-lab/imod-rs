@@ -6,21 +6,16 @@
 //!
 //! Organization: Dept. of MCD Biology, University of Colorado
 //!
-//! **`etomo.process.SystemProgram` is an external-process boundary.**  Both of the
-//! class's methods run `env` (or `cmd.exe /C echo %VAR%` on Windows) as a *separate
-//! process* and read its stdout - reading this process's own environment instead would
-//! be a different program, because the source sees the environment of a freshly forked
-//! `env`.  `etomo/process/SystemProgram.java` has no module of its own; what the two
-//! methods below need of it is exactly `Runtime.getRuntime().exec(commandArray, null,
-//! null)` plus the two `OutputBufferManager` threads that turn the child's stdout and
-//! stderr into `String[]` of `BufferedReader.readLine()` lines
-//! (`SystemProgram.java:300-345`).  With a null `BaseManager`, a null `commandAction`
-//! and debug off, `run()` prints nothing of its own, so that is the whole observable
-//! boundary and it is spawned here rather than emulated.
+//! Both methods run `env` (or `cmd.exe /C echo %VAR%` on Windows) through a
+//! `SystemProgram` and read its standard output, as the source does: the values come
+//! from the environment of a freshly forked `env`, not from this process.
+//! `SystemProgram.run` reports a failure to start through its exit value rather than
+//! by throwing, so the source's `catch (Exception)` arms cannot be reached.
 #![allow(dead_code)]
 
 use super::utilities;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::process::system_program::SystemProgram;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -59,12 +54,13 @@ impl EnvironmentVariable {
     /// Return an environment variable value.
     ///
     /// Java declares this `synchronized`; the two `Mutex` fields carry that here.
+    /// `SystemProgram` never reads its axis, so a null axis is passed as `ONLY`.
     pub fn get_value(
         &self,
-        _manager: Option<&'static dyn BaseManager>,
-        _property_user_dir: Option<&str>,
+        manager: Option<&'static dyn BaseManager>,
+        property_user_dir: Option<&str>,
         var_name: &str,
-        _axis_id: Option<AxisID>,
+        axis_id: Option<AxisID>,
     ) -> String {
         let mut value = "".to_string();
         // prevent multiple reads and writes at the same time
@@ -80,38 +76,28 @@ impl EnvironmentVariable {
         let read_env_var;
         if utilities::is_windows_os() {
             let var = "%".to_string() + var_name + "%";
-            read_env_var = std::process::Command::new("cmd.exe")
-                .args(["/C", "echo", &var])
-                .output();
-            let read_env_var = match read_env_var {
-                Err(excep) => {
-                    // `excep.printStackTrace()`; see etomo/util/stack_trace.rs.
-                    eprintln!("{}", excep);
-                    eprintln!("{}", excep);
-                    eprintln!(
-                        "Unable to run cmd command to find {} environment variable",
-                        var_name
-                    );
-                    return "".to_string();
-                }
-                Ok(read_env_var) => read_env_var,
-            };
-            let stderr: Vec<String> = String::from_utf8_lossy(&read_env_var.stderr)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
-            if !stderr.is_empty() {
+            read_env_var = SystemProgram::new_array(
+                manager,
+                property_user_dir.map(str::to_owned),
+                Some(vec![
+                    "cmd.exe".to_owned(),
+                    "/C".to_owned(),
+                    "echo".to_owned(),
+                    var.clone(),
+                ]),
+                axis_id.unwrap_or(AxisID::Only),
+            );
+            read_env_var.run();
+            let stderr = read_env_var.get_std_error();
+            if let Some(stderr) = stderr.filter(|stderr| !stderr.is_empty()) {
                 eprintln!("Error running 'cmd.exe' command");
                 for line in stderr.iter() {
                     eprintln!("{}", line);
                 }
             }
             // Return the first line from the command
-            let stdout: Vec<String> = String::from_utf8_lossy(&read_env_var.stdout)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
-            if !stdout.is_empty() {
+            let stdout = read_env_var.get_std_output();
+            if let Some(stdout) = stdout.filter(|stdout| !stdout.is_empty()) {
                 // if the variable isn't set, echo will return the string sent to it
                 if stdout[0] != var {
                     value = stdout[0].clone();
@@ -120,24 +106,14 @@ impl EnvironmentVariable {
         }
         // Non windows environment
         else {
-            read_env_var = std::process::Command::new("env").output();
-            let read_env_var = match read_env_var {
-                Err(excep) => {
-                    // `excep.printStackTrace()`; see etomo/util/stack_trace.rs.
-                    eprintln!("{}", excep);
-                    eprintln!("{}", excep);
-                    eprintln!(
-                        "Unable to run env command to find {} environment variable",
-                        var_name
-                    );
-                    return "".to_string();
-                }
-                Ok(read_env_var) => read_env_var,
-            };
-            let stderr: Vec<String> = String::from_utf8_lossy(&read_env_var.stderr)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
+            read_env_var = SystemProgram::new_array(
+                manager,
+                property_user_dir.map(str::to_owned),
+                Some(vec!["env".to_owned()]),
+                axis_id.unwrap_or(AxisID::Only),
+            );
+            read_env_var.run();
+            let stderr = read_env_var.get_std_error().unwrap_or_default();
             if !stderr.is_empty() {
                 eprintln!("Error running 'env' command");
                 for line in stderr.iter() {
@@ -149,10 +125,7 @@ impl EnvironmentVariable {
             // environment variable
             let search_string = var_name.to_string() + "=";
             let n_char = search_string.len();
-            let stdout: Vec<String> = String::from_utf8_lossy(&read_env_var.stdout)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
+            let stdout = read_env_var.get_std_output().unwrap_or_default();
             for line in stdout.iter() {
                 if line.find(&search_string) == Some(0) {
                     value = line[n_char..].to_string();
@@ -171,10 +144,10 @@ impl EnvironmentVariable {
     /// non-existant one.  If unable to check, returns false.
     pub fn exists(
         &self,
-        _manager: Option<&'static dyn BaseManager>,
-        _property_user_dir: Option<&str>,
+        manager: Option<&'static dyn BaseManager>,
+        property_user_dir: Option<&str>,
         var_name: &str,
-        _axis_id: Option<AxisID>,
+        axis_id: Option<AxisID>,
     ) -> bool {
         let mut variable_found_list = self.variable_found_list.lock().unwrap();
         if let Some(found) = variable_found_list.get(var_name) {
@@ -185,39 +158,28 @@ impl EnvironmentVariable {
         let read_env_var;
         if utilities::is_windows_os() {
             let var = "%".to_string() + var_name + "%";
-            read_env_var = std::process::Command::new("cmd.exe")
-                .args(["/C", "echo", &var])
-                .output();
-            let read_env_var = match read_env_var {
-                Err(excep) => {
-                    // `excep.printStackTrace()`; see etomo/util/stack_trace.rs.
-                    eprintln!("{}", excep);
-                    eprintln!("{}", excep);
-                    eprintln!(
-                        "Unable to run cmd command to find {} environment variable",
-                        var_name
-                    );
-                    variable_found_list.insert(var_name.to_string(), false);
-                    return false;
-                }
-                Ok(read_env_var) => read_env_var,
-            };
-            let stderr: Vec<String> = String::from_utf8_lossy(&read_env_var.stderr)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
-            if !stderr.is_empty() {
+            read_env_var = SystemProgram::new_array(
+                manager,
+                property_user_dir.map(str::to_owned),
+                Some(vec![
+                    "cmd.exe".to_owned(),
+                    "/C".to_owned(),
+                    "echo".to_owned(),
+                    var.clone(),
+                ]),
+                axis_id.unwrap_or(AxisID::Only),
+            );
+            read_env_var.run();
+            let stderr = read_env_var.get_std_error();
+            if let Some(stderr) = stderr.filter(|stderr| !stderr.is_empty()) {
                 eprintln!("Error running 'cmd.exe' command");
                 for line in stderr.iter() {
                     eprintln!("{}", line);
                 }
             }
             // Return the first line from the command
-            let stdout: Vec<String> = String::from_utf8_lossy(&read_env_var.stdout)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
-            if !stdout.is_empty() {
+            let stdout = read_env_var.get_std_output();
+            if let Some(stdout) = stdout.filter(|stdout| !stdout.is_empty()) {
                 // if the variable isn't set, echo will return the string sent to it
                 if stdout[0] != var {
                     variable_found_list.insert(var_name.to_string(), true);
@@ -227,25 +189,14 @@ impl EnvironmentVariable {
         }
         // Non windows environment
         else {
-            read_env_var = std::process::Command::new("env").output();
-            let read_env_var = match read_env_var {
-                Err(excep) => {
-                    // `excep.printStackTrace()`; see etomo/util/stack_trace.rs.
-                    eprintln!("{}", excep);
-                    eprintln!("{}", excep);
-                    eprintln!(
-                        "Unable to run env command to find {} environment variable",
-                        var_name
-                    );
-                    variable_found_list.insert(var_name.to_string(), false);
-                    return false;
-                }
-                Ok(read_env_var) => read_env_var,
-            };
-            let stderr: Vec<String> = String::from_utf8_lossy(&read_env_var.stderr)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
+            read_env_var = SystemProgram::new_array(
+                manager,
+                property_user_dir.map(str::to_owned),
+                Some(vec!["env".to_owned()]),
+                axis_id.unwrap_or(AxisID::Only),
+            );
+            read_env_var.run();
+            let stderr = read_env_var.get_std_error().unwrap_or_default();
             if !stderr.is_empty() {
                 eprintln!("Error running 'env' command");
                 for line in stderr.iter() {
@@ -256,10 +207,7 @@ impl EnvironmentVariable {
             // Search through the evironment string array to find the request
             // environment variable
             let search_string = var_name.to_string() + "=";
-            let stdout: Vec<String> = String::from_utf8_lossy(&read_env_var.stdout)
-                .lines()
-                .map(|line| line.to_string())
-                .collect();
+            let stdout = read_env_var.get_std_output().unwrap_or_default();
             for line in stdout.iter() {
                 if line.find(&search_string) == Some(0) {
                     variable_found_list.insert(var_name.to_string(), true);

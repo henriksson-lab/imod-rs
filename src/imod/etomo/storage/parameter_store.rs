@@ -170,8 +170,8 @@ impl ParameterStore {
     /// itself through `&self` (see `storable.rs`).  Java's
     /// `synchronized (dataFile)` is this store's own lock, which the caller
     /// already holds to reach `&self`.
-    pub fn load<T: Storable + ?Sized>(&self, storable: &T) {
-        storable.load(&self.properties);
+    pub fn load<T: Storable + ?Sized>(&mut self, storable: &T) {
+        storable.load(&mut self.properties);
     }
 
     /// Java `getAbsolutePath()`.
@@ -199,10 +199,10 @@ mod tests {
         fn store_with_prepend(&self, p: &mut BTreeMap<String, String>, prepend: &str) {
             p.insert(format!("{prepend}.Value"), self.value.borrow().clone());
         }
-        fn load(&self, p: &BTreeMap<String, String>) {
+        fn load(&self, p: &mut BTreeMap<String, String>) {
             *self.value.borrow_mut() = p.get("Value").cloned().unwrap_or_default();
         }
-        fn load_with_prepend(&self, p: &BTreeMap<String, String>, prepend: &str) {
+        fn load_with_prepend(&self, p: &mut BTreeMap<String, String>, prepend: &str) {
             *self.value.borrow_mut() = p
                 .get(&format!("{prepend}.Value"))
                 .cloned()
@@ -211,7 +211,7 @@ mod tests {
     }
     #[test]
     fn fileless_store_load_matches_source() {
-        let store = ParameterStore::get_fileless_instance().unwrap();
+        let mut store = ParameterStore::get_fileless_instance().unwrap();
         let sample = Sample {
             value: RefCell::new(String::new()),
         };

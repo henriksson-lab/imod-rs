@@ -6,9 +6,8 @@
 //! private `propertyValue` field is the string the constructor was handed, so it is
 //! recovered from the variant rather than stored.
 //!
-//! Deviation, as in `etomo/type/view_type.rs`: the Java class implements
-//! `EnumeratedType`, which is not translated, so its four methods are inherent methods
-//! here rather than a trait implementation.
+//! The Java class implements `EnumeratedType` (the trait impl at the end of this file,
+//! delegating to the inherent methods of the same names).
 #![allow(dead_code)]
 
 use super::const_etomo_number::ConstEtomoNumber;
@@ -153,5 +152,23 @@ impl ImageOutputFormat {
 impl std::fmt::Display for ImageOutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.property_value())
+    }
+}
+
+/// Java `ImageOutputFormat implements EnumeratedType`.  Java's `getValue()` returns
+/// null; the trait returns a number, so this gives a null (unset) one, which the
+/// one caller (`RadioButton`'s constructor, `if (number != null)`) treats alike
+/// except that its `selectedStringValue` reads "" rather than null.
+impl super::enumerated_type::EnumeratedType for ImageOutputFormat {
+    fn is_default(&self) -> bool {
+        ImageOutputFormat::is_default(*self)
+    }
+
+    fn get_value(&self) -> ConstEtomoNumber {
+        ConstEtomoNumber::new()
+    }
+
+    fn get_label(&self) -> Option<String> {
+        Some(ImageOutputFormat::get_label(*self).to_owned())
     }
 }

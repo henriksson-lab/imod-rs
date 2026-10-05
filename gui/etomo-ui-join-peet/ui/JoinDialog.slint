@@ -5,261 +5,134 @@
 //   `AutoAlignmentPanel.java`  - the Align tab's "Auto Alignment Parameters"
 //   `TransformChooserPanel.java`, `BinnedXY3dmodButton.java`, `CheckBoxSpinner.java`
 //
-// Appearance only: no callbacks, no manager, no state.  Every field carries the
-// static default the Java installs (or an empty string where the Java fills the
-// field from metadata).
+// Wired through `EtomoBridge` (`ui/swing/slint_bridge.rs`): every widget is
+// identified by the label the Java gives it, and the two tables are
+// `BridgedTable`s read from the translated Swing tables (their rows, header
+// cells and field cells come from the component tree, so they grow as
+// sections are added).  Unwired (the standalone preview), the widgets show
+// the Java's static defaults and the tables are empty.
+//
+// Swing shows one tab body at a time: `changeTab` removes the components from
+// the old tab's panel and adds them to the new one.  Here the selected tab
+// (`BridgedTabbedPane.shown-current`, read from the Swing `TabbedPane`)
+// chooses the body that is drawn.
 
-import { EtomoStyle, BeveledBorder, LabeledTextField, LabeledSpinner, CheckBox,
-         RadioButton, MultiLineButton, SpacedPanel, TabbedPane }
+import { EtomoStyle, EtomoBridge, BeveledBorder, LabeledTextField, LabeledSpinner, CheckBox,
+         RadioButton, MultiLineButton, SpacedPanel, BridgedTextBox, BridgedButton,
+         BridgedTable, BridgedTabbedPane }
     from "../../etomo-ui-common/ui/widgets.slint";
-import { HeaderCell, FieldCell, ExpandButton, FileTextField, CheckBoxSpinner,
-         BinnedXY3dmodButton, PlainLabel }
-    from "EtomoTables.slint";
+import { PlainLabel } from "EtomoTables.slint";
 
-// `SectionTablePanel.addButtonsPanelComponents` (SectionTablePanel.java:415-425):
-// the button strip below the table, its content chosen by the current tab.
-component SectionTableButtons inherits HorizontalLayout {
-    in property <bool> setup-tab: false;
-    in property <bool> align-tab: false;
-    spacing: EtomoStyle.gap;
-    alignment: start;
-    if root.setup-tab: VerticalLayout {
+// `FileTextField` (`FileTextField.java`): label, entry box and the folder
+// button that opens a `JFileChooser` (bridged as "fbn", the button beside the
+// field labelled `label`).
+component JoinFileTextField inherits HorizontalLayout {
+    in property <string> label;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("tf", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
         spacing: EtomoStyle.gap;
-        MultiLineButton { text: "Move Section Up"; }
-        MultiLineButton { text: "Add Section"; }
+        alignment: start;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        BridgedTextBox { kind: "tf"; label: root.label; width: 250px; }
+        Rectangle {
+            width: 26px;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+            BridgedButton { kind: "fbn"; label: root.label; }
+        }
     }
-    if root.setup-tab: VerticalLayout {
+}
+
+// `CheckBoxSpinner` (`CheckBoxSpinner.java`): a check box and a spinner, both
+// named from the same text.
+component JoinCheckBoxSpinner inherits HorizontalLayout {
+    in property <string> text;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("sp", root.text, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
         spacing: EtomoStyle.gap;
-        MultiLineButton { text: "Move Section Down"; }
-        MultiLineButton { text: "Delete Section"; }
+        alignment: start;
+        CheckBox { text: root.text; }
+        BridgedTextBox { kind: "sp"; label: root.text; width: 60px; text: "1"; }
+        VerticalLayout {
+            Rectangle {
+                width: 14px; height: EtomoStyle.field-height / 2;
+                background: EtomoStyle.panel; border-width: 1px; border-color: EtomoStyle.border;
+                Text { text: "^"; font-size: 8px; }
+                TouchArea { clicked => { EtomoBridge.toggled("sp", root.text, true); } }
+            }
+            Rectangle {
+                width: 14px; height: EtomoStyle.field-height / 2;
+                background: EtomoStyle.panel; border-width: 1px; border-color: EtomoStyle.border;
+                Text { text: "v"; font-size: 8px; }
+                TouchArea { clicked => { EtomoBridge.toggled("sp", root.text, false); } }
+            }
+        }
     }
-    if !root.align-tab: BinnedXY3dmodButton { text: "Open in 3dmod"; }
-    if root.setup-tab: VerticalLayout {
+}
+
+// `BinnedXY3dmodButton` (`BinnedXY3dmodButton.java:61-95`): the
+// "Open binned by " spinner with " in X and Y" above the 3dmod button.  Every
+// instance names its spinner the same, so `spinner-occurrence` says which
+// showing one this is ("#N").
+component JoinBinnedXY3dmodButton inherits BeveledBorder {
+    in property <string> text;
+    in property <string> occurrence;
+    in property <string> spinner-occurrence;
+    title: "";
+    HorizontalLayout {
+        alignment: center;
         spacing: EtomoStyle.gap;
-        MultiLineButton { text: "Get Angles from Slicer"; }
-        MultiLineButton { text: "Invert Table"; }
+        LabeledSpinner { label: "Open binned by "; occurrence: root.spinner-occurrence; text: "1"; }
+        PlainLabel { text: " in X and Y"; }
     }
+    MultiLineButton { text: root.text; occurrence: root.occurrence; }
 }
 
-// `SectionTablePanel.addSetupTablePanelComponents` (SectionTablePanel.java:249-299).
-// Thirteen grid columns; the Java spans are reproduced with `colspan`.
-export component SectionTableSetup inherits BeveledBorder {
+// `SectionTablePanel` (`SectionTablePanel.java`): the "Section Table" border
+// with the table (`pnlTable`) and, except on the Align tab, the button strip
+// chosen by the tab (`addButtonsPanelComponents`, :415-425).
+component SectionTablePanel inherits BeveledBorder {
+    in property <int> tab;
     title: "Section Table";
-    GridLayout {
-        spacing: 1px;
-        Row {
-            HeaderCell { colspan: 2; text: "Z Order"; }
-            HeaderCell { text: "Sections"; }
-            ExpandButton { }
-            HeaderCell { colspan: 4; text: "Sample Slices"; }
-            HeaderCell { colspan: 2; text: "Final"; }
-            HeaderCell { colspan: 3; text: "Rotation Angles"; }
+    BridgedTable { table: "Section Table"; }
+    if root.tab != 1: HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        if root.tab == 0: VerticalLayout {
+            spacing: EtomoStyle.row-gap;
+            MultiLineButton { text: "Move Section Up"; width: 140px; }
+            MultiLineButton { text: "Add Section"; width: 140px; }
         }
-        Row {
-            HeaderCell { colspan: 2; text: ""; }
-            HeaderCell { colspan: 2; text: ""; }
-            HeaderCell { colspan: 2; text: "Bottom"; }
-            HeaderCell { colspan: 2; text: "Top"; }
-            HeaderCell { colspan: 2; text: ""; }
-            HeaderCell { colspan: 3; text: ""; }
+        if root.tab == 0: VerticalLayout {
+            spacing: EtomoStyle.row-gap;
+            MultiLineButton { text: "Move Section Down"; width: 140px; }
+            MultiLineButton { text: "Delete Section"; width: 140px; }
         }
-        Row {
-            HeaderCell { colspan: 2; text: ""; }
-            HeaderCell { colspan: 2; text: ""; }
-            HeaderCell { text: "Start"; }
-            HeaderCell { text: "End"; }
-            HeaderCell { text: "Start"; }
-            HeaderCell { text: "End"; }
-            HeaderCell { text: "Start"; }
-            HeaderCell { text: "End"; }
-            HeaderCell { text: "X"; }
-            HeaderCell { text: "Y"; }
-            HeaderCell { text: "Z"; }
-        }
-        // Two representative `SectionTableRow` rows.
-        Row {
-            HeaderCell { colspan: 2; text: "1"; }
-            FieldCell { colspan: 2; text: "sectionA.rec"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "20"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "20"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "120"; }
-            FieldCell { text: "0.0"; }
-            FieldCell { text: "0.0"; }
-            FieldCell { text: "0.0"; }
-        }
-        Row {
-            HeaderCell { colspan: 2; text: "2"; }
-            FieldCell { colspan: 2; text: "sectionB.rec"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "20"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "20"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "120"; }
-            FieldCell { text: "0.0"; }
-            FieldCell { text: "0.0"; }
-            FieldCell { text: "0.0"; }
-        }
-    }
-    SectionTableButtons { setup-tab: true; }
-}
-
-// `SectionTablePanel.addAlignTablePanelComponents` (SectionTablePanel.java:305-347).
-// Seven grid columns, and no button strip (`addRootPanelComponents` skips it on
-// the Align tab, SectionTablePanel.java:434).
-export component SectionTableAlign inherits BeveledBorder {
-    title: "Section Table";
-    GridLayout {
-        spacing: 1px;
-        Row {
-            HeaderCell { text: "Z Order"; }
-            HeaderCell { text: "Sections"; }
-            ExpandButton { }
-            HeaderCell { text: "Slices in"; }
-            HeaderCell { text: "Current"; }
-            HeaderCell { text: "Reference"; }
-            HeaderCell { text: "Current"; }
-        }
-        Row {
-            HeaderCell { text: ""; }
-            HeaderCell { colspan: 2; text: ""; }
-            HeaderCell { text: "Sample"; }
-            HeaderCell { text: "Chunk"; }
-            HeaderCell { text: "Section"; }
-            HeaderCell { text: "Section"; }
-        }
-        Row {
-            HeaderCell { text: "1"; }
-            FieldCell { colspan: 2; text: "sectionA.rec"; }
-            FieldCell { text: "20"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "2"; }
-        }
-        Row {
-            HeaderCell { text: "2"; }
-            FieldCell { colspan: 2; text: "sectionB.rec"; }
-            FieldCell { text: "20"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "2"; }
+        JoinBinnedXY3dmodButton { text: "Open in 3dmod"; occurrence: "#1"; spinner-occurrence: "#1"; }
+        if root.tab == 0: VerticalLayout {
+            spacing: EtomoStyle.row-gap;
+            MultiLineButton { text: "Get Angles from Slicer"; width: 160px; }
+            MultiLineButton { text: "Invert Table"; width: 160px; }
         }
     }
 }
 
-// `SectionTablePanel.addJoinTablePanelComponents` (SectionTablePanel.java:349-390).
-// Six grid columns.
-export component SectionTableJoin inherits BeveledBorder {
-    // `hasRotatedSection()` (SectionTablePanel.java:360, 391-395) is false until
-    // a row carries a rotation, and no row does by default.
-    in property <bool> has-rotated-section: false;
-    title: "Section Table";
-    GridLayout {
-        spacing: 1px;
-        Row {
-            HeaderCell { colspan: 2; text: "Z Order"; }
-            HeaderCell { text: "Sections"; }
-            ExpandButton { }
-            HeaderCell { colspan: 2; text: "Final"; }
-        }
-        // Second header row: header2ZOrder (empty), header2JoinSections
-        // ("In Final", SectionTablePanel.java:99) and header2JoinFinal (empty),
-        // emitted only inside `if (hasRotatedSection())`
-        // (SectionTablePanel.java:360-370).
-        if root.has-rotated-section: Row {
-            HeaderCell { colspan: 2; text: ""; }
-            HeaderCell { colspan: 2; text: "In Final"; }
-            HeaderCell { colspan: 2; text: ""; }
-        }
-        Row {
-            HeaderCell { colspan: 2; text: ""; }
-            // header3JoinSections is empty until the same branch sets it to
-            // "Orientation" (SectionTablePanel.java:369).
-            HeaderCell { colspan: 2; text: root.has-rotated-section ? "Orientation" : ""; }
-            HeaderCell { text: "Start"; }
-            HeaderCell { text: "End"; }
-        }
-        Row {
-            HeaderCell { colspan: 2; text: "1"; }
-            FieldCell { colspan: 2; text: "sectionA.rec"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "120"; }
-        }
-        Row {
-            HeaderCell { colspan: 2; text: "2"; }
-            FieldCell { colspan: 2; text: "sectionB.rec"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "120"; }
-        }
-    }
-    SectionTableButtons { }
-}
-
-// `BoundaryTable.addModelHeader` (BoundaryTable.java:207-229), inside the
-// "Boundary Table" etched border (BoundaryTable.java:99).
-export component BoundaryTableModel inherits BeveledBorder {
+// `BoundaryTable` (`BoundaryTable.java`): the "Boundary Table" border.
+component BoundaryTablePanel inherits BeveledBorder {
     title: "Boundary Table";
-    GridLayout {
-        spacing: 1px;
-        Row {
-            HeaderCell { text: "Boundaries"; }
-            HeaderCell { text: "Best"; }
-            HeaderCell { text: "Error"; }
-        }
-        Row {
-            HeaderCell { text: ""; }
-            HeaderCell { text: "Gap"; }
-            HeaderCell { text: "Mean"; }
-            HeaderCell { text: "Max"; }
-        }
-        Row {
-            HeaderCell { text: "1 - 2"; }
-            FieldCell { text: "0.0"; }
-            FieldCell { text: "0.00"; }
-            FieldCell { text: "0.00"; }
-        }
-    }
-}
-
-// `BoundaryTable.addRejoinHeader` (BoundaryTable.java:231-273).
-export component BoundaryTableRejoin inherits BeveledBorder {
-    title: "Boundary Table";
-    GridLayout {
-        spacing: 1px;
-        Row {
-            HeaderCell { text: "Sections"; }
-            HeaderCell { colspan: 2; text: "Original"; }
-            HeaderCell { text: "Best"; }
-            HeaderCell { text: "Adjusted"; }
-        }
-        Row {
-            HeaderCell { text: ""; }
-            HeaderCell { text: ""; }
-            HeaderCell { text: ""; }
-            HeaderCell { text: "Gap"; }
-            HeaderCell { text: ""; }
-            HeaderCell { text: ""; }
-        }
-        Row {
-            HeaderCell { text: ""; }
-            HeaderCell { text: "End"; }
-            HeaderCell { text: "Start"; }
-            HeaderCell { text: ""; }
-            HeaderCell { text: "End"; }
-            HeaderCell { text: "Start"; }
-        }
-        Row {
-            HeaderCell { text: "1 - 2"; }
-            FieldCell { text: "120"; }
-            FieldCell { text: "1"; }
-            FieldCell { text: "0.0"; }
-            FieldCell { text: "120"; }
-            FieldCell { text: "1"; }
-        }
-    }
+    BridgedTable { table: "Boundary Table"; }
 }
 
 // `TransformChooserPanel` (`TransformChooserPanel.java:87-109`).  The join
@@ -281,28 +154,16 @@ component TransformChooserPanel inherits HorizontalLayout {
 // `JoinDialog.createSetupPanel` / `addSetupPanelComponents`
 // (JoinDialog.java:571-628).
 export component JoinSetupTab inherits SpacedPanel {
-    FileTextField { label: "Working directory: "; text: ""; }
+    JoinFileTextField { label: "Working directory: "; }
     LabeledTextField { label: "Root name for output file: "; text: ""; }
-    SectionTableSetup { }
+    SectionTablePanel { tab: 0; }
     // pnlMidasLimit: ltfMidasLimit then the lblMidasLimit JLabel.
     HorizontalLayout {
-        alignment: start;
-        spacing: EtomoStyle.gap;
-        LabeledTextField {
-            label: "Squeeze samples to ";
-            label-width: 140px;
-            text: "";
-            width: 240px;
-        }
-        PlainLabel { text: "pixels if bigger."; }
+        LabeledTextField { label: "Squeeze samples to "; text: ""; }
+        PlainLabel { text: "pixels if bigger."; horizontal-stretch: 0; }
     }
     HorizontalLayout {
-        alignment: start;
-        LabeledSpinner {
-            label: "Reference section for density matching: ";
-            label-width: 250px;
-            text: "1";
-        }
+        LabeledSpinner { label: "Reference section for density matching: "; text: "1"; }
     }
     Rectangle { height: 5px; }
     HorizontalLayout {
@@ -310,77 +171,41 @@ export component JoinSetupTab inherits SpacedPanel {
         MultiLineButton { text: "Change Setup"; }
         MultiLineButton { text: "Revert to Last Setup"; }
     }
-    MultiLineButton { text: "Make Samples"; }
+    HorizontalLayout {
+        alignment: center;
+        MultiLineButton { text: "Make Samples"; width: 200px; }
+    }
 }
 
 // `JoinDialog.createAlignPanel` / `addAlignPanelComponents`
 // (JoinDialog.java:630-651) plus `AutoAlignmentPanel.createPanel`
-// (AutoAlignmentPanel.java:126-237) in its join configuration.
+// (AutoAlignmentPanel.java:126-237) in its join configuration, where the
+// serial-sections-only fields are hidden and the Sobel-filter and warping
+// panels are null.
 export component JoinAlignTab inherits SpacedPanel {
-    // `createPanel(true)` - the join configuration - hides spReduceByBinning,
-    // ltfSkipSectionsFrom1, cbPreCrossCorrelation, ltfEdgeToIgnore and
-    // spMidasBinning in one block (AutoAlignmentPanel.java:152-158), so a single
-    // property gates all five.  They are visible only in
-    // `getSerialSectionsInstance` (AutoAlignmentPanel.java:119-124).
-    in property <bool> show-serial-sections-fields: false;
-    SectionTableAlign { }
+    SectionTablePanel { tab: 1; }
     HorizontalLayout {
         spacing: EtomoStyle.gap;
         MultiLineButton { text: "Open Sample in 3dmod"; }
         MultiLineButton { text: "Open Sample Averages in 3dmod"; }
     }
-    // pnlParameters (AutoAlignmentPanel.java:165-183), in the order that block
-    // adds its components.  The Sobel-filter and warping panels are `null` in
-    // the join configuration (AutoAlignmentPanel.java:88-95), so they are
-    // genuinely absent rather than hidden and no slot is kept for them.
     BeveledBorder {
         title: "Auto Alignment Parameters";
-        LabeledTextField { label: "Sigma for low-frequency filter: "; label-width: 220px; text: "0.0"; }
-        LabeledTextField { label: "Cutoff for high-frequency filter: "; label-width: 220px; text: "0.35"; }
-        LabeledTextField { label: "Sigma for high-frequency filter: "; label-width: 220px; text: "0.05"; }
-        // pnlPreCrossCorrelation: cbPreCrossCorrelation plus a horizontal glue
-        // (AutoAlignmentPanel.java:216-220, declared at line 61).
-        if root.show-serial-sections-fields: HorizontalLayout {
-            alignment: start;
-            CheckBox { text: "Find initial shifts with cross-correlation"; }
-        }
+        LabeledTextField { label: "Sigma for low-frequency filter: "; text: "0.0"; }
+        LabeledTextField { label: "Cutoff for high-frequency filter: "; text: "0.35"; }
+        LabeledTextField { label: "Sigma for high-frequency filter: "; text: "0.05"; }
         TransformChooserPanel { allow-translation: false; }
-        // ltfSkipSectionsFrom1 (AutoAlignmentPanel.java:59, added at line 181).
-        if root.show-serial-sections-fields: LabeledTextField {
-            label: "Sections to skip: ";
-            label-width: 220px;
-            text: "";
-        }
-        // ltfEdgeToIgnore (AutoAlignmentPanel.java:63), set to "0.05" by
-        // createPanel (AutoAlignmentPanel.java:129).
-        if root.show-serial-sections-fields: LabeledTextField {
-            label: "Fraction to ignore on edges: ";
-            label-width: 220px;
-            text: "0.05";
-        }
-        // spReduceByBinning (AutoAlignmentPanel.java:57): value 2, range 1-50.
-        if root.show-serial-sections-fields: HorizontalLayout {
-            alignment: start;
-            LabeledSpinner { label: "Binning in search: "; label-width: 130px; text: "2"; }
-        }
-    }
-    // spMidasBinning is added to pnlRoot, between pnlParameters and pnlButtons
-    // (AutoAlignmentPanel.java:161-163), not to the parameters box; value 1,
-    // range 1-8 (AutoAlignmentPanel.java:65).
-    if root.show-serial-sections-fields: HorizontalLayout {
-        alignment: start;
-        LabeledSpinner { label: "Binning in Midas: "; label-width: 130px; text: "1"; }
     }
     HorizontalLayout {
         spacing: EtomoStyle.gap;
         VerticalLayout {
-            spacing: EtomoStyle.gap;
+            spacing: EtomoStyle.row-gap;
             MultiLineButton { text: "Initial Auto Alignment"; }
             MultiLineButton { text: "Midas"; }
             MultiLineButton { text: "Refine with Auto Alignment"; }
         }
         VerticalLayout {
-            spacing: EtomoStyle.gap;
+            spacing: EtomoStyle.row-gap;
             MultiLineButton { text: "Revert Auto Alignment to Midas"; }
             MultiLineButton { text: "Revert to No Transforms"; }
         }
@@ -393,38 +218,38 @@ export component JoinAlignTab inherits SpacedPanel {
 export component JoinJoinTab inherits HorizontalLayout {
     spacing: EtomoStyle.gap;
     padding: EtomoStyle.inset;
-    SectionTableJoin { }
+    alignment: start;
+    SectionTablePanel { tab: 2; }
     // pnlFinishJoin: BorderFactory.createEtchedBorder(), i.e. untitled.
     BeveledBorder {
         title: "";
-        CheckBoxSpinner { text: "Reference section for alignment: "; value: "1"; }
+        JoinCheckBoxSpinner { text: "Reference section for alignment: "; }
         MultiLineButton { text: "Get Max Size and Shift"; }
         HorizontalLayout {
             spacing: EtomoStyle.gap;
-            LabeledTextField { label: "Size in X: "; label-width: 70px; text: ""; }
-            LabeledTextField { label: "Y: "; label-width: 20px; text: ""; }
+            LabeledTextField { label: "Size in X: "; text: ""; }
+            LabeledTextField { label: "Y: "; occurrence: "#1"; text: ""; }
         }
         HorizontalLayout {
             spacing: EtomoStyle.gap;
-            LabeledTextField { label: "Shift in X: "; label-width: 70px; text: ""; }
-            LabeledTextField { label: "Y: "; label-width: 20px; text: ""; }
+            LabeledTextField { label: "Shift in X: "; text: ""; }
+            LabeledTextField { label: "Y: "; occurrence: "#2"; text: ""; }
         }
         CheckBox { text: "Do local linear fits"; }
         BeveledBorder {
             title: "Trial Join";
             HorizontalLayout {
-                alignment: start;
                 spacing: EtomoStyle.gap;
-                LabeledSpinner { label: "Use every "; label-width: 70px; text: "10"; }
+                LabeledSpinner { label: "Use every "; text: "10"; }
                 PlainLabel { text: "slices"; }
             }
-            LabeledSpinner { label: "Binning in X and Y: "; label-width: 130px; text: "1"; }
+            LabeledSpinner { label: "Binning in X and Y: "; text: "1"; }
             MultiLineButton { text: "Trial Join"; }
-            BinnedXY3dmodButton { text: "Open Trial in 3dmod"; }
+            JoinBinnedXY3dmodButton { text: "Open Trial in 3dmod"; spinner-occurrence: "#2"; }
             MultiLineButton { text: "Get Subarea Size And Shift"; }
         }
         MultiLineButton { text: "Finish Join"; }
-        BinnedXY3dmodButton { text: "Open in 3dmod"; }
+        JoinBinnedXY3dmodButton { text: "Open in 3dmod"; occurrence: "#2"; spinner-occurrence: "#3"; }
         CheckBox { text: "Refine with trial"; }
         MultiLineButton { text: "Refine Join"; }
     }
@@ -434,7 +259,7 @@ export component JoinJoinTab inherits HorizontalLayout {
 // (JoinDialog.java:653-733).
 export component JoinModelTab inherits SpacedPanel {
     MultiLineButton { text: "Make Refining Model"; }
-    BoundaryTableModel { }
+    BoundaryTablePanel { }
     BeveledBorder {
         title: "Transformations";
         TransformChooserPanel { allow-translation: true; }
@@ -445,16 +270,16 @@ export component JoinModelTab inherits SpacedPanel {
         HorizontalLayout {
             spacing: EtomoStyle.gap;
             CheckBox { text: "Try gaps: "; }
-            LabeledTextField { label: "Start: "; label-width: 45px; text: ""; enabled: false; }
-            LabeledTextField { label: "End: "; label-width: 35px; text: ""; enabled: false; }
-            LabeledTextField { label: "Increment: "; label-width: 75px; text: ""; enabled: false; }
+            LabeledTextField { label: "Start: "; text: ""; enabled: false; }
+            LabeledTextField { label: "End: "; text: ""; enabled: false; }
+            LabeledTextField { label: "Increment: "; text: ""; enabled: false; }
         }
         // pnlPointsToFit.
         HorizontalLayout {
             spacing: EtomoStyle.gap;
             PlainLabel { text: "Points to fit: "; }
-            LabeledTextField { label: "Min: "; label-width: 35px; text: ""; }
-            LabeledTextField { label: "Max: "; label-width: 35px; text: ""; }
+            LabeledTextField { label: "Min: "; text: ""; }
+            LabeledTextField { label: "Max: "; text: ""; }
         }
         HorizontalLayout {
             alignment: center;
@@ -471,13 +296,14 @@ export component JoinModelTab inherits SpacedPanel {
 // `JoinDialog.createRejoinPanel` / `addRejoinPanelComponents`
 // (JoinDialog.java:735-810).
 export component JoinRejoinTab inherits VerticalLayout {
-    spacing: EtomoStyle.gap;
+    spacing: EtomoStyle.row-gap;
     padding: EtomoStyle.inset;
     // pnlTables: the section table beside the boundary table.
     HorizontalLayout {
         spacing: EtomoStyle.gap;
-        SectionTableJoin { }
-        BoundaryTableRejoin { }
+        alignment: start;
+        SectionTablePanel { tab: 4; }
+        BoundaryTablePanel { }
     }
     BeveledBorder {
         title: "Trial Rejoin";
@@ -487,15 +313,14 @@ export component JoinRejoinTab inherits VerticalLayout {
             BeveledBorder {
                 title: "";
                 HorizontalLayout {
-                    alignment: start;
                     spacing: EtomoStyle.gap;
-                    LabeledSpinner { label: "Use every "; label-width: 70px; text: "10"; }
+                    LabeledSpinner { label: "Use every "; text: "10"; }
                     PlainLabel { text: "slices"; }
                 }
-                LabeledSpinner { label: "Binning in X and Y: "; label-width: 130px; text: "1"; }
+                LabeledSpinner { label: "Binning in X and Y: "; text: "1"; }
                 MultiLineButton { text: "Trial Rejoin"; }
             }
-            BinnedXY3dmodButton { text: "Open Trial Rejoin in 3dmod"; }
+            JoinBinnedXY3dmodButton { text: "Open Trial Rejoin in 3dmod"; spinner-occurrence: "#2"; }
         }
     }
     BeveledBorder {
@@ -503,40 +328,37 @@ export component JoinRejoinTab inherits VerticalLayout {
         HorizontalLayout {
             spacing: EtomoStyle.gap;
             MultiLineButton { text: "Rejoin"; }
-            BinnedXY3dmodButton { text: "Open Rejoin in 3dmod"; }
+            JoinBinnedXY3dmodButton { text: "Open Rejoin in 3dmod"; spinner-occurrence: "#3"; }
         }
     }
     BeveledBorder {
         title: "Transform Model";
-        FileTextField { label: "Model file: "; text: ""; }
+        JoinFileTextField { label: "Model file: "; }
         LabeledTextField { label: "Output file: "; text: ""; }
         HorizontalLayout {
             spacing: EtomoStyle.gap;
             MultiLineButton { text: "Transform Model"; }
-            BinnedXY3dmodButton { text: "Open Rejoin with Transformed Model"; }
+            JoinBinnedXY3dmodButton { text: "Open Rejoin with Transformed Model"; spinner-occurrence: "#4"; }
         }
     }
 }
 
-// `JoinDialog.createTabPane` (JoinDialog.java:318-334): the five tabs, in order.
-//
-// Swing shows one tab body at a time; `addPanelComponents`/`removePanelComponents`
-// move the components as the selection changes.  Slint has no tab container in
-// this crate's vocabulary and this is an appearance-only mirror, so all five
-// bodies are laid out in sequence below the strip rather than only the selected
-// one.  Each body is also exported on its own for viewing in isolation.
+// `JoinDialog.createTabPane` (JoinDialog.java:318-334): the five tabs, in
+// order; the Model and Rejoin tabs are disabled until a refine starts
+// (`updateDisplay`), which the bridged tab strip shows.
 export component JoinDialog inherits Rectangle {
     background: EtomoStyle.background;
     VerticalLayout {
-        TabbedPane {
+        alignment: start;
+        tabs := BridgedTabbedPane {
             tabs: ["Setup", "Align", "Join", "Model", "Rejoin"];
             current: 0;
         }
-        JoinSetupTab { }
-        JoinAlignTab { }
-        JoinJoinTab { }
-        JoinModelTab { }
-        JoinRejoinTab { }
+        if tabs.shown-current == 0: JoinSetupTab { }
+        if tabs.shown-current == 1: JoinAlignTab { }
+        if tabs.shown-current == 2: JoinJoinTab { }
+        if tabs.shown-current == 3: JoinModelTab { }
+        if tabs.shown-current == 4: JoinRejoinTab { }
     }
 }
 

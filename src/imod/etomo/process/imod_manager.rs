@@ -322,13 +322,14 @@ impl ImodManager {
     }
 
     /// Java `setMetaData(JoinMetaData)`.
-    // TODO(unit): needs etomo/type/JoinMetaData.java - the parameter's declared type;
-    // the body reads only `getAxisType` and `getName`, which `BaseMetaData` declares.
-    pub fn set_meta_data_join_meta_data(&self, meta_data: &dyn BaseMetaData) {
+    pub fn set_meta_data_join_meta_data(
+        &self,
+        meta_data: &crate::imod::etomo::r#type::join_meta_data::JoinMetaData,
+    ) {
         *self.fields.meta_data_set.lock().unwrap() = true;
         self.base
-            .set_axis_type(Some(meta_data.base().get_axis_type()));
-        let dataset_name = meta_data.get_name().unwrap_or_default();
+            .set_axis_type(Some(BaseMetaData::base(meta_data).get_axis_type()));
+        let dataset_name = BaseMetaData::get_name(meta_data).unwrap_or_default();
         *self.fields.dataset_name.lock().unwrap() = dataset_name.clone();
         if dataset_name == "" {
             eprintln!("java.lang.IllegalStateException: DatasetName is empty.");
@@ -337,9 +338,10 @@ impl ImodManager {
     }
 
     /// Java `setMetaData(SerialSectionsMetaData)`.
-    // TODO(unit): needs etomo/type/SerialSectionsMetaData.java - the parameter's
-    // declared type; the body reads only `BaseMetaData` members.
-    pub fn set_meta_data_serial_sections_meta_data(&self, meta_data: &dyn BaseMetaData) {
+    pub fn set_meta_data_serial_sections_meta_data(
+        &self,
+        meta_data: &crate::imod::etomo::r#type::serial_sections_meta_data::SerialSectionsMetaData,
+    ) {
         *self.fields.meta_data_set.lock().unwrap() = true;
         self.base
             .set_axis_type(Some(meta_data.base().get_axis_type()));
@@ -352,9 +354,10 @@ impl ImodManager {
     }
 
     /// Java `setMetaData(ConstPeetMetaData)`.
-    // TODO(unit): needs etomo/type/ConstPeetMetaData.java - the parameter's declared
-    // type; the body reads only `BaseMetaData` members.
-    pub fn set_meta_data_const_peet_meta_data(&self, meta_data: &dyn BaseMetaData) {
+    pub fn set_meta_data_const_peet_meta_data(
+        &self,
+        meta_data: &crate::imod::etomo::r#type::peet_meta_data::PeetMetaData,
+    ) {
         *self.fields.meta_data_set.lock().unwrap() = true;
         self.base
             .set_axis_type(Some(meta_data.base().get_axis_type()));
@@ -367,13 +370,14 @@ impl ImodManager {
     }
 
     /// Java `setMetaData(ParallelMetaData)`.
-    // TODO(unit): needs etomo/type/ParallelMetaData.java - the parameter's declared
-    // type; the body reads only `BaseMetaData` members.
-    pub fn set_meta_data_parallel_meta_data(&self, meta_data: &dyn BaseMetaData) {
+    pub fn set_meta_data_parallel_meta_data(
+        &self,
+        meta_data: &crate::imod::etomo::r#type::parallel_meta_data::ParallelMetaData,
+    ) {
         *self.fields.meta_data_set.lock().unwrap() = true;
         self.base
-            .set_axis_type(Some(meta_data.base().get_axis_type()));
-        let dataset_name = meta_data.get_name().unwrap_or_default();
+            .set_axis_type(Some(BaseMetaData::base(meta_data).get_axis_type()));
+        let dataset_name = BaseMetaData::get_name(meta_data).unwrap_or_default();
         *self.fields.dataset_name.lock().unwrap() = dataset_name.clone();
         if dataset_name == "" {
             eprintln!("java.lang.IllegalStateException: DatasetName is empty.");

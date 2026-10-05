@@ -85,7 +85,7 @@ impl SectionTableRowData {
     }
 
     /// Java `load(Properties)`.  Get the objects attributes from the properties object.
-    pub fn load(&mut self, props: &BTreeMap<String, String>) {
+    pub fn load(&mut self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, Some(""));
     }
 
@@ -95,7 +95,11 @@ impl SectionTableRowData {
     /// `props.getProperty(VERSION_KEY)`, without the row's group prefix that `store`
     /// writes it under, so the version always read back as null and every load ran the
     /// 1.0 conversion.  The version is read from `group + VERSION_KEY` here.
-    pub fn load_with_prepend(&mut self, props: &BTreeMap<String, String>, prepend: Option<&str>) {
+    pub fn load_with_prepend(
+        &mut self,
+        props: &mut BTreeMap<String, String>,
+        prepend: Option<&str>,
+    ) {
         self.reset();
         let prepend = ConstSectionTableRowData::create_prepend(self, prepend);
         let group = format!("{}.", prepend);
@@ -145,15 +149,10 @@ impl SectionTableRowData {
     }
 
     /// Java private `convertVersion`.  Convert stored version to current version.
-    ///
-    /// Deviation: the source removes the obsolete 1.0 `XMax`/`YMax`/`ZMax` keys from the
-    /// `Properties` it was loaded from.  `Storable::load` takes the map shared, so those
-    /// removals are not made; they only drop keys a 1.1 `store` never writes, and the
-    /// next save of the file (which rebuilds it from `store`) drops them anyway.
     fn convert_version(
         &mut self,
         stored_version: Option<&str>,
-        props: &BTreeMap<String, String>,
+        props: &mut BTreeMap<String, String>,
         prepend: &str,
     ) {
         if stored_version.is_none() {
@@ -164,16 +163,10 @@ impl SectionTableRowData {
             if self.base.setup_final_end.equals_int(INTEGER_NULL_VALUE) {
                 self.base.setup_final_end.reset();
             }
-            // `props.remove(group + setupXMaxString)` and the Y and Z twins: `load`
-            // receives the map shared (`Storable::load`), so these removals of the
-            // obsolete 1.0 keys cannot be made here.  See the doc comment.
-            let _ = (
-                props,
-                prepend,
-                SETUP_X_MAX_STRING,
-                SETUP_Y_MAX_STRING,
-                SETUP_Z_MAX_STRING,
-            );
+            let group = format!("{}.", prepend);
+            props.remove(&format!("{}{}", group, SETUP_X_MAX_STRING));
+            props.remove(&format!("{}{}", group, SETUP_Y_MAX_STRING));
+            props.remove(&format!("{}{}", group, SETUP_Z_MAX_STRING));
         }
     }
 
@@ -423,7 +416,10 @@ impl SectionTableRowData {
     /// [`MRCHeader::read_with_manager`] reports as one message; the source's two catch
     /// blocks differ only in the exception name they print, and the popup here names
     /// neither.
-    fn read_header(&self, path: &str) -> Option<Rc<RefCell<MRCHeader>>> {
+    fn read_header(
+        &self,
+        path: &str,
+    ) -> Option<std::sync::Arc<crate::imod::etomo::util::mrc_header::SharedMRCHeader>> {
         let header = MRCHeader::get_instance_in_dir(
             self.manager.get_property_user_dir().as_deref(),
             Some(path),
@@ -543,11 +539,11 @@ impl StorableValue for SectionTableRowData {
         ConstSectionTableRowData::store_with_prepend(self, properties, Some(prepend));
     }
 
-    fn load(&mut self, properties: &BTreeMap<String, String>) {
+    fn load(&mut self, properties: &mut BTreeMap<String, String>) {
         SectionTableRowData::load(self, properties);
     }
 
-    fn load_with_prepend(&mut self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         SectionTableRowData::load_with_prepend(self, properties, Some(prepend));
     }
 }

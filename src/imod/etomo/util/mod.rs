@@ -1,6 +1,7 @@
 //! Non-GUI translations of `IMOD/Etomo/src/etomo/util` source units.
 pub mod clean_print;
 pub mod dataset_files;
+pub mod queue;
 pub mod environment_variable;
 pub mod event_queue;
 pub mod file_modified_flag;
@@ -24,3 +25,6 @@ pub mod hashed_array;
 pub mod shared_constants;
 pub mod redactor;
 pub mod front_end_logic;
+pub mod bracket;
+pub mod quote;
+pub mod java_hash_map;

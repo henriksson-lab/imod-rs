@@ -19,7 +19,6 @@ component CalcPanel inherits HorizontalLayout {
     in property <string> total: "0.0";
     in property <bool> enabled: true;
     spacing: EtomoStyle.gap;
-    alignment: start;
     Text {
         text: root.label + ":";
         width: 130px;
@@ -29,12 +28,12 @@ component CalcPanel inherits HorizontalLayout {
     if root.more: LabeledTextField {
         label: "Original:";
         text: root.original;
-        label-width: 60px;
+        
     }
     if root.more: LabeledTextField {
         label: "Added:";
         text: root.added;
-        label-width: 60px;
+        
     }
     Text { text: "Total:"; vertical-alignment: center; }
     TextField { label: "Total:"; text: root.total; enabled: root.enabled; field-width: 70px; }
@@ -49,7 +48,7 @@ export component TomogramPositioningDialog inherits VerticalLayout {
     // `cbSampleTypeCryo` swaps `ltfExtraThickness` for `ltfExtraThicknessCryo`.
     in property <bool> cryo: false;
 
-    spacing: EtomoStyle.gap;
+    spacing: EtomoStyle.row-gap;
 
     // `pnlPosition`, bordered with `new BeveledBorder("Tomogram Positioning")`.
     BeveledBorder {
@@ -57,7 +56,7 @@ export component TomogramPositioningDialog inherits VerticalLayout {
 
         // `pnlTomoParams`
         VerticalLayout {
-            spacing: EtomoStyle.gap;
+            spacing: EtomoStyle.row-gap;
             CheckBox { text: "Use the GPU"; }
             CheckBox { text: "Find boundary model automatically"; }
             CheckBox { text: "Do positioning for cryo sample"; enabled: false; }
@@ -69,23 +68,22 @@ export component TomogramPositioningDialog inherits VerticalLayout {
                 TextField { label: "Sample has gold beads of size:"; text: "10.0"; enabled: false; field-width: 70px; }
                 Text { text: " pixels"; vertical-alignment: center; color: EtomoStyle.disabled-text; }
             }
-            LabeledTextField { label: "Positioning tomogram thickness: "; text: "1200"; label-width: 210px; }
+            LabeledTextField { label: "Positioning tomogram thickness: "; text: "1200"; }
             CheckBox { text: "Coarse alignment only"; }
-            LabeledTextField { label: "Tilt axis rotation:"; text: "0.0"; enabled: root.fiducialess; label-width: 210px; }
+            LabeledTextField { label: "Tilt axis rotation:"; text: "0.0"; enabled: root.fiducialess; }
             // `pnlWholeTomogram`
             HorizontalLayout {
                 spacing: EtomoStyle.gap;
-                alignment: start;
                 CheckBox { text: "Use whole tomogram"; }
-                LabeledSpinner { label: "   Binning "; text: "3"; label-width: 70px; enabled: false; }
+                LabeledSpinner { label: "   Binning "; text: "3"; enabled: false; }
             }
         }
 
         MultiLineButton { text: "Create Sample Tomograms"; }
         MultiLineButton { text: "Create Boundary Model"; }
 
-        if !root.cryo: LabeledTextField { label: "Added border thickness (unbinned): "; text: ""; label-width: 230px; }
-        if root.cryo: LabeledTextField { label: "Added border thickness (unbinned): "; text: ""; label-width: 230px; }
+        if !root.cryo: LabeledTextField { label: "Added border thickness (unbinned): "; text: ""; }
+        if root.cryo: LabeledTextField { label: "Added border thickness (unbinned): "; text: ""; }
 
         CheckBox { text: "Keep X-axis tilt at zero"; }
         MultiLineButton { text: "Compute Z Shift & Pitch Angles"; }
@@ -106,7 +104,7 @@ export component TomogramPositioningDialog inherits VerticalLayout {
             if root.fiducialess: CalcPanel { label: "Tilt angle offset"; }
             if root.fiducialess: CalcPanel { label: "Z shift"; }
             CalcPanel { label: "X axis tilt"; }
-            LabeledTextField { label: "Final Tomogram Thickness: "; text: "1200"; label-width: 210px; }
+            LabeledTextField { label: "Final Tomogram Thickness: "; text: "1200"; }
         }
     }
 

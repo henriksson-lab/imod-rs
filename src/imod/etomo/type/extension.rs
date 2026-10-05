@@ -485,7 +485,10 @@ impl Extension {
             || image_filename_style == Some(ImageFilenameStyle::Old)
             || image_filename_style
                 .map(|style| {
-                    !std::ptr::eq(style.get_default_raw_image_stack_extension(), extension)
+                    // Java `!=` on the singletons: here the style's default
+                    // and the `INSTANCES` entry are separate copies of the same
+                    // extension, so they are compared by value.
+                    style.get_default_raw_image_stack_extension() != extension
                 })
                 .unwrap_or(true)
         {

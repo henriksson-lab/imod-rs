@@ -1,358 +1,251 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/DirectivesSectionRow.java`.
 //!
-//! `Ebutton`, `JPanel`, `GridBagLayout`, `GridBagConstraints`, and the
-//! directive-row source unit are GUI/source-unit boundaries here.  The state
-//! and transitions performed by `DirectivesSectionRow` remain in this file.
-#![allow(dead_code)]
+//! A section header row of the directives table: an open/close button over the
+//! directive rows of one section of the directives description file.  An event
+//! dispatch thread object, created as `Rc<Self>`.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 
-use super::appearance_extension::{FlagDisplay, FlagType};
-use super::batch_run_tomo_step_panel::BatchRunTomoStatus;
-use super::cell::{CellGridBagConstraintsBoundary, CellGridBagLayoutBoundary, CellPanelBoundary};
-use super::directives_dialog::{
-    DirectivesDialog, DirectivesDialogParent, DirectivesTableBoundary, SectionListener,
-};
+use super::directives_dialog::DirectivesDialog;
 use super::directives_directive_row::DirectivesDirectiveRow;
 use super::directives_row::DirectivesRow;
+use super::ebutton::Ebutton;
+use crate::imod::etomo::jdk::{
+    ActionEvent, ActionListener, GRID_BAG_REMAINDER, GridBagConstraints, GridBagLayout,
+    JComponent,
+};
+use crate::imod::etomo::storage::directive_descr_element::DirectiveDescrElement;
+use crate::imod::etomo::r#type::batch_run_tomo_status::BatchRunTomoStatus;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::flag_display::FlagDisplay;
+use crate::imod::etomo::ui::flag_type::FlagType;
+use crate::imod::etomo::ui::section_listener::SectionListener;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 
-/// Calls made by this source unit to the neighbouring
-/// `DirectivesDirectiveRow` source unit.
-pub trait DirectivesDirectiveRowBoundary {
-    /// Java `DirectivesDirectiveRow.setOpen(boolean)`.
-    fn set_open(&mut self, open: bool);
-    /// Java `DirectivesDirectiveRow.getFlagType()`.
-    fn get_flag_type(&self) -> Option<FlagType>;
-    /// Java `DirectivesDirectiveRow.canDisplay()`.
-    fn can_display(&self) -> bool;
-}
-
-/// Direct implementation of the calls above once the neighbouring source unit
-/// is present.  This is the Java `List<DirectivesDirectiveRow>` relationship,
-/// rather than a replacement row model.
-impl DirectivesDirectiveRowBoundary for DirectivesDirectiveRow {
-    fn set_open(&mut self, open: bool) {
-        DirectivesDirectiveRow::set_open(self, open);
-    }
-
-    fn get_flag_type(&self) -> Option<FlagType> {
-        DirectivesDirectiveRow::get_flag_type(self)
-    }
-
-    fn can_display(&self) -> bool {
-        DirectivesDirectiveRow::can_display(self)
-    }
-}
-
-/// Direct calls to Swing's `Ebutton` from this source unit.  Rendering and
-/// native listener dispatch remain at that boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DirectivesSectionEbuttonBoundary {
-    pub text: String,
-    pub selected: bool,
-    pub enabled: bool,
-    pub respond_to_non_error_flags: bool,
-    pub allow_flag_editable_control: bool,
-    pub action_listener_count: usize,
-    pub removed: bool,
-    pub flag_type: Option<FlagType>,
-    pub add_count: usize,
-}
-
-impl DirectivesSectionEbuttonBoundary {
-    /// Java `Ebutton.getHeaderInstance()`.
-    pub fn get_header_instance() -> Self {
-        Self {
-            text: String::new(),
-            selected: false,
-            enabled: true,
-            respond_to_non_error_flags: true,
-            allow_flag_editable_control: true,
-            action_listener_count: 0,
-            removed: false,
-            flag_type: None,
-            add_count: 0,
-        }
-    }
-    /// Java `Ebutton.getOpenCloseInstance(String)`.
-    pub fn get_open_close_instance(text: impl Into<String>) -> Self {
-        let mut instance = Self::get_header_instance();
-        instance.text = text.into();
-        instance
-    }
-    /// Java `Ebutton.add(JPanel, GridBagLayout, GridBagConstraints)`.
-    pub fn add(
-        &mut self,
-        _panel: &mut CellPanelBoundary,
-        _layout: &mut CellGridBagLayoutBoundary,
-        _constraints: &mut CellGridBagConstraintsBoundary,
-    ) {
-        self.add_count += 1;
-    }
-    /// Java `Ebutton.remove()`.
-    pub fn remove(&mut self) {
-        self.removed = true;
-    }
-    /// Java `Ebutton.addActionListener(ActionListener)`.
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-    /// Java `Ebutton.setFlag(FlagType)`.
-    pub fn set_flag(&mut self, flag_type: Option<FlagType>) {
-        self.flag_type = flag_type;
-    }
-}
-
-/// Java final package-private `DirectivesSectionRow`.
+/// Java `final class DirectivesSectionRow implements DirectivesRow, ActionListener,
+/// SectionListener, FlagDisplay, FieldDisplayer`.
 pub struct DirectivesSectionRow {
-    pub h_empty: DirectivesSectionEbuttonBoundary,
-    pub directive_list: Vec<Rc<RefCell<dyn DirectivesDirectiveRowBoundary>>>,
-    pub btn_section: DirectivesSectionEbuttonBoundary,
-    cur_error_flag_type: Option<FlagType>,
-    /// The Java `GridBagConstraints.gridwidth` writes made by `display`.
-    /// The native constraints object is deliberately an external GUI boundary.
-    pub display_gridwidths: Vec<i32>,
+    /// Java private final `hEmpty`.
+    h_empty: Rc<Ebutton>,
+    /// Java private final `directiveList`.
+    directive_list: RefCell<Vec<Rc<DirectivesDirectiveRow>>>,
+    /// Java private final `btnSection`.
+    btn_section: Rc<Ebutton>,
+    /// Java private `curErrorFlagType`, initially null.
+    cur_error_flag_type: Cell<Option<&'static FlagType>>,
+    /// Java `this`.
+    this: Weak<DirectivesSectionRow>,
 }
 
 impl DirectivesSectionRow {
+    /// The field initialisers with the given section button.
+    fn construct(btn_section: Rc<Ebutton>) -> Rc<DirectivesSectionRow> {
+        btn_section.set_respond_to_non_error_flags(false);
+        btn_section.set_allow_flag_editable_control(false);
+        Rc::new_cyclic(|this| DirectivesSectionRow {
+            h_empty: Ebutton::get_header_instance_void(),
+            directive_list: RefCell::new(Vec::new()),
+            btn_section,
+            cur_error_flag_type: Cell::new(None),
+            this: this.clone(),
+        })
+    }
+
     /// Java private `DirectivesSectionRow(String[])`.
-    fn new(line_array: &[String]) -> Self {
-        let mut btn_section = DirectivesSectionEbuttonBoundary::get_open_close_instance(
-            line_array.first().cloned().unwrap_or_default(),
-        );
-        btn_section.respond_to_non_error_flags = false;
-        btn_section.allow_flag_editable_control = false;
-        Self {
-            h_empty: DirectivesSectionEbuttonBoundary::get_header_instance(),
-            directive_list: Vec::new(),
-            btn_section,
-            cur_error_flag_type: None,
-            display_gridwidths: Vec::new(),
-        }
+    fn new_line_array(line_array: Option<&[String]>) -> Rc<DirectivesSectionRow> {
+        DirectivesSectionRow::construct(Ebutton::get_open_close_instance(
+            DirectiveDescrElement::get_section_header_from_line_array(line_array).as_deref(),
+        ))
     }
+
     /// Java private `DirectivesSectionRow(String)`.
-    fn new_with_title(title: &str) -> Self {
-        let mut btn_section = DirectivesSectionEbuttonBoundary::get_open_close_instance(title);
-        btn_section.respond_to_non_error_flags = false;
-        btn_section.allow_flag_editable_control = false;
-        Self {
-            h_empty: DirectivesSectionEbuttonBoundary::get_header_instance(),
-            directive_list: Vec::new(),
-            btn_section,
-            cur_error_flag_type: None,
-            display_gridwidths: Vec::new(),
+    fn new_title(title: &str) -> Rc<DirectivesSectionRow> {
+        DirectivesSectionRow::construct(Ebutton::get_open_close_instance(Some(title)))
+    }
+
+    /// Java package-private static `getInstance(DirectivesDialog, String[], JPanel,
+    /// GridBagLayout, GridBagConstraints)`.
+    pub fn get_instance(
+        parent: &Rc<DirectivesDialog>,
+        line_array: Option<&[String]>,
+    ) -> Rc<DirectivesSectionRow> {
+        let instance = DirectivesSectionRow::new_line_array(line_array);
+        instance.add_listeners(parent);
+        instance
+    }
+
+    /// Java package-private static `getExtrasInstance(DirectivesDialog)`.
+    pub fn get_extras_instance(parent: &Rc<DirectivesDialog>) -> Rc<DirectivesSectionRow> {
+        let instance = DirectivesSectionRow::new_title("Unknown Directives");
+        instance.add_listeners(parent);
+        instance
+    }
+
+    /// Java private `addListeners(DirectivesDialog)`.
+    fn add_listeners(&self, dialog: &Rc<DirectivesDialog>) {
+        let this = self.this.clone();
+        let listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            if let Some(row) = this.upgrade() {
+                row.action_performed(event);
+            }
+        });
+        self.btn_section
+            .add_action_listener_action_listener(Some(listener));
+        if let Some(this) = self.this.upgrade() {
+            dialog.add_section_listener(this as Rc<dyn SectionListener>);
         }
     }
-    /// Java static `getInstance(DirectivesDialog, String[], JPanel, GridBagLayout, GridBagConstraints)`.
-    pub fn get_instance<T: DirectivesTableBoundary, P: DirectivesDialogParent>(
-        parent: &mut DirectivesDialog<T, P>,
-        line_array: &[String],
-        _panel: &mut CellPanelBoundary,
-        _layout: &mut CellGridBagLayoutBoundary,
-        _constraints: &mut CellGridBagConstraintsBoundary,
-    ) -> Rc<RefCell<Self>> {
-        let instance = Rc::new(RefCell::new(Self::new(line_array)));
-        Self::add_listeners(parent, instance.clone());
-        instance
+
+    /// Java package-private `getTitle()`.
+    pub fn get_title(&self) -> String {
+        self.btn_section.get_text()
     }
-    /// Java static `getExtrasInstance(DirectivesDialog)`.
-    pub fn get_extras_instance<T: DirectivesTableBoundary, P: DirectivesDialogParent>(
-        parent: &mut DirectivesDialog<T, P>,
-    ) -> Rc<RefCell<Self>> {
-        let instance = Rc::new(RefCell::new(Self::new_with_title("Unknown Directives")));
-        Self::add_listeners(parent, instance.clone());
-        instance
-    }
-    /// Java private `addListeners(DirectivesDialog)`.
-    fn add_listeners<T: DirectivesTableBoundary, P: DirectivesDialogParent>(
-        dialog: &mut DirectivesDialog<T, P>,
-        instance: Rc<RefCell<Self>>,
-    ) {
-        instance.borrow_mut().btn_section.add_action_listener();
-        dialog.add_section_listener(instance);
-    }
-    /// Java `getTitle()`.
-    pub fn get_title(&self) -> &str {
-        &self.btn_section.text
-    }
-    /// Java `setOpen(boolean)`.
-    pub fn set_open(&mut self, open: bool) {
-        if self.btn_section.selected == open {
+
+    /// Java package-private `setOpen(boolean)`.
+    pub fn set_open(&self, open: bool) {
+        if self.btn_section.is_selected() == open {
             return;
         }
-        self.btn_section.selected = open;
-        for directive in &self.directive_list {
-            directive.borrow_mut().set_open(open);
+        self.btn_section.set_selected(open);
+        let directive_list = self.directive_list.borrow().clone();
+        for directive in directive_list {
+            directive.set_open(open);
         }
     }
-    /// Java `addDirective(DirectivesDirectiveRow)`.
-    pub fn add_directive(&mut self, directive: Rc<RefCell<dyn DirectivesDirectiveRowBoundary>>) {
-        self.directive_list.push(directive);
+
+    /// Java package-private `addDirective(DirectivesDirectiveRow)`.
+    pub fn add_directive(&self, directive: Rc<DirectivesDirectiveRow>) {
+        self.directive_list.borrow_mut().push(directive);
     }
-    /// Java `hasDirectives()`.
+
+    /// Java package-private `hasDirectives()`.
     pub fn has_directives(&self) -> bool {
-        !self.directive_list.is_empty()
+        !self.directive_list.borrow().is_empty()
     }
+
     /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed(&mut self) {
+    pub fn action_performed(&self, _event: &ActionEvent) {
         self.update_open();
     }
-    /// Java `display()` from `FieldDisplayer`.
-    pub fn display_field(&mut self) {
-        if !self.btn_section.selected {
-            self.btn_section.selected = true;
-            self.action_performed();
+
+    /// Java `display()` (FieldDisplayer).
+    pub fn display_void(&self) {
+        if !self.btn_section.is_selected() {
+            self.btn_section.do_click();
         }
     }
+
     /// Java private `updateOpen()`.
-    fn update_open(&mut self) {
-        let open = self.btn_section.selected;
-        for directive in &self.directive_list {
-            directive.borrow_mut().set_open(open);
+    fn update_open(&self) {
+        let open = self.btn_section.is_selected();
+        let directive_list = self.directive_list.borrow().clone();
+        for directive in directive_list {
+            directive.set_open(open);
         }
     }
-    /// Java `sectionEvent()`.
-    pub fn section_event(&mut self) {
-        self.update_enabled();
-    }
-    /// Java private `isProcessFlag(FlagType)`.
-    fn is_process_flag(&self, flag_type: Option<FlagType>) -> bool {
-        let flag_type = flag_type.filter(|flag_type| flag_type.is_error());
-        if flag_type.is_none() && self.cur_error_flag_type.is_none() {
+
+    /// Java private `isProcessFlag(FlagType)`.  Returns true if flagType is not equal
+    /// to curErrorFlagType.  Not error flag types are treated as null flags because
+    /// this class does not react to them.  Error flags are all processed in the same
+    /// way so they are treated as the same flag.
+    fn is_process_flag(&self, mut flag_type: Option<&'static FlagType>) -> bool {
+        if let Some(flag) = flag_type
+            && !flag.is_error()
+        {
+            flag_type = None;
+        }
+        let cur_error_flag_type = self.cur_error_flag_type.get();
+        if flag_type.is_none() && cur_error_flag_type.is_none() {
             return false;
         }
-        flag_type.is_none() || self.cur_error_flag_type.is_none()
+        flag_type.is_none() || cur_error_flag_type.is_none()
     }
-    /// Java `updateEnabled()`.
-    pub fn update_enabled(&mut self) {
+
+    /// Java package-private `updateEnabled()`.  Allows the section be disabled if no
+    /// rows are visible.
+    pub fn update_enabled(&self) {
         let can_display = self
             .directive_list
+            .borrow()
             .iter()
-            .any(|directive| directive.borrow().can_display());
-        if !can_display && self.btn_section.selected {
-            self.btn_section.selected = false;
+            .any(|directive| directive.can_display());
+        if !can_display && self.btn_section.is_selected() {
+            self.btn_section.set_selected(false);
             self.update_open();
         }
-        self.btn_section.enabled = can_display;
+        self.btn_section.set_enabled(can_display);
     }
 }
 
 impl DirectivesRow for DirectivesSectionRow {
-    /// Java `display(JPanel, GridBagLayout, GridBagConstraints)`.
-    fn display(
-        &mut self,
-        pnl_table: &mut CellPanelBoundary,
-        layout: &mut CellGridBagLayoutBoundary,
-        constraints: &mut CellGridBagConstraintsBoundary,
-    ) {
-        self.display_gridwidths.push(1);
-        self.btn_section.add(pnl_table, layout, constraints);
-        // Java `GridBagConstraints.REMAINDER`.
-        self.display_gridwidths.push(0);
-        self.h_empty.add(pnl_table, layout, constraints);
-    }
     /// Java `remove()`.
-    fn remove(&mut self) {
+    fn remove(&self) {
         self.btn_section.remove();
         self.h_empty.remove();
     }
-    /// Java `statusChanged(BatchRunTomoStatus) {}`.
-    fn status_changed(&mut self, _status: BatchRunTomoStatus) {}
+
+    /// Java `display(JPanel, GridBagLayout, GridBagConstraints)`.
+    fn display(
+        &self,
+        pnl_table: &Rc<JComponent>,
+        layout: &GridBagLayout,
+        constraints: &mut GridBagConstraints,
+    ) {
+        constraints.gridwidth = 1;
+        self.btn_section.add(pnl_table);
+        layout.set_constraints(&self.btn_section.get_component(), constraints);
+        constraints.gridwidth = GRID_BAG_REMAINDER;
+        self.h_empty.add(pnl_table);
+        layout.set_constraints(&self.h_empty.get_component(), constraints);
+    }
+
+    /// Java `statusChanged(BatchRunTomoStatus)`: empty.
+    fn status_changed(&self, _status: Option<BatchRunTomoStatus>) {}
 }
 
 impl SectionListener for DirectivesSectionRow {
-    fn section_event(&mut self) {
-        self.section_event();
+    /// Java `sectionEvent()`.
+    fn section_event(&self) {
+        self.update_enabled();
     }
 }
 
 impl FlagDisplay for DirectivesSectionRow {
-    /// Java `setFlag(FlagType)`.
-    fn set_flag(&mut self, flag_type: Option<FlagType>) {
+    /// Java `setFlag(FlagType)`.  Set a flag if any of the rows has an error flagType.
+    /// Only do this if the flag has changed.
+    fn set_flag(&self, flag_type: Option<&'static FlagType>) {
+        // If this change isn't significant, don't investigate it.
         if !self.is_process_flag(flag_type) {
             return;
         }
-        let error_flag = self.directive_list.iter().find_map(|directive| {
-            directive
-                .borrow()
-                .get_flag_type()
-                .filter(|flag| flag.is_error())
-        });
+        let mut error_flag = None;
+        for directive in self.directive_list.borrow().iter() {
+            let flag_type = directive.get_flag_type();
+            if let Some(flag) = flag_type
+                && flag.is_error()
+            {
+                error_flag = Some(flag);
+                break;
+            }
+        }
+        // Call setFlag if something has changed.
+        // Don't care which error flag it is - they all work the same for btnSection.
         if self.is_process_flag(error_flag) {
-            self.cur_error_flag_type = error_flag;
-            self.btn_section.set_flag(self.cur_error_flag_type);
+            self.cur_error_flag_type.set(error_flag);
+            self.btn_section.set_flag(error_flag);
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Directive {
-        open: Vec<bool>,
-        flag_type: Option<FlagType>,
-        can_display: bool,
+impl FieldDisplayer for DirectivesSectionRow {
+    /// Java `display()`.
+    fn display_void(&self) {
+        DirectivesSectionRow::display_void(self);
     }
-    impl DirectivesDirectiveRowBoundary for Directive {
-        fn set_open(&mut self, open: bool) {
-            self.open.push(open);
-        }
-        fn get_flag_type(&self) -> Option<FlagType> {
-            self.flag_type
-        }
-        fn can_display(&self) -> bool {
-            self.can_display
-        }
-    }
-    #[test]
-    fn open_close_and_field_display_propagate_to_directives() {
-        let mut row = DirectivesSectionRow::new_with_title("Section");
-        let directive = Rc::new(RefCell::new(Directive {
-            can_display: true,
-            ..Directive::default()
-        }));
-        row.add_directive(directive.clone());
-        row.set_open(true);
-        row.set_open(true);
-        row.action_performed();
-        row.btn_section.selected = false;
-        row.display_field();
-        assert_eq!(directive.borrow().open, vec![true, true, true]);
-        assert!(row.btn_section.selected);
-        assert!(row.has_directives());
-    }
-    #[test]
-    fn flags_and_visibility_follow_source_rules() {
-        let mut row = DirectivesSectionRow::new_with_title("Section");
-        let directive = Rc::new(RefCell::new(Directive {
-            flag_type: Some(FlagType::ERROR),
-            ..Directive::default()
-        }));
-        row.add_directive(directive.clone());
-        row.set_flag(Some(FlagType::ERROR));
-        assert_eq!(row.btn_section.flag_type, Some(FlagType::ERROR));
-        row.btn_section.selected = true;
-        directive.borrow_mut().can_display = false;
-        row.update_enabled();
-        assert!(!row.btn_section.enabled);
-        assert!(!row.btn_section.selected);
-        assert_eq!(directive.borrow().open, vec![false]);
-    }
-    #[test]
-    fn table_display_remove_and_status_keep_source_boundary_calls() {
-        let mut row = DirectivesSectionRow::new_with_title("Section");
-        let mut panel = CellPanelBoundary;
-        let mut layout = CellGridBagLayoutBoundary;
-        let mut constraints = CellGridBagConstraintsBoundary;
-        row.display(&mut panel, &mut layout, &mut constraints);
-        row.status_changed(BatchRunTomoStatus::Running);
-        row.remove();
-        assert_eq!(row.display_gridwidths, vec![1, 0]);
-        assert_eq!(row.btn_section.add_count, 1);
-        assert_eq!(row.h_empty.add_count, 1);
-        assert!(row.btn_section.removed);
-        assert!(row.h_empty.removed);
+
+    /// Java `display(UIComponent)`.
+    fn display_ui_component(&self, _ui_component: Option<&dyn UIComponent>) {
+        DirectivesSectionRow::display_void(self);
     }
 }

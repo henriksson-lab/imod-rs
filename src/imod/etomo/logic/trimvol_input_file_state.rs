@@ -7,12 +7,9 @@
 //! If this is used with a non-post-processing trimvol, and new getInstance function
 //! should be created which doesn't call setChanged.
 //!
-//! The `MRCHeader` n'ton hands out shared `Rc<RefCell<MRCHeader>>` handles (see
+//! The `MRCHeader` n'ton hands out shared `std::sync::Arc<crate::imod::etomo::util::mrc_header::SharedMRCHeader>` handles (see
 //! `util/mrc_header.rs`), so this class, like its Java original, lives on the thread
 //! that created it.
-// TODO(unit): needs etomo/type/TomogramState.java - `isPostProcTrimVolInputNColumnsNull`,
-// `getPostProcTrimVolInputNColumns` and the NRows/NSections twins
-// (r#type::tomogram_state::TomogramState, snake_case names, as trimvol_param.rs assumes).
 #![allow(dead_code)]
 
 use std::cell::RefCell;
@@ -44,7 +41,7 @@ pub struct TrimvolInputFileState {
     /// Java field `changed`.
     changed: bool,
     /// Java field `mrcHeader`.
-    mrc_header: Option<Rc<RefCell<MRCHeader>>>,
+    mrc_header: Option<std::sync::Arc<crate::imod::etomo::util::mrc_header::SharedMRCHeader>>,
     /// Java field `inputFileMissing`.
     input_file_missing: bool,
 }

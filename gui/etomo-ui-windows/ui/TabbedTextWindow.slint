@@ -26,6 +26,7 @@ export component TabbedTextWindow inherits VerticalLayout {
     // Slint cannot switch a `JTabbedPane` body from the strip, so the shown
     // tab is selected here.  `JTabbedPane` starts on its first tab.
     in property <int> current-tab: 0;
+    callback tab-pressed(int);
     // `editorPane.read(reader, file)` — `:276`.
     in property <string> page-text:
         "  Residual error mean and sd:   0.53   0.31\n\n  view   n   mean   sd\n     1  24   0.48  0.27\n     2  24   0.55  0.33\n";
@@ -52,6 +53,7 @@ export component TabbedTextWindow inherits VerticalLayout {
     JTabbedPane {
         tabs: root.tabs;
         current-tab: root.current-tab;
+        tab-pressed(index) => { root.tab-pressed(index); }
     }
     // The selected tab's body: `new JScrollPane(editorPane)` — `:151`.
     JScrollPane {
@@ -80,8 +82,19 @@ export component TabbedTextWindowWindow inherits Window {
     preferred-width: root.font-size-pt * 625 / 12 * 1px;
     preferred-height: root.font-size-pt * 800 / 12 * 1px;
     background: EtomoStyle.background;
+    // Rust-only wiring (`ui/swing/slint_bridge.rs`): the tab titles, the shown
+    // tab's editor-pane text, and a press on a tab.
+    in property <[string]> tabs: ["Robust", "Errors", "Solution", "Surface Angles",
+        "Locals", "Large Residual", "Mappings", "Coordinates", "Beam Tilt",
+        "Complete Log"];
+    in property <string> page-text:
+        "  Residual error mean and sd:   0.53   0.31\n\n  view   n   mean   sd\n     1  24   0.48  0.27\n     2  24   0.55  0.33\n";
+    callback tab-pressed(int);
     TabbedTextWindow {
+        tabs: root.tabs;
+        page-text: root.page-text;
         current-tab: root.current-tab;
         font-size-pt: root.font-size-pt;
+        tab-pressed(index) => { root.tab-pressed(index); }
     }
 }

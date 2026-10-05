@@ -315,10 +315,7 @@ pub struct ProcesschunksProcessMonitor<
     /// Java field `parallelProgressDisplay`.
     parallel_progress_display: Mutex<Option<ParallelProgressDisplayRef>>,
     /// Java field `messageReporter`.
-    // TODO(unit): needs etomo/process/MessageReporter.java - created by
-    // `createProcessOutput` (`new MessageReporter(axisID, processOutput)`),
-    // polled by `updateProgressBar` and closed by `closeProcessOutput`.
-    message_reporter: Mutex<Option<Infallible>>,
+    message_reporter: Mutex<Option<super::message_reporter::MessageReporter>>,
     /// Java field `willResume`.
     will_resume: AtomicBool,
     /// Java `volatile` field `running`.
@@ -392,8 +389,11 @@ impl<S: ProcesschunksProcessMonitorImpl> ProcesschunksProcessMonitor<S> {
             let tool_kit = MonitorToolKit::new(manager, axis_id, Some(monitor));
             let busy_status_mediator = manager.get_busy_status_mediator();
             busy_status_mediator.msg_monitor_constructed(axis_id);
-            let messages =
-                ProcessMessages::get_instance_for_parallel_processing(multi_line_messages);
+            let messages = ProcessMessages::get_instance_for_parallel_processing(
+                Some(manager),
+                axis_id,
+                multi_line_messages,
+            );
             let mediator = manager
                 .get_processing_method_mediator(Some(axis_id))
                 .map(|mediator| Arc::new(EdtRef::new(mediator)));
@@ -960,9 +960,9 @@ impl ProcesschunksProcessMonitor {
     /// Java `synchronized closeProcessOutput` (the class's body).
     pub fn close_process_output_super(&self) {
         let _synchronized = self.process_output_lock.lock().unwrap();
-        // TODO(unit): needs etomo/process/MessageReporter.java -
-        // `if (messageReporter != null) messageReporter.close()`.
-        let _ = &self.message_reporter;
+        if let Some(message_reporter) = self.message_reporter.lock().unwrap().as_mut() {
+            message_reporter.close();
+        }
         let process_output = self.process_output.lock().unwrap().clone();
         let reader_id = self.process_output_reader_id.lock().unwrap().clone();
         if let (Some(process_output), Some(reader_id)) = (process_output, reader_id) {
@@ -1068,9 +1068,17 @@ impl ProcesschunksProcessMonitor {
             }
             self.process_message(&line);
             if !line.contains("imodkillgroup") {
-                self.messages.lock().unwrap().add_process_output(&line);
+                self.messages
+                    .lock()
+                    .unwrap()
+                    .add_process_output(Some(&line));
             }
-            if !self.messages.lock().unwrap().is_empty(MessageType::Error) {
+            if !self
+                .messages
+                .lock()
+                .unwrap()
+                .is_empty(Some(MessageType::Error))
+            {
                 // Set failure boolean but continue to add all the output lines to
                 // messages.
                 failed = true;
@@ -1266,8 +1274,9 @@ impl ProcesschunksProcessMonitor {
         self.manager.post_main_panel(Box::new(move |panel| {
             panel.set_progress_bar_value_int_string_axis_id(value, Some(&status_string), axis_id);
         }));
-        // TODO(unit): needs etomo/process/MessageReporter.java -
-        // `if (messageReporter != null) messageReporter.checkForMessages(manager)`.
+        if let Some(message_reporter) = self.message_reporter.lock().unwrap().as_mut() {
+            message_reporter.check_for_messages(self.manager);
+        }
     }
 
     /// Java final `initializeProgressBar`.
@@ -1421,11 +1430,17 @@ impl ProcesschunksProcessMonitor {
             Some(self.manager.get_emergency_monitor(Some(self.axis_id))),
         )?;
         *self.process_output.lock().unwrap() = Some(process_output.clone());
-        // TODO(unit): needs etomo/process/MessageReporter.java -
-        // `if (messageReporter != null) messageReporter.close();` then
-        // `messageReporter = new MessageReporter(axisID, processOutput)`:
-        // processchunks needs to always report lines tagged with MESSAGE.
-        let _ = &self.message_reporter;
+        {
+            let mut message_reporter = self.message_reporter.lock().unwrap();
+            if let Some(message_reporter) = message_reporter.as_mut() {
+                message_reporter.close();
+            }
+            // Processchunks needs to always report lines tagged with MESSAGE.
+            *message_reporter = Some(super::message_reporter::MessageReporter::new(
+                self.axis_id,
+                process_output.clone(),
+            ));
+        }
         // Attempt to clean up previous reads. This will only work if somthing is wrong.
         if let Some(reader_id) = self.process_output_reader_id.lock().unwrap().take() {
             process_output.close_id(Some(&*reader_id));

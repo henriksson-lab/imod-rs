@@ -36,6 +36,15 @@ impl SerialSectionsFileFilter {
     }
 }
 
+impl crate::imod::etomo::jdk::FileFilter for SerialSectionsFileFilter {
+    fn accept(&self, file: &Path) -> bool {
+        SerialSectionsFileFilter::accept(self, file)
+    }
+    fn get_description(&self) -> Option<String> {
+        Some(SerialSectionsFileFilter::get_description(self))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -25,10 +25,11 @@
 //! `TomogramGenerationExpert.dialog`), and the Java `expert` field is only
 //! used to call back into it.
 //!
-//! **Method plugin.**  `etomo/plugin` (`TomoGenMethodPlugin`, `PluginPanel`)
-//! has no translation; the expert passes a null plugin, so `rbMethodPlugin`
-//! and `methodPluginPanel` are null and every `!= null` branch on them takes
-//! its null path.
+//! **Method plugin.**  The expert passes its `TomoGenMethodPlugin` (null
+//! unless one was loaded; `etomo -plugin` loads the built-in demo).  A plugin
+//! with a custom tilt panel supplies a `TiltPanel` subclass, so `tiltPanel` is
+//! held as a [`TiltPanelVirtual`]; its panel and radio button are
+//! `methodPluginPanel` / `rbMethodPlugin`.
 
 use super::recon_ui_expert::ReconUIExpertVirtual;
 use std::cell::OnceCell;
@@ -49,9 +50,10 @@ use super::radio_button::RadioButton;
 use super::sirt_panel::SirtPanel;
 use super::sirtsetup_display::SirtsetupDisplay;
 use super::tilt_display::TiltDisplay;
-use super::tilt_panel::TiltPanel;
+use super::tilt_panel::{TiltPanel, TiltPanelVirtual};
 use super::tomogram_generation_expert::TomogramGenerationExpert;
 use super::tomogram_generation_parent::TomogramGenerationParent;
+use super::trial_tilt_parent::TrialTiltParent;
 use super::ui_harness;
 use super::ui_utilities;
 use crate::imod::etomo::application_manager::ApplicationManager;
@@ -64,6 +66,8 @@ use crate::imod::etomo::comscript::sirtsetup_param::SirtsetupParam;
 use crate::imod::etomo::jdk::{
     ActionEvent, ActionListener, ButtonGroup, FocusListener, JComponent, MouseEvent, MouseListener,
 };
+use crate::imod::etomo::plugin::plugin_panel::PluginPanel;
+use crate::imod::etomo::plugin::tomo_gen_method_plugin::TomoGenMethodPlugin;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
@@ -93,8 +97,9 @@ pub struct TomogramGenerationDialog {
     /// Java private final `rbSirt`.
     rb_sirt: Rc<RadioButton>,
 
-    /// Java private final `tiltPanel`.
-    tilt_panel: OnceCell<Rc<TiltPanel>>,
+    /// Java private final `tiltPanel` (a `TiltPanel` or a plugin's subclass of
+    /// it).
+    tilt_panel: OnceCell<Rc<dyn TiltPanelVirtual>>,
     /// Java private final `expert` (held weakly; see the module docs).
     expert: Weak<TomogramGenerationExpert>,
     /// Java private final `multifiltPanel`.
@@ -103,12 +108,10 @@ pub struct TomogramGenerationDialog {
     sirt_panel: OnceCell<Rc<SirtPanel>>,
     /// Java private final `tiltPanelRoot` (a `Component`).
     tilt_panel_root: OnceCell<Rc<JComponent>>,
-    /// Java private final `rbMethodPlugin`; null without a method plugin
-    /// (always, see the module docs).
-    rb_method_plugin: Option<Rc<RadioButton>>,
-    // TODO(unit): needs etomo/plugin/PluginPanel.java - Java private final
-    // `methodPluginPanel`, null without a method plugin (always here); every
-    // `methodPluginPanel != null` branch below is its null path.
+    /// Java private final `rbMethodPlugin`; null without a method plugin panel.
+    rb_method_plugin: OnceCell<Option<Rc<RadioButton>>>,
+    /// Java private final `methodPluginPanel`; null without a method plugin.
+    method_plugin_panel: OnceCell<Option<Rc<dyn PluginPanel>>>,
     /// Java private final `ctf3dPanel`.  Never null in the Java (created
     /// unconditionally), though the Java tests it.
     ctf3d_panel: OnceCell<Rc<Ctf3dPanel>>,
@@ -127,15 +130,11 @@ impl Deref for TomogramGenerationDialog {
 impl TomogramGenerationDialog {
     /// Java private constructor `TomogramGenerationDialog(ApplicationManager,
     /// TomogramGenerationExpert, AxisID, TomoGenMethodPlugin)`.
-    ///
-    /// TODO(unit): needs etomo/plugin/TomoGenMethodPlugin.java - the
-    /// `methodPlugin` parameter.  The expert always passes null, so
-    /// `tiltPanel` is `TiltPanel.getInstance(...)`, `methodPluginPanel` and
-    /// `rbMethodPlugin` are null.
     fn new(
         app_mgr: &'static ApplicationManager,
         expert: Weak<TomogramGenerationExpert>,
         axis_id: AxisID,
+        method_plugin: Option<&Rc<dyn TomoGenMethodPlugin>>,
     ) -> Rc<TomogramGenerationDialog> {
         // super(appMgr, axisID, DialogType.TOMOGRAM_GENERATION)
         let base = ProcessDialog::new_application_manager_axis_id_dialog_type(
@@ -162,8 +161,8 @@ impl TomogramGenerationDialog {
             multifilt_panel: OnceCell::new(),
             sirt_panel: OnceCell::new(),
             tilt_panel_root: OnceCell::new(),
-            // methodPluginPanel is null, so rbMethodPlugin = null.
-            rb_method_plugin: None,
+            rb_method_plugin: OnceCell::new(),
+            method_plugin_panel: OnceCell::new(),
             ctf3d_panel: OnceCell::new(),
             rb_ctf3d: OnceCell::new(),
         });
@@ -175,14 +174,25 @@ impl TomogramGenerationDialog {
         let parent: Weak<dyn TomogramGenerationParent> =
             Rc::downgrade(&instance) as Weak<dyn TomogramGenerationParent>;
         let dialog_type = instance.base.dialog_type;
-        // if (methodPlugin == null || !methodPlugin.hasCustomTiltPanel())
-        let tilt_panel = TiltPanel::get_instance(
-            app_mgr,
-            axis_id,
-            dialog_type,
-            &instance.base.btn_advanced,
-            parent,
-        );
+        let mut tilt_panel: Option<Rc<dyn TiltPanelVirtual>> = None;
+        if let Some(method_plugin) = method_plugin
+            && method_plugin.has_custom_tilt_panel()
+        {
+            tilt_panel = method_plugin.get_tilt_panel(parent.clone(), &instance.base.btn_advanced);
+        }
+        // `methodPlugin == null || !methodPlugin.hasCustomTiltPanel()`.  A plugin
+        // that claims a custom tilt panel and returns null leaves the Java field
+        // null and every later use throws NullPointerException; fixed in
+        // translation: the standard panel is used.
+        let tilt_panel = tilt_panel.unwrap_or_else(|| {
+            TiltPanel::get_instance(
+                app_mgr,
+                axis_id,
+                dialog_type,
+                &instance.base.btn_advanced,
+                parent,
+            ) as Rc<dyn TiltPanelVirtual>
+        });
         let _ = instance.tilt_panel.set(tilt_panel);
         let multifilt_panel =
             MultifiltPanel::get_instance(app_mgr, axis_id, Rc::downgrade(&instance), dialog_type);
@@ -200,30 +210,61 @@ impl TomogramGenerationDialog {
         let _ = instance.rb_ctf3d.set(rb_ctf3d);
         let ctf3d_panel = Ctf3dPanel::get_instance(app_mgr, axis_id, Rc::downgrade(&instance));
         let _ = instance.ctf3d_panel.set(ctf3d_panel);
-        // methodPlugin is null: methodPluginPanel = null, rbMethodPlugin = null.
+        let method_plugin_panel = match method_plugin {
+            Some(method_plugin) => {
+                method_plugin.get_panel(Rc::downgrade(&instance), &instance.base.btn_advanced)
+            }
+            None => None,
+        };
+        let rb_method_plugin = method_plugin_panel.as_ref().map(|method_plugin_panel| {
+            RadioButton::new_string_button_group(
+                method_plugin_panel.get_button_title().as_deref(),
+                Some(&instance.bg_method),
+            )
+        });
+        let _ = instance.method_plugin_panel.set(method_plugin_panel);
+        let _ = instance.rb_method_plugin.set(rb_method_plugin);
         let tilt_panel_root = instance.tilt_panel().get_root();
         let _ = instance.tilt_panel_root.set(tilt_panel_root);
         instance
     }
 
     /// Java package-private static `getInstance(ApplicationManager,
-    /// TomogramGenerationExpert, AxisID, TomoGenMethodPlugin)`.  The plugin
-    /// parameter is absent (see [`TomogramGenerationDialog::new`]).
+    /// TomogramGenerationExpert, AxisID, TomoGenMethodPlugin)`.
     pub fn get_instance(
         app_mgr: &'static ApplicationManager,
         expert: Weak<TomogramGenerationExpert>,
         axis_id: AxisID,
+        method_plugin: Option<&Rc<dyn TomoGenMethodPlugin>>,
     ) -> Rc<TomogramGenerationDialog> {
-        let instance = TomogramGenerationDialog::new(app_mgr, expert, axis_id);
+        let instance = TomogramGenerationDialog::new(app_mgr, expert, axis_id, method_plugin);
         instance.create_panel();
         instance.update_display();
         instance.add_listeners();
         instance
     }
 
-    /// Rust-only: the Java `final` field `tiltPanel` (set by the constructor).
-    fn tilt_panel(&self) -> &Rc<TiltPanel> {
+    /// Rust-only: the Java `final` field `tiltPanel` (set by the constructor),
+    /// as the object itself (overridden methods dispatch through it).
+    fn tilt_panel_object(&self) -> &Rc<dyn TiltPanelVirtual> {
         self.tilt_panel.get().expect("set by the constructor")
+    }
+
+    /// Rust-only: the `TiltPanel` part of the Java `final` field `tiltPanel`.
+    fn tilt_panel(&self) -> &TiltPanel {
+        self.tilt_panel_object().tilt_panel()
+    }
+
+    /// Rust-only: the Java `final` field `rbMethodPlugin` (null before the
+    /// constructor sets it, or without a method plugin panel).
+    fn rb_method_plugin(&self) -> Option<&Rc<RadioButton>> {
+        self.rb_method_plugin.get().and_then(Option::as_ref)
+    }
+
+    /// Rust-only: the Java `final` field `methodPluginPanel` (null before the
+    /// constructor sets it, or without a method plugin).
+    fn method_plugin_panel(&self) -> Option<&Rc<dyn PluginPanel>> {
+        self.method_plugin_panel.get().and_then(Option::as_ref)
     }
 
     /// Rust-only: the Java `final` field `multifiltPanel`.
@@ -270,8 +311,9 @@ impl TomogramGenerationDialog {
         if let Some(ctf3d_panel) = self.ctf3d_panel() {
             root_panel.add(&ctf3d_panel.get_component());
         }
-        // methodPluginPanel is null (see the module docs):
-        // rootPanel.add(methodPluginPanel.getComponent()) is not reached.
+        if let Some(method_plugin_panel) = self.method_plugin_panel() {
+            root_panel.add(&method_plugin_panel.get_component());
+        }
         // method panel
         // Swing layout: pnlMethod.setLayout(new BoxLayout(pnlMethod,
         // BoxLayout.X_AXIS)); horizontal glue before, between and after the radio
@@ -282,7 +324,7 @@ impl TomogramGenerationDialog {
         if let Some(rb_ctf3d) = self.rb_ctf3d() {
             pnl_method.add(&rb_ctf3d.get_component());
         }
-        if let Some(rb_method_plugin) = &self.rb_method_plugin {
+        if let Some(rb_method_plugin) = self.rb_method_plugin() {
             pnl_method.add(&rb_method_plugin.get_component());
         }
         // buttons
@@ -315,7 +357,7 @@ impl TomogramGenerationDialog {
         if let Some(rb_ctf3d) = self.rb_ctf3d() {
             rb_ctf3d.add_action_listener(listener.clone());
         }
-        if let Some(rb_method_plugin) = &self.rb_method_plugin {
+        if let Some(rb_method_plugin) = self.rb_method_plugin() {
             rb_method_plugin.add_action_listener(listener.clone());
         }
     }
@@ -338,8 +380,9 @@ impl TomogramGenerationDialog {
         state: &TomogramState,
     ) {
         self.sirt_panel().checkpoint(state);
-        // methodPluginPanel is null: methodPluginPanel.updateDisplay() is not
-        // reached.
+        if let Some(method_plugin_panel) = self.method_plugin_panel() {
+            method_plugin_panel.update_display();
+        }
     }
 
     /// Java public `@Deprecated allowTiltComSave()` (8/3/2018 See
@@ -386,8 +429,9 @@ impl TomogramGenerationDialog {
         }
         self.sirt_panel()
             .get_parameters_recon_screen_state(screen_state);
-        // methodPluginPanel is null: methodPluginPanel.getParameters(screenState)
-        // is not reached.
+        if let Some(method_plugin_panel) = self.method_plugin_panel() {
+            method_plugin_panel.get_parameters(screen_state);
+        }
     }
 
     /// Java package-private `setParameters(ConstMetaData)`.
@@ -456,8 +500,9 @@ impl TomogramGenerationDialog {
         if let Some(ctf3d_panel) = self.ctf3d_panel() {
             ctf3d_panel.set_parameters_recon_screen_state(screen_state);
         }
-        // methodPluginPanel is null: methodPluginPanel.setParameters(screenState)
-        // is not reached.
+        if let Some(method_plugin_panel) = self.method_plugin_panel() {
+            method_plugin_panel.set_parameters(screen_state);
+        }
     }
 
     /// Java private `updateDisplay()`.  Update the dialog with the current
@@ -468,8 +513,9 @@ impl TomogramGenerationDialog {
         if let Some(ctf3d_panel) = self.ctf3d_panel() {
             ctf3d_panel.update_display();
         }
-        // methodPluginPanel is null: methodPluginPanel.updateDisplay() is not
-        // reached.
+        if let Some(method_plugin_panel) = self.method_plugin_panel() {
+            method_plugin_panel.update_display();
+        }
         let manager: &'static dyn BaseManager = self.application_manager;
         ui_harness::with(|harness| {
             harness.pack_axis_id_base_manager(Some(self.axis_id), Some(manager))
@@ -483,7 +529,7 @@ impl TomogramGenerationDialog {
 
     /// Java package-private `getTiltDisplay()`.
     pub fn get_tilt_display(&self) -> Rc<dyn TiltDisplay> {
-        self.tilt_panel().clone() as Rc<dyn TiltDisplay>
+        self.tilt_panel_object().clone() as Rc<dyn TiltDisplay>
     }
 
     /// Java package-private `getMultifiltSetupDisplay()`.
@@ -565,9 +611,9 @@ impl TomogramGenerationDialog {
         if let Some(ctf3d_panel) = self.ctf3d_panel() {
             ctf3d_panel.msg_method_changed();
         }
-        // methodPluginPanel is null:
-        // methodPluginPanel.msgVisibilityChanged(isMethodPlugin()) is not
-        // reached.
+        if let Some(method_plugin_panel) = self.method_plugin_panel() {
+            method_plugin_panel.msg_visibility_changed(self.is_method_plugin());
+        }
         let manager: &'static dyn BaseManager = self.application_manager;
         ui_harness::with(|harness| {
             harness.pack_axis_id_base_manager(Some(self.axis_id), Some(manager));
@@ -577,7 +623,7 @@ impl TomogramGenerationDialog {
 
     /// Java public `getProcessingMethod()`.
     pub fn get_processing_method(&self) -> ProcessingMethod {
-        self.tilt_panel().get_processing_method()
+        TrialTiltParent::get_processing_method(&**self.tilt_panel_object())
     }
 
     /// Java package-private `displayMultifilt()`.
@@ -594,12 +640,9 @@ impl TomogramGenerationDialog {
             || self
                 .rb_ctf3d()
                 .is_some_and(|rb_ctf3d| action_command == rb_ctf3d.get_action_command().as_deref())
-            || self
-                .rb_method_plugin
-                .as_ref()
-                .is_some_and(|rb_method_plugin| {
-                    action_command == rb_method_plugin.get_action_command().as_deref()
-                })
+            || self.rb_method_plugin().is_some_and(|rb_method_plugin| {
+                action_command == rb_method_plugin.get_action_command().as_deref()
+            })
         {
             self.method_changed();
         }
@@ -622,7 +665,9 @@ impl ProcessDialogVirtual for TomogramGenerationDialog {
         if let Some(ctf3d_panel) = self.ctf3d_panel() {
             ctf3d_panel.done();
         }
-        // methodPluginPanel is null: methodPluginPanel.done() is not reached.
+        if let Some(method_plugin_panel) = self.method_plugin_panel() {
+            method_plugin_panel.done();
+        }
         self.base.set_displayed(false);
     }
 }
@@ -716,7 +761,7 @@ impl TomogramGenerationParent for TomogramGenerationDialog {
 
     /// Java public override `isMethodPlugin()`.
     fn is_method_plugin(&self) -> bool {
-        if let Some(rb_method_plugin) = &self.rb_method_plugin {
+        if let Some(rb_method_plugin) = self.rb_method_plugin() {
             return rb_method_plugin.is_selected();
         }
         false

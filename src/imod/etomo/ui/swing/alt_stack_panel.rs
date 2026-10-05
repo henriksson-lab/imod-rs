@@ -22,6 +22,7 @@ use super::beveled_border::BeveledBorder;
 use super::button_component::ButtonComponent;
 use super::check_box::CheckBox;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::cpu_gpu_panel::CpuGpuPanel;
 use super::deferred_3dmod_button::Deferred3dmodButton;
@@ -389,11 +390,9 @@ impl AltStackPanel {
     }
 
     /// Java private `addListeners()`.
-    fn add_listeners(&self) {
-        // Swing mouse: pnlRoot.addMouseListener(new GenericMouseAdapter(this)).
-        // Mouse events are not modelled; the adapter's only effect is to call
-        // popUpContextMenu on a right-button press, which a driver calls
-        // directly.
+    fn add_listeners(self: &Rc<Self>) {
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.pnl_root.add_mouse_listener(GenericMouseAdapter::new(context_menu));
         self.cb_process_even_odd_pairs
             .add_action_listener(Some(self.action_listener.clone()));
         if let (Some(rb_both), Some(rb_aonly), Some(rb_bonly)) =

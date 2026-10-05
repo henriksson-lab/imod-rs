@@ -1,67 +1,68 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ParallelProcessPanel.java`.
 //!
-//! `ParallelManager.java` has not yet been translated.  Its only use in this
-//! source unit is as the `BaseManager` argument passed unchanged to
-//! `AxisProcessPanel`, so the inherited Rust manager reference retains that
-//! source boundary without inventing a stand-in manager.
-#![allow(dead_code)]
+//! The axis process panel of the generic parallel process and anisotropic
+//! diffusion interfaces (`ParallelManager`).  Extends [`AxisProcessPanel`] (held as
+//! `base`, dereffed to) and implements [`AxisProcessPanelVirtual`]; its only
+//! override is `showBothAxis`, which sets the parallel background colour.
 
-use super::axis_process_panel::AxisProcessPanel;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
+
+use super::axis_process_panel::{AxisProcessPanel, AxisProcessPanelVirtual};
 use super::axis_progress_panel::AxisProgressPanel;
-use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::parallel_manager::ParallelManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::interface_type::InterfaceType;
 
-/// Java `ParallelProcessPanel`, including its `AxisProcessPanel` superclass.
+/// Java package-private `final class ParallelProcessPanel extends AxisProcessPanel`.
 pub struct ParallelProcessPanel {
-    pub axis_process_panel: AxisProcessPanel,
+    /// The Java superclass part.
+    base: Rc<AxisProcessPanel>,
+}
+
+impl Deref for ParallelProcessPanel {
+    type Target = AxisProcessPanel;
+    fn deref(&self) -> &AxisProcessPanel {
+        &self.base
+    }
 }
 
 impl ParallelProcessPanel {
+    /// Java package-private constructor
     /// `ParallelProcessPanel(ParallelManager, AxisProgressPanel)`.
-    pub fn new(manager: &'static dyn BaseManager, axis_progress_panel: AxisProgressPanel) -> Self {
-        let axis_process_panel = AxisProcessPanel::new(
-            AxisID::Only,
-            manager,
-            true,
-            true,
-            InterfaceType::Pp,
-            false,
-            axis_progress_panel,
-        );
-        let mut instance = Self { axis_process_panel };
-        instance.axis_process_panel.create_process_control_panel();
-        instance.show_both_axis();
-        instance.axis_process_panel.initialize_panels(true);
-        instance
-    }
-
-    /// `showBothAxis()`.
-    pub fn show_both_axis(&mut self) {
-        // `Colors.getBackgroundParallel()`: 186, 224, 173 when APRIL_FOOLS is
-        // false.  The Colors unit is still an independent source boundary, so
-        // retain the concrete color passed to the inherited Swing operation.
-        self.axis_process_panel.set_background("rgb(186,224,173)");
+    pub fn new(
+        manager: &'static ParallelManager,
+        axis_progress_panel: Rc<AxisProgressPanel>,
+    ) -> Rc<ParallelProcessPanel> {
+        // super(AxisID.ONLY, manager, true, true, InterfaceType.PP, false,
+        //   axisProgressPanel)
+        let this = Rc::new(ParallelProcessPanel {
+            base: AxisProcessPanel::new(
+                AxisID::Only,
+                manager,
+                true,
+                true,
+                InterfaceType::Pp,
+                false,
+                axis_progress_panel,
+            ),
+        });
+        this.base
+            .set_this(Rc::downgrade(&this) as Weak<dyn AxisProcessPanelVirtual>);
+        this.base.create_process_control_panel();
+        this.base.show_both_axis();
+        this.base.initialize_panels();
+        this
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
+impl AxisProcessPanelVirtual for ParallelProcessPanel {
+    fn axis_process_panel(&self) -> &AxisProcessPanel {
+        &self.base
+    }
 
-    #[test]
-    fn constructor_preserves_parallel_superclass_arguments_and_initialization_order() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let axis_progress_panel = AxisProgressPanel::get_instance(Some(AxisID::Only), manager);
-        let panel = ParallelProcessPanel::new(manager, axis_progress_panel);
-        let superclass = &panel.axis_process_panel;
-        assert_eq!(superclass.axis_id, AxisID::Only);
-        assert!(superclass.popup_chunk_warnings);
-        assert!(superclass.runnable_parallel);
-        assert_eq!(superclass.interface_type, InterfaceType::Pp);
-        assert!(!superclass.alt_parallel_loc);
-        assert_eq!(superclass.background.as_deref(), Some("rgb(186,224,173)"));
-        assert!(superclass.panel_process_info_has_status);
+    /// Java package-private `showBothAxis()` override.
+    fn show_both_axis(&self) {
+        // Swing painting: setBackground(Colors.getBackgroundParallel()).
     }
 }

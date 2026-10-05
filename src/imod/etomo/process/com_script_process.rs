@@ -145,6 +145,10 @@ impl ComScriptProcess {
         let own_process_name = process_name
             .clone()
             .or_else(|| ProcessName::get_instance_with_axis(&init.com_script, axis_id));
+        // Only the constructors that make their own `ProcessData` set its
+        // processing method; the managed-data one (`ComScriptProcess.java:207-235`)
+        // keeps the one its caller gave the data (`BatchRunTomoManager.batchruntomo`).
+        let own_process_data = managed_process_data.is_none();
         let process_data = match managed_process_data {
             Some(process_data) => process_data,
             None => Arc::new(Mutex::new(ProcessData::get_managed_instance(
@@ -158,7 +162,9 @@ impl ComScriptProcess {
             if let Some(display) = &init.process_result_display {
                 data.set_display_key(Some(&**display.get()));
             }
-            data.set_processing_method(init.processing_method);
+            if own_process_data {
+                data.set_processing_method(init.processing_method);
+            }
             if let Some(process_series) = &init.process_series {
                 let process_series = process_series.get().borrow();
                 data.set_dialog_type(process_series.get_dialog_type());
@@ -199,7 +205,7 @@ impl ComScriptProcess {
                 end_state: Mutex::new(None),
                 manager,
                 emergency_monitor,
-                process_messages: Mutex::new(ProcessMessages::get_instance()),
+                process_messages: Mutex::new(ProcessMessages::get_instance(Some(manager), axis_id)),
                 process_series: init.process_series,
                 process_result_display: Mutex::new(init.process_result_display),
                 parse_log_file: AtomicBool::new(true),
@@ -474,7 +480,7 @@ impl ComScriptProcess {
                 self.error.store(true, Ordering::SeqCst);
                 self.process_messages.lock().unwrap().add_message(
                     MessageType::Error,
-                    format!("{} is already running", self.com_script_name),
+                    &format!("{} is already running", self.com_script_name),
                 );
                 self.run_msg_com_script_done(1);
                 return Ok(());
@@ -494,7 +500,7 @@ impl ComScriptProcess {
                     let vmstopy = self.vmstopy.lock().unwrap().clone();
                     if let Some(message) = except {
                         let mut messages = self.process_messages.lock().unwrap();
-                        messages.add_message(MessageType::Error, message);
+                        messages.add_message(MessageType::Error, &message);
                         if vmstopy.is_none() {
                             messages.add_message(MessageType::Error, "vmstopy is null");
                         }
@@ -512,7 +518,7 @@ impl ComScriptProcess {
                     self.process_messages
                         .lock()
                         .unwrap()
-                        .add_message(MessageType::Error, message);
+                        .add_message(MessageType::Error, &message);
                 }
             }
             if let Err(except) = self.parse() {
@@ -522,7 +528,7 @@ impl ComScriptProcess {
                         .process_messages
                         .lock()
                         .unwrap()
-                        .add_message(MessageType::Error, message),
+                        .add_message(MessageType::Error, &message),
                 }
             }
             Ok(())
@@ -801,7 +807,7 @@ impl ComScriptProcess {
         if vmstopy.get_exit_value() != 0 {
             self.process_messages.lock().unwrap().add_message(
                 MessageType::Error,
-                format!("Running vmstopy against {} failed", self.com_script_name),
+                &format!("Running vmstopy against {} failed", self.com_script_name),
             );
             return Err(None);
         }
@@ -857,8 +863,8 @@ impl ComScriptProcess {
         }
         let mut messages = self.process_messages.lock().unwrap();
         messages
-            .add_process_output_file(log_file_to_parse.get_file())
-            .map_err(|e| ParseError::Other(e.to_string()))?;
+            .add_process_output_log_file(log_file_to_parse)
+            .map_err(ParseError::from)?;
         messages.print_all();
         Ok(())
     }
@@ -908,10 +914,9 @@ impl ComScriptProcess {
     /// `OutfileComScriptProcess.getMonitorProcessMessages`.
     pub fn get_monitor_process_messages(&self) -> Option<ProcessMessages> {
         let monitor = self.outfile_monitor.as_ref()?;
-        let messages = monitor.get_process_messages()?;
-        let mut copy = ProcessMessages::get_instance();
-        copy.add_process_messages(&messages);
-        Some(copy)
+        monitor
+            .get_process_messages()
+            .map(|messages| messages.clone())
     }
 
     /// `OutfileComScriptProcess.getStatusString`.

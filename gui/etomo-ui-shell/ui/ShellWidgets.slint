@@ -5,7 +5,7 @@
 // here rather than in the common crate so nothing shared is disturbed.
 
 import {
-    EtomoStyle, EtomoBridge, BridgedTextBox, BridgedButton, BridgedComboBox,
+    EtomoStyle, EtomoBridge, ContextArea, BridgedTextBox, BridgedButton, BridgedComboBox,
 } from "../../etomo-ui-common/ui/widgets.slint";
 
 // `ComboBox` (`ComboBox.java`): `pnlRoot` is BoxLayout.X_AXIS holding a rigid
@@ -14,27 +14,31 @@ export component ComboBox inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
-    in property <length> label-width: 130px;
     in property <length> box-width: 200px;
-    alignment: start;
-    Rectangle { width: 2px; }
-    Text {
-        text: root.label;
-        width: root.label-width;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("cbb", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        alignment: start;
+        Rectangle { width: 2px; }
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        Rectangle { width: 3px; }
+        // Wired: "cbb." + the label (`ComboBox.setName`).
+        BridgedComboBox {
+            width: root.box-width;
+            kind: "cbb";
+            label: root.label;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        Rectangle { width: 2px; }
     }
-    Rectangle { width: 3px; }
-    // Wired: "cbb." + the label (`ComboBox.setName`).
-    BridgedComboBox {
-        width: root.box-width;
-        kind: "cbb";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    Rectangle { width: 2px; }
 }
 
 // `FileTextField` / `FileTextField2` (`FileTextField.java`,
@@ -45,30 +49,34 @@ export component FileTextField inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
-    in property <length> label-width: 160px;
-    Text {
-        text: root.label;
-        width: root.label-width;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
-    }
-    // Wired: the field is named "tf." + the label; the folder button is the
-    // button in the field's panel (bridge kind "fbn").
-    BridgedTextBox {
-        kind: "tf";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    Rectangle {
-        width: EtomoStyle.field-height;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.panel;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        Text { text: "📁"; horizontal-alignment: center; vertical-alignment: center; }
-        BridgedButton { kind: "fbn"; label: root.label; default-enabled: root.enabled; }
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("tf", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        // Wired: the field is named "tf." + the label; the folder button is the
+        // button in the field's panel (bridge kind "fbn").
+        BridgedTextBox {
+            kind: "tf";
+            label: root.label;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        Rectangle {
+            width: EtomoStyle.field-height;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text { text: "📁"; horizontal-alignment: center; vertical-alignment: center; }
+            BridgedButton { kind: "fbn"; label: root.label; default-enabled: root.enabled; }
+        }
     }
 }
 
@@ -77,11 +85,15 @@ export component FileTextField inherits HorizontalLayout {
 export component PlainButton inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
-    height: EtomoStyle.field-height + 4px;
+    // Wired: drawn only while the Swing component shows; it then takes no room.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("bn", root.text, true, EtomoBridge.generation);
+    height: root.shown-visible ? EtomoStyle.field-height + 4px : 0px;
     background: EtomoStyle.panel;
-    border-width: 1px;
+    border-width: root.shown-visible ? 1px : 0px;
     border-color: EtomoStyle.border;
     HorizontalLayout {
+        visible: root.shown-visible;
         padding-left: 10px;
         padding-right: 10px;
         Text {
@@ -95,83 +107,55 @@ export component PlainButton inherits Rectangle {
     area := BridgedButton { kind: "bn"; label: root.text; default-enabled: root.enabled; }
 }
 
-// `javax.swing.JList` inside a `JScrollPane`, as `SettingsDialog` uses for the
-// font-family list (SINGLE_SELECTION, visible row count 3).  Static rows.
-export component ScrollList inherits Rectangle {
-    in property <[string]> rows;
-    in property <int> selected: 0;
-    in property <int> visible-rows: 3;
-    height: EtomoStyle.field-height * root.visible-rows;
-    background: EtomoStyle.field-background;
-    border-width: 1px;
-    border-color: EtomoStyle.border;
-    HorizontalLayout {
-        padding: 1px;
-        VerticalLayout {
-            alignment: start;
-            for row[index] in root.rows: Rectangle {
-                height: EtomoStyle.field-height;
-                background: index == root.selected ? #b0c4de : EtomoStyle.field-background;
-                HorizontalLayout {
-                    padding-left: 3px;
-                    Text {
-                        text: row;
-                        vertical-alignment: center;
-                        color: EtomoStyle.text;
-                    }
-                }
-            }
-        }
-        // The JScrollPane's vertical bar.
-        Rectangle {
-            width: 14px;
-            background: EtomoStyle.panel;
-            border-width: 1px;
-            border-color: EtomoStyle.border;
-        }
-    }
-}
-
 // `Spinner` (`Spinner.java`) laid out horizontally with its label, as
 // `ParallelDialog` and `FilterFullVolumePanel` place it in an X_AXIS row.
 // Same shape as the common `LabeledSpinner`, but sized to its label instead of
 // a fixed 180px column.
 export component InlineSpinner inherits HorizontalLayout {
     in property <string> label;
+    // Wired: "#N" when the dialog draws N showing spinners with this label;
+    // appended to the bridge label.
+    in property <string> occurrence;
     in property <string> text;
     in property <bool> enabled: true;
-    spacing: EtomoStyle.gap;
-    alignment: start;
-    Text {
-        text: root.label;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
-    }
-    // Wired: "sp." + the label.
-    BridgedTextBox {
-        width: 60px;
-        kind: "sp";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    Rectangle {
-        width: 14px;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.panel;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        VerticalLayout {
-            Text {
-                text: "^";
-                horizontal-alignment: center;
-                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, true); } }
-            }
-            Text {
-                text: "v";
-                horizontal-alignment: center;
-                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, false); } }
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("sp", root.label + root.occurrence, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        // Wired: "sp." + the label.
+        BridgedTextBox {
+            width: 60px;
+            kind: "sp";
+            label: root.label + root.occurrence;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        Rectangle {
+            width: 14px;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            VerticalLayout {
+                Text {
+                    text: "^";
+                    horizontal-alignment: center;
+                    TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, true); } }
+                }
+                Text {
+                    text: "v";
+                    horizontal-alignment: center;
+                    TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, false); } }
+                }
             }
         }
     }
@@ -182,24 +166,33 @@ export component InlineSpinner inherits HorizontalLayout {
 // labelled fields side by side.
 export component InlineTextField inherits HorizontalLayout {
     in property <string> label;
+    // Wired: "#N" when the dialog draws N showing fields with this label;
+    // appended to the bridge label.
+    in property <string> occurrence;
     in property <string> text;
     in property <bool> enabled: true;
     in property <length> field-width: 120px;
-    spacing: EtomoStyle.gap;
-    alignment: start;
-    Text {
-        text: root.label;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
-    }
-    // Wired: "tf." + the label.
-    BridgedTextBox {
-        width: root.field-width;
-        kind: "tf";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("tf", root.label + root.occurrence, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        // Wired: "tf." + the label.
+        BridgedTextBox {
+            width: root.field-width;
+            kind: "tf";
+            label: root.label + root.occurrence;
+            text: root.text;
+            enabled: root.enabled;
+        }
     }
 }
 
@@ -223,30 +216,35 @@ export component Spinner inherits HorizontalLayout {
     in property <string> text;
     in property <bool> enabled: true;
     in property <length> box-width: 50px;
-    alignment: start;
-    BridgedTextBox {
-        width: root.box-width;
-        kind: "sp";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    Rectangle {
-        width: 14px;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.panel;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        VerticalLayout {
-            Text {
-                text: "^";
-                horizontal-alignment: center;
-                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, true); } }
-            }
-            Text {
-                text: "v";
-                horizontal-alignment: center;
-                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, false); } }
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("sp", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        alignment: start;
+        BridgedTextBox {
+            width: root.box-width;
+            kind: "sp";
+            label: root.label;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        Rectangle {
+            width: 14px;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            VerticalLayout {
+                Text {
+                    text: "^";
+                    horizontal-alignment: center;
+                    TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, true); } }
+                }
+                Text {
+                    text: "v";
+                    horizontal-alignment: center;
+                    TouchArea { clicked => { EtomoBridge.toggled("sp", root.label, false); } }
+                }
             }
         }
     }
@@ -259,7 +257,9 @@ export component TextField inherits BridgedTextBox {
     // it); not drawn.
     in property <bool> editable: true;
     kind: "tf";
-    width: 100px;
+    // A `JTextField`'s maximum width is unbounded: it keeps this preferred
+    // width only where its row does not stretch it.
+    preferred-width: root.shown-visible ? 100px : 0px;
 }
 
 // `TextArea` (`TextArea.java`) inside a `JScrollPane`.  `rows` and `columns`
@@ -302,12 +302,19 @@ export component TextArea inherits Rectangle {
 // the box, and an empty title draws no row at all.
 export component EtchedBorder inherits Rectangle {
     in property <string> title;
+    // Wired: false while the titled panel is not showing (`visible-value`
+    // "brd"); the box then takes no room.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.title == ""
+        || EtomoBridge.visible-value("brd", root.title, true, EtomoBridge.generation);
+    height: root.shown-visible ? etched-layout.preferred-height : 0px;
     background: EtomoStyle.panel;
-    border-width: 1px;
+    border-width: root.shown-visible ? 1px : 0px;
     border-color: EtomoStyle.border;
-    VerticalLayout {
+    ContextArea { kind: "brd"; label: root.title; visible: root.shown-visible; }
+    etched-layout := VerticalLayout {
+        visible: root.shown-visible;
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
         if root.title != "": Text {
             text: root.title;
             font-size: EtomoStyle.font-size-pt * 1px;
@@ -362,11 +369,15 @@ export component SingleLineButton inherits Rectangle {
     property <string> shown-text: EtomoBridge.wired
         ? EtomoBridge.text-value("bn", root.labels, root.text, EtomoBridge.generation)
         : root.text;
-    height: EtomoStyle.field-height + 2px;
+    // Wired: drawn only while the Swing component shows; it then takes no room.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("bn", root.labels, true, EtomoBridge.generation);
+    height: root.shown-visible ? EtomoStyle.field-height + 2px : 0px;
     background: EtomoStyle.panel;
-    border-width: 2px;
+    border-width: root.shown-visible ? 2px : 0px;
     border-color: EtomoStyle.border;
     HorizontalLayout {
+        visible: root.shown-visible;
         padding-left: 10px;
         padding-right: 10px;
         Text {
@@ -393,22 +404,28 @@ export component ButtonControlTextEfield inherits HorizontalLayout {
     in property <bool> enabled: true;
     in property <bool> clear-button: true;
     in property <length> field-width: 200px;
-    spacing: 2px;
-    alignment: start;
-    if root.label != "": Text {
-        text: root.label;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("tf", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: 2px;
+        alignment: start;
+        if root.label != "": Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        // Wired: `TextEfield.setName`, "tf." + the label.
+        BridgedTextBox {
+            width: root.field-width;
+            kind: "tf";
+            label: root.label;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        Ebutton { glyph: "📁"; enabled: root.enabled; field-label: root.label; }
+        if root.clear-button: Ebutton { glyph: "🧽"; enabled: root.enabled; }
     }
-    // Wired: `TextEfield.setName`, "tf." + the label.
-    BridgedTextBox {
-        width: root.field-width;
-        kind: "tf";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    Ebutton { glyph: "📁"; enabled: root.enabled; field-label: root.label; }
-    if root.clear-button: Ebutton { glyph: "🧽"; enabled: root.enabled; }
 }

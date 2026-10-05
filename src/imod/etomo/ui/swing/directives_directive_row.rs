@@ -1,653 +1,1022 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/DirectivesDirectiveRow.java`.
 //!
-//! The owning table, dialog, section row, directive storage, autodoc writer,
-//! validation pop-up and Swing layout are neighbouring source units.  This
-//! module preserves the row's construction branches and forwarding order, and
-//! keeps each of those calls at an explicit boundary.
-#![allow(dead_code)]
+//! A row associated with one directive in the Directives Editor (the advanced
+//! batchruntomo dataset dialog).  An event dispatch thread object, created as
+//! `Rc<Self>`.  Exactly one of the four value fields exists, chosen by the
+//! directive's value type.
+//!
+//! Java `implements DirectiveInterface` (`setValue(boolean)`, `setValue(String)`,
+//! `resetValue()`): the methods are inherent here.  The interface is only reached
+//! through `DirectivesTable.RowList`'s `DirectiveMapInterface` binding, which only the
+//! never-called `DirectivesDialog.setValues(BaseManager)` uses (DEAD_CODE.md); the
+//! translated `DirectiveInterface` is a thread-shared trait an event dispatch thread
+//! row cannot implement.
 
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
 
-use crate::imod::etomo::base_manager::BaseManager;
-
-use super::appearance_extension::FlagType;
-use super::batch_run_tomo_step_panel::BatchRunTomoStatus;
-use super::cell::{CellGridBagConstraintsBoundary, CellGridBagLayoutBoundary, CellPanelBoundary};
+use super::boolean_combo_box_efield::BooleanComboBoxEfield;
+use super::button_control_text_efield::ButtonControlTextEfield;
+use super::combo_box_efield::ComboBoxEfield;
+use super::control_target::ControlTarget;
+use super::directives_dialog::DirectivesDialog;
 use super::directives_row::DirectivesRow;
+use super::directives_section_row::DirectivesSectionRow;
+use super::ebutton::Ebutton;
+use super::popup::Popup;
+use super::select_file_extension::SelectFileExtension;
+use super::text_efield::TextEfield;
 use super::toggle_ebutton::ToggleEbutton;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::{GRID_BAG_REMAINDER, GridBagConstraints, GridBagLayout, JComponent};
+use crate::imod::etomo::logic::batch_tool::{self, TemplateValues};
+use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+use crate::imod::etomo::storage::directive_adaptor::DirectiveAdaptor;
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::storage::directive_descr_choice_list::DirectiveDescrChoiceList;
+use crate::imod::etomo::storage::directive_descr_element::DirectiveDescrElement;
+use crate::imod::etomo::storage::directive_descr_etomo_column::DirectiveDescrEtomoColumn;
+use crate::imod::etomo::storage::directive_file_interface::DirectiveFileInterface;
+use crate::imod::etomo::storage::directive_value_type::DirectiveValueType;
+use crate::imod::etomo::r#type::batch_run_tomo_status::BatchRunTomoStatus;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
+use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
+use crate::imod::etomo::ui::flag_display::FlagDisplay;
+use crate::imod::etomo::ui::flag_type::FlagType;
+use crate::imod::etomo::ui::row_listener::RowListener;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 
-/// Java `DirectiveValueType` as read from a directive-description row.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DirectiveValueType {
-    Boolean,
-    File,
-    String,
-    Integer,
-    FloatingPoint,
-}
-
-/// Java `DirectiveDef`, whose storage identity is used by this row.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct DirectiveDef(pub String);
-impl std::fmt::Display for DirectiveDef {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-/// Java `DirectiveValue` returned by `BatchTool.setTextValue`.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct DirectiveValue {
-    pub override_value: bool,
-    pub batch: bool,
-}
-
-/// Calls from this row to the real `DirectivesDialog` source unit.
-pub trait DirectivesDialogBoundary {
-    fn is_show_for_template_only(&self) -> bool;
-    fn is_show_included_only(&self) -> bool;
-    fn is_show_if_set(&self) -> bool;
-    fn add_row_listener(&mut self);
+thread_local! {
+    /// Java private static `select_file_extension`, initially null: the file chooser
+    /// definition shared by every file row.
+    static SELECT_FILE_EXTENSION: RefCell<Option<Rc<SelectFileExtension>>> =
+        const { RefCell::new(None) };
 }
 
-/// Calls from this row to the real `DirectivesSectionRow` source unit.
-pub trait DirectivesSectionRowBoundary {
-    fn get_title(&self) -> String;
-    fn add_directive(&mut self);
-}
-
-/// Java `Ebutton` state reached by this source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct EbuttonBoundary {
-    pub text: String,
-    pub visible: bool,
-    pub enabled: bool,
-    pub selected: bool,
-    pub tooltip: Option<String>,
-    pub horizontal_alignment_right: bool,
-    pub removed: bool,
-}
-impl EbuttonBoundary {
-    pub fn get_header_instance(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            visible: true,
-            enabled: true,
-            ..Default::default()
-        }
-    }
-    pub fn set_visible(&mut self, visible: bool) {
-        self.visible = visible;
-    }
-    pub fn remove(&mut self) {
-        self.removed = true;
-    }
-}
-
-/// Source-visible common field operations.  The concrete combo/text/file
-/// widgets remain their own Java source units; this state records exactly the
-/// messages `DirectivesDirectiveRow` sends to one of them.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DirectiveFieldBoundary {
-    pub text: String,
-    pub empty: bool,
-    pub selected: bool,
-    pub override_value: bool,
-    pub template_value: bool,
-    pub enabled: bool,
-    pub editable: bool,
-    pub visible: bool,
-    pub backup: Option<String>,
-    pub checkpoint: Option<String>,
-    pub removed: bool,
-    pub directive_def: Option<DirectiveDef>,
-    pub location_descr: Option<String>,
-    pub flag_errors: bool,
-    /// Java `getFlagType()` from the field's appearance extension.
-    pub flag_type: Option<FlagType>,
-}
-impl DirectiveFieldBoundary {
-    fn new() -> Self {
-        Self {
-            empty: true,
-            enabled: true,
-            editable: true,
-            visible: true,
-            ..Default::default()
-        }
-    }
-    fn set_text(&mut self, text: impl Into<String>) {
-        self.text = text.into();
-        self.empty = self.text.is_empty();
-    }
-    fn clear(&mut self) {
-        self.text.clear();
-        self.empty = true;
-    }
-    fn backup(&mut self) {
-        self.backup = Some(self.text.clone());
-    }
-    fn checkpoint(&mut self) {
-        self.checkpoint = Some(self.text.clone());
-    }
-    fn restore_from_backup(&mut self) {
-        if let Some(text) = self.backup.clone() {
-            self.set_text(text);
-        }
-    }
-}
-
-/// Java final `DirectivesDirectiveRow`.
+/// Java `final class DirectivesDirectiveRow implements DirectivesRow,
+/// DirectiveInterface, RowListener`.
 pub struct DirectivesDirectiveRow {
-    pub h_title: EbuttonBoundary,
-    pub bcb_value: Option<DirectiveFieldBoundary>,
-    pub cb_value: Option<DirectiveFieldBoundary>,
-    pub tf_value: Option<DirectiveFieldBoundary>,
-    pub bctf_value: Option<DirectiveFieldBoundary>,
-    pub etomo_column: Option<bool>,
-    pub value_type: DirectiveValueType,
-    pub directive_def: DirectiveDef,
-    pub description_available: bool,
-    pub manager: Option<&'static dyn BaseManager>,
-    pub h_empty: Option<EbuttonBoundary>,
-    pub tbtn_override_toggle: Option<ToggleEbutton>,
-    pub open: bool,
-    pub show_for_template_only: bool,
-    pub show_included_only: bool,
-    pub debug: bool,
-    pub show_if_set: bool,
+    /// Java private final `hTitle`.
+    h_title: Rc<Ebutton>,
+    /// Java private final `bcbValue`.
+    bcb_value: Option<Rc<BooleanComboBoxEfield>>,
+    /// Java private final `cbValue`.
+    cb_value: Option<Rc<ComboBoxEfield>>,
+    /// Java private final `tfValue`.
+    tf_value: Option<Rc<TextEfield>>,
+    /// Java private final `bctfValue`.
+    bctf_value: Option<Rc<ButtonControlTextEfield>>,
+    /// Java private final `etomoColumn`.
+    #[allow(dead_code)]
+    etomo_column: Option<DirectiveDescrEtomoColumn>,
+    /// Java private final `valueType`.
+    #[allow(dead_code)]
+    value_type: DirectiveValueType,
+    /// Java private final `directiveDef`.
+    directive_def: Option<DirectiveDef>,
+    /// Java private final `descriptionAvailable`.
+    #[allow(dead_code)]
+    description_available: bool,
+    /// Java private final `manager`.
+    #[allow(dead_code)]
+    manager: &'static dyn BaseManager,
+    /// Java private final `dialog`.
+    dialog: Weak<DirectivesDialog>,
+    /// Java private final `hEmpty`.
+    h_empty: Option<Rc<Ebutton>>,
+    /// Java private final `tbtnOverrideToggle`.
+    tbtn_override_toggle: Option<Rc<ToggleEbutton>>,
+    /// Java private final `section`.
+    section: Rc<DirectivesSectionRow>,
+
+    /// Java private `open`, initially false.
+    open: Cell<bool>,
+    /// Java private `showForTemplateOnly`, initially true.
+    show_for_template_only: Cell<bool>,
+    /// Java private `showIncludedOnly`, initially false.
+    show_included_only: Cell<bool>,
+    /// Java private `debug`, initially false.
+    #[allow(dead_code)]
+    debug: Cell<bool>,
+    /// Java private `showIfSet`, initially false.
+    show_if_set: Cell<bool>,
+}
+
+/// The section row as the `FlagDisplay` the value fields report to.
+fn section_flag_display(section: &Rc<DirectivesSectionRow>) -> Option<Rc<dyn FlagDisplay>> {
+    Some(section.clone() as Rc<dyn FlagDisplay>)
 }
 
 impl DirectivesDirectiveRow {
-    /// Java private description-row constructor.  `title`, `value_type`, and
-    /// `is_choice_list` are the values extracted by `DirectiveDescrElement`.
-    pub fn new_description(
-        manager: Option<&'static dyn BaseManager>,
-        title: String,
-        section_title: String,
-        value_type: DirectiveValueType,
+    /// Java private `DirectivesDirectiveRow(BaseManager, DirectivesDialog,
+    /// DirectivesSectionRow, String[], boolean, boolean, DirectiveDef, boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    fn new_line_array(
+        manager: &'static dyn BaseManager,
+        dialog: &Rc<DirectivesDialog>,
+        section: Rc<DirectivesSectionRow>,
+        line_array: Option<&[String]>,
         is_choice_list: bool,
-        directive_def: DirectiveDef,
+        _dialog_mode: bool,
+        directive_def: Option<DirectiveDef>,
         debug: bool,
-    ) -> Self {
-        let mut h_title = EbuttonBoundary::get_header_instance(title);
-        h_title.enabled = false; // Java setAllowFlagEditableControl(false) boundary.
-        let mut row = Self {
+    ) -> Rc<DirectivesDirectiveRow> {
+        let etomo_column = DirectiveDescrElement::get_etomo_column_from_line_array(line_array);
+        // Set the title
+        let title = if DirectiveDescrElement::is_label(line_array) {
+            DirectiveDescrElement::get_label_from_line_array(line_array)
+        } else if let Some(directive_def) = directive_def {
+            Some(directive_def.to_string())
+        } else {
+            DirectiveDescrElement::get_name_from_line_array(line_array)
+        };
+        let h_title = Ebutton::get_header_instance_string(title.as_deref());
+        h_title.set_allow_flag_editable_control(false);
+        let value_type = DirectiveDescrElement::get_value_type_from_line_array(line_array);
+        let section_title = section.get_title();
+        let h_title_display: Option<Rc<dyn FlagDisplay>> =
+            Some(h_title.clone() as Rc<dyn FlagDisplay>);
+        let mut bcb_value = None;
+        let mut cb_value = None;
+        let mut tf_value = None;
+        let mut bctf_value = None;
+        let mut h_empty = None;
+        let mut tbtn_override_toggle = None;
+        if value_type == DirectiveValueType::Boolean {
+            let field = BooleanComboBoxEfield::new(title.as_deref());
+            field.set_directive_def(directive_def);
+            field.add_flag_display(h_title_display.clone());
+            field.add_final_flag_display(section_flag_display(&section));
+            bcb_value = Some(field);
+            h_empty = Some(Ebutton::get_header_instance_void());
+        } else if is_choice_list {
+            let field = ComboBoxEfield::get_override_instance(title.as_deref(), true);
+            field.set_directive_def(directive_def);
+            field.add_flag_display(h_title_display.clone());
+            field.add_final_flag_display(section_flag_display(&section));
+            let toggle = ToggleEbutton::get_override_instance(Some(
+                Rc::downgrade(&field) as Weak<dyn ControlTarget>
+            ));
+            field.add_flag_display(Some(toggle.clone() as Rc<dyn FlagDisplay>));
+            tbtn_override_toggle = Some(toggle);
+            cb_value = Some(field);
+        } else if value_type == DirectiveValueType::File {
+            let shared = SELECT_FILE_EXTENSION.with(|extension| extension.borrow().clone());
+            let field =
+                ButtonControlTextEfield::get_file_override_instance(title.as_deref(), shared, false);
+            if SELECT_FILE_EXTENSION.with(|extension| extension.borrow().is_none()) {
+                let select_file_extension = field.get_select_file_extension();
+                SELECT_FILE_EXTENSION
+                    .with(|extension| *extension.borrow_mut() = select_file_extension.clone());
+                if let Some(select_file_extension) = select_file_extension {
+                    select_file_extension
+                        .set_alt_browsing_directory(dialog.get_browsing_directory());
+                }
+            }
+            if directive_def == Some(DirectiveDef::DISTORT)
+                || directive_def == Some(DirectiveDef::GRADIENT)
+                || directive_def == Some(DirectiveDef::CTF_NOISE)
+            {
+                field.set_override_file_open_directory(dialog.get_calibration_dir());
+                field.set_file_only(true);
+                field.set_file_must_exist(true);
+                field.set_flag_errors();
+            }
+            field.set_columns();
+            field.set_directive_def(directive_def);
+            field.set_location_descr(Some(&section_title));
+            field.add_final_flag_display(section_flag_display(&section));
+            field.add_flag_display(h_title_display.clone());
+            let toggle = ToggleEbutton::get_override_instance(Some(
+                Rc::downgrade(&field) as Weak<dyn ControlTarget>
+            ));
+            field.add_flag_display(Some(toggle.clone() as Rc<dyn FlagDisplay>));
+            tbtn_override_toggle = Some(toggle);
+            bctf_value = Some(field);
+        } else {
+            let field = TextEfield::get_override_instance(title.as_deref(), Some(value_type));
+            field.set_columns();
+            field.set_directive_def(directive_def);
+            field.set_flag_errors();
+            field.add_flag_display(h_title_display.clone());
+            field.add_final_flag_display(section_flag_display(&section));
+            field.set_location_descr(Some(&section_title));
+            let toggle = ToggleEbutton::get_override_instance(Some(
+                Rc::downgrade(&field) as Weak<dyn ControlTarget>
+            ));
+            field.add_flag_display(Some(toggle.clone() as Rc<dyn FlagDisplay>));
+            tbtn_override_toggle = Some(toggle);
+            tf_value = Some(field);
+        }
+        // init
+        if let Some(toggle) = &tbtn_override_toggle {
+            toggle.set_enabled(false);
+        }
+        Rc::new(DirectivesDirectiveRow {
             h_title,
-            bcb_value: None,
-            cb_value: None,
-            tf_value: None,
-            bctf_value: None,
-            etomo_column: None,
+            bcb_value,
+            cb_value,
+            tf_value,
+            bctf_value,
+            etomo_column,
             value_type,
             directive_def,
             description_available: true,
             manager,
-            h_empty: None,
-            tbtn_override_toggle: None,
-            open: false,
-            show_for_template_only: true,
-            show_included_only: false,
-            debug,
-            show_if_set: false,
-        };
-        if value_type == DirectiveValueType::Boolean {
-            row.bcb_value = Some(DirectiveFieldBoundary::new());
-            row.h_empty = Some(EbuttonBoundary::get_header_instance(""));
-        } else if is_choice_list {
-            row.cb_value = Some(DirectiveFieldBoundary::new());
-            row.tbtn_override_toggle = Some(ToggleEbutton::get_override_instance(None));
-        } else if value_type == DirectiveValueType::File {
-            let mut field = DirectiveFieldBoundary::new();
-            field.location_descr = Some(section_title);
-            row.bctf_value = Some(field);
-            row.tbtn_override_toggle = Some(ToggleEbutton::get_override_instance(None));
-        } else {
-            let mut field = DirectiveFieldBoundary::new();
-            field.location_descr = Some(section_title);
-            field.flag_errors = true;
-            row.tf_value = Some(field);
-            row.tbtn_override_toggle = Some(ToggleEbutton::get_override_instance(None));
-        }
-        if let Some(toggle) = &mut row.tbtn_override_toggle {
-            toggle.set_enabled(false);
-        }
-        row
+            dialog: Rc::downgrade(dialog),
+            h_empty,
+            tbtn_override_toggle,
+            section,
+            open: Cell::new(false),
+            show_for_template_only: Cell::new(true),
+            show_included_only: Cell::new(false),
+            debug: Cell::new(debug),
+            show_if_set: Cell::new(false),
+        })
     }
 
-    /// Java private `DirectiveAdaptor` constructor.
-    pub fn new_adaptor(
-        manager: Option<&'static dyn BaseManager>,
-        title: String,
-        section_title: String,
-        directive_def: DirectiveDef,
-    ) -> Self {
-        let mut row = Self::new_description(
-            manager,
-            title,
-            section_title,
-            DirectiveValueType::String,
-            false,
+    /// Java private `DirectivesDirectiveRow(BaseManager, DirectivesDialog,
+    /// DirectivesSectionRow, DirectiveAdaptor, boolean)`.
+    fn new_directive(
+        manager: &'static dyn BaseManager,
+        dialog: &Rc<DirectivesDialog>,
+        section: Rc<DirectivesSectionRow>,
+        directive: &mut DirectiveAdaptor,
+        _dialog_mode: bool,
+    ) -> Rc<DirectivesDirectiveRow> {
+        let directive_def = directive.get_directive_def();
+        // Set the title (Java dereferences the directive def; the table only builds
+        // a row for a recognized one).
+        let title = directive_def.map(|directive_def| directive_def.to_string());
+        let h_title = Ebutton::get_header_instance_string(title.as_deref());
+        h_title.set_allow_flag_editable_control(false);
+        let value_type = DirectiveValueType::String;
+        let tf_value = TextEfield::get_override_instance(title.as_deref(), Some(value_type));
+        tf_value.set_columns();
+        tf_value.set_directive_def(directive_def);
+        tf_value.set_flag_errors();
+        tf_value.add_flag_display(Some(h_title.clone() as Rc<dyn FlagDisplay>));
+        tf_value.add_final_flag_display(section_flag_display(&section));
+        tf_value.set_location_descr(Some(&section.get_title()));
+        let tbtn_override_toggle = ToggleEbutton::get_override_instance(Some(
+            Rc::downgrade(&tf_value) as Weak<dyn ControlTarget>
+        ));
+        tf_value.add_flag_display(Some(tbtn_override_toggle.clone() as Rc<dyn FlagDisplay>));
+        // init
+        tbtn_override_toggle.set_enabled(false);
+        Rc::new(DirectivesDirectiveRow {
+            h_title,
+            bcb_value: None,
+            cb_value: None,
+            tf_value: Some(tf_value),
+            bctf_value: None,
+            etomo_column: None,
+            value_type,
             directive_def,
-            false,
+            description_available: false,
+            manager,
+            dialog: Rc::downgrade(dialog),
+            h_empty: None,
+            tbtn_override_toggle: Some(tbtn_override_toggle),
+            section,
+            open: Cell::new(false),
+            show_for_template_only: Cell::new(true),
+            show_included_only: Cell::new(false),
+            debug: Cell::new(false),
+            show_if_set: Cell::new(false),
+        })
+    }
+
+    /// Java package-private static `getInstance(BaseManager, DirectivesDialog,
+    /// DirectivesSectionRow, String[], JPanel, GridBagLayout, GridBagConstraints,
+    /// boolean, DirectiveDef, boolean)`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn get_instance_line_array(
+        manager: &'static dyn BaseManager,
+        dialog: &Rc<DirectivesDialog>,
+        section: Rc<DirectivesSectionRow>,
+        line_array: Option<&[String]>,
+        dialog_mode: bool,
+        directive_def: Option<DirectiveDef>,
+        debug: bool,
+    ) -> Rc<DirectivesDirectiveRow> {
+        let choice_list = DirectiveDescrElement::get_choice_list_from_line_array(line_array);
+        // Create and setup instance
+        let instance = DirectivesDirectiveRow::new_line_array(
+            manager,
+            dialog,
+            section.clone(),
+            line_array,
+            choice_list.is_some(),
+            dialog_mode,
+            directive_def,
+            debug,
         );
-        row.description_available = false;
-        row
+        instance.create_panel(choice_list.as_ref());
+        instance.add_listeners();
+        section.add_directive(instance.clone());
+        instance.set_tooltips(line_array);
+        instance
     }
 
-    /// Java static `getInstance` post-construction sequence.
-    pub fn get_instance<D: DirectivesDialogBoundary, S: DirectivesSectionRowBoundary>(
-        mut row: Self,
-        dialog: &mut D,
-        section: Option<&mut S>,
-        choice_list_present: bool,
-        tooltip: String,
-    ) -> Self {
-        row.create_panel(choice_list_present);
-        row.add_listeners(dialog);
-        if let Some(section) = section {
-            section.add_directive();
-        }
-        row.set_tooltips(tooltip);
-        row
+    /// Java package-private static `getInstance(BaseManager, DirectivesDialog,
+    /// DirectivesSectionRow, DirectiveAdaptor, boolean)`.
+    pub fn get_instance_directive(
+        manager: &'static dyn BaseManager,
+        dialog: &Rc<DirectivesDialog>,
+        section: Rc<DirectivesSectionRow>,
+        directive: &mut DirectiveAdaptor,
+        dialog_mode: bool,
+    ) -> Rc<DirectivesDirectiveRow> {
+        // Create and setup instance
+        let instance =
+            DirectivesDirectiveRow::new_directive(manager, dialog, section.clone(), directive, dialog_mode);
+        instance.create_panel(None);
+        instance.add_listeners();
+        section.add_directive(instance.clone());
+        instance.set_tooltips(None);
+        instance
     }
 
-    /// Java `toString()`.
-    pub fn to_string_value(&self) -> String {
-        self.h_title.text.clone()
+    fn dialog(&self) -> Option<Rc<DirectivesDialog>> {
+        self.dialog.upgrade()
     }
-    pub fn get_directive_def(&self) -> &DirectiveDef {
-        &self.directive_def
-    }
-    #[allow(non_snake_case)]
-    pub fn getUIComponent(&self) -> &Self {
-        self
-    }
-    #[allow(non_snake_case)]
-    pub fn isEnabled(&self) -> bool {
-        self.field().is_none_or(|field| field.enabled)
-    }
-    #[allow(non_snake_case)]
-    pub fn isEditable(&self) -> bool {
-        self.field().is_none_or(|field| field.editable)
+
+    /// Java package-private `getDirectiveDef()`.
+    pub fn get_directive_def(&self) -> Option<DirectiveDef> {
+        self.directive_def
     }
 
     /// Java private `createPanel(DirectiveDescrChoiceList)`.
-    pub fn create_panel(&mut self, _choice_list_present: bool) {
-        self.h_title.horizontal_alignment_right = true;
-        self.row_event_values(true, false, false);
+    fn create_panel(&self, choice_list: Option<&DirectiveDescrChoiceList>) {
+        // init: `hTitle.setHorizontalAlignment(SwingConstants.RIGHT)`.
+        self.h_title.set_horizontal_alignment(4);
+        if let (Some(cb_value), Some(choice_list)) = (&self.cb_value, choice_list) {
+            cb_value.set_choice_list(choice_list);
+        }
+        self.row_event();
     }
-    /// Java private `addListeners()`.
-    pub fn add_listeners<D: DirectivesDialogBoundary>(&mut self, dialog: &mut D) {
-        dialog.add_row_listener();
-    }
-    /// Java `statusChanged(BatchRunTomoStatus)`; `None` is Java null.
-    pub fn status_changed_nullable(&mut self, status: Option<BatchRunTomoStatus>) {
-        self.set_editable(status.is_none_or(|value| value == BatchRunTomoStatus::Open));
-    }
-    pub fn set_editable(&mut self, editable: bool) {
-        if let Some(v) = &mut self.bcb_value {
-            v.editable = editable;
-        } else if let Some(v) = &mut self.cb_value {
-            v.editable = editable;
-        } else if let Some(v) = &mut self.bctf_value {
-            v.editable = editable;
-        } else if let Some(v) = &mut self.tf_value {
-            v.editable = editable;
+
+    /// Java private `addListeners()`.  Listen to the checkboxes in the show panel.
+    fn add_listeners(self: &Rc<Self>) {
+        if let Some(dialog) = self.dialog() {
+            dialog.add_row_listener(self.clone() as Rc<dyn RowListener>);
         }
     }
-    /// Java `setValue(boolean)`.
-    pub fn set_value_boolean(&mut self, value: bool) {
-        if let Some(v) = &mut self.bcb_value {
-            v.selected = value;
-            v.empty = false;
-            v.text = if value { "1".into() } else { "0".into() };
+
+    /// Java public `setEditable(boolean)`.
+    pub fn set_editable(&self, editable: bool) {
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.set_editable(editable);
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.set_editable(editable);
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.set_editable(editable);
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.set_editable(editable);
         }
     }
-    /// Java `setValue(String)`.
-    pub fn set_value_string(&mut self, value: impl Into<String>) {
-        let value = value.into();
-        if let Some(v) = &mut self.cb_value {
-            v.set_text(value);
-        } else if let Some(v) = &mut self.bctf_value {
-            v.set_text(value);
-        } else if let Some(v) = &mut self.tf_value {
-            v.set_text(value);
+
+    /// Java package-private `saveAutodoc(WritableAutodoc, boolean, FieldDisplayer,
+    /// Map<DirectiveDef, String>, boolean) throws FieldValidationFailedException`.
+    pub fn save_autodoc(
+        &self,
+        autodoc: *mut Autodoc,
+        do_validation: bool,
+        field_displayer: Option<&dyn FieldDisplayer>,
+        template_values: Option<&TemplateValues>,
+        validate_only: bool,
+    ) -> Result<(), FieldValidationFailedException> {
+        if validate_only && !do_validation {
+            return Ok(());
         }
+        let override_available = self.tbtn_override_toggle.is_some();
+        let override_ = override_available
+            && self
+                .tbtn_override_toggle
+                .as_ref()
+                .is_some_and(|toggle| toggle.is_selected());
+        if let Some(bcb_value) = &self.bcb_value {
+            batch_tool::save_text_to_autodoc_efield(
+                Some(&**bcb_value),
+                bcb_value.get_text().as_deref(),
+                autodoc,
+                template_values,
+                validate_only,
+            )?;
+        } else if let Some(cb_value) = &self.cb_value {
+            batch_tool::save_text_to_autodoc_efield_override(
+                &**cb_value,
+                cb_value.get_text().as_deref(),
+                override_available,
+                override_,
+                autodoc,
+                template_values,
+                validate_only,
+            )?;
+        } else if let Some(bctf_value) = &self.bctf_value {
+            let text = bctf_value.get_text_boolean_field_displayer_field_displayer(
+                do_validation,
+                field_displayer,
+                Some(&*self.section as &dyn FieldDisplayer),
+            )?;
+            batch_tool::save_text_to_autodoc_efield_override(
+                &**bctf_value,
+                text.as_deref(),
+                override_available,
+                override_,
+                autodoc,
+                template_values,
+                validate_only,
+            )?;
+        } else if let Some(tf_value) = &self.tf_value {
+            let text = tf_value.get_text_boolean_field_displayer_field_displayer(
+                do_validation,
+                field_displayer,
+                Some(&*self.section as &dyn FieldDisplayer),
+            )?;
+            batch_tool::save_text_to_autodoc_efield_override(
+                &**tf_value,
+                text.as_deref(),
+                override_available,
+                override_,
+                autodoc,
+                template_values,
+                validate_only,
+            )?;
+        }
+        Ok(())
     }
-    /// Java `setValue(DirectiveFileInterface, boolean, Map)` after the
-    /// storage `BatchTool.setTextValue` call has returned its `DirectiveValue`.
-    pub fn set_value_from_directive_value(
-        &mut self,
-        value: Option<DirectiveValue>,
-        set_field_highlight_value: bool,
-    ) {
-        let Some(value) = value else { return };
-        let Some(toggle) = &mut self.tbtn_override_toggle else {
-            return;
-        };
-        if set_field_highlight_value && !value.override_value {
-            toggle.set_enabled(true);
-        } else if value.batch {
-            if value.override_value {
-                toggle.set_enabled(true);
-            }
-            if toggle.is_enabled() {
-                toggle.set_selected(value.override_value);
-            }
-        }
-    }
-    pub fn reset_value(&mut self) {
-        self.clear_value();
-    }
-    pub fn restore_from_backup(&mut self) {
-        if let Some(v) = &mut self.bcb_value {
-            v.restore_from_backup();
-        } else if let Some(v) = &mut self.cb_value {
-            v.restore_from_backup();
-        } else if let Some(v) = &mut self.bctf_value {
-            v.restore_from_backup();
-        } else if let Some(v) = &mut self.tf_value {
-            v.restore_from_backup();
-        }
-    }
-    pub fn is_different_from_checkpoint(&self, _always_check: bool) -> bool {
-        if let Some(v) = &self.bcb_value {
-            return v.checkpoint.as_ref().is_some_and(|x| x != &v.text);
-        }
-        if let Some(v) = &self.cb_value {
-            return v.checkpoint.as_ref().is_some_and(|x| x != &v.text);
-        }
-        if let Some(v) = &self.bctf_value {
-            return v.checkpoint.as_ref().is_some_and(|x| x != &v.text);
-        }
-        self.tf_value
-            .as_ref()
-            .is_some_and(|v| v.checkpoint.as_ref().is_some_and(|x| x != &v.text))
-    }
-    pub fn clear_value(&mut self) {
-        if let Some(v) = &mut self.bcb_value {
-            v.clear();
-        } else if let Some(v) = &mut self.cb_value {
-            v.clear();
-        } else if let Some(v) = &mut self.bctf_value {
-            v.clear();
-        } else if let Some(v) = &mut self.tf_value {
-            v.clear();
-        }
-    }
-    /// Java `getFlagType()`.
-    pub fn get_flag_type(&self) -> Option<FlagType> {
-        if let Some(value) = &self.bcb_value {
-            return value.flag_type;
-        }
-        if let Some(value) = &self.cb_value {
-            return value.flag_type;
-        }
-        if let Some(value) = &self.bctf_value {
-            return value.flag_type;
-        }
-        self.tf_value.as_ref().and_then(|value| value.flag_type)
-    }
-    pub fn checkpoint(&mut self) {
-        if let Some(v) = &mut self.bcb_value {
-            v.checkpoint();
-        } else if let Some(v) = &mut self.cb_value {
-            v.checkpoint();
-        } else if let Some(v) = &mut self.bctf_value {
-            v.checkpoint();
-        } else if let Some(v) = &mut self.tf_value {
-            v.checkpoint();
-        }
-    }
-    pub fn clear_template_value(&mut self) {
-        if let Some(v) = &mut self.bcb_value {
-            v.template_value = false;
-        } else if let Some(v) = &mut self.cb_value {
-            v.template_value = false;
-        } else if let Some(v) = &mut self.bctf_value {
-            v.template_value = false;
-        } else if let Some(v) = &mut self.tf_value {
-            v.template_value = false;
-        }
-    }
-    pub fn clear(&mut self) {
-        self.clear_value();
-    }
-    pub fn backup(&mut self) {
-        if let Some(v) = &mut self.bcb_value {
-            v.backup();
-        } else if let Some(v) = &mut self.cb_value {
-            v.backup();
-        } else if let Some(v) = &mut self.bctf_value {
-            v.backup();
-        } else if let Some(v) = &mut self.tf_value {
-            v.backup();
-        }
-    }
-    pub fn remove(&mut self) {
-        self.h_title.remove();
-        if let Some(v) = &mut self.bcb_value {
-            v.removed = true;
-        } else if let Some(v) = &mut self.cb_value {
-            v.removed = true;
-        } else if let Some(v) = &mut self.bctf_value {
-            v.removed = true;
-        } else if let Some(v) = &mut self.tf_value {
-            v.removed = true;
-        }
-        if let Some(v) = &mut self.h_empty {
-            v.remove();
-        }
-        if let Some(v) = &mut self.tbtn_override_toggle {
-            v.remove();
-        }
-    }
-    /// Java `rowEvent()` after the three dialog queries.
-    pub fn row_event_values(
-        &mut self,
-        show_for_template_only: bool,
-        show_included_only: bool,
-        show_if_set: bool,
-    ) {
-        self.show_for_template_only = show_for_template_only;
-        self.show_included_only = show_included_only;
-        self.show_if_set = show_if_set;
-        self.update_visible();
-    }
-    pub fn row_event<D: DirectivesDialogBoundary>(&mut self, dialog: &D) {
-        self.row_event_values(
-            dialog.is_show_for_template_only(),
-            dialog.is_show_included_only(),
-            dialog.is_show_if_set(),
-        );
-    }
-    /// Java `canDisplay()` including the intentionally unused historical
-    /// template-only condition.
-    pub fn can_display(&self) -> bool {
-        if self.show_included_only || self.show_if_set {
-            let set = !self.is_empty() || self.is_override();
-            return (self.show_included_only && set && !self.is_template_value())
-                || (self.show_if_set && set && !self.show_included_only);
+
+    /// Java package-private `validateMutuallyExclusive(DirectivesDirectiveRow,
+    /// DirectivesDirectiveRow, String, FieldDisplayer)`.  Compares the rows, displays
+    /// this row, and pops up errMsg; returns false if invalid.
+    pub fn validate_mutually_exclusive_rows(
+        &self,
+        row1: Option<&Rc<DirectivesDirectiveRow>>,
+        row2: Option<&Rc<DirectivesDirectiveRow>>,
+        err_msg: &str,
+        field_displayer: Option<Rc<dyn FieldDisplayer>>,
+    ) -> bool {
+        // Find out how many of the mutually exclusive fields are set.
+        let nfields_set = (if self.is_set() { 1 } else { 0 })
+            + (if row1.is_some_and(|row| row.is_set()) { 1 } else { 0 })
+            + (if row2.is_some_and(|row| row.is_set()) { 1 } else { 0 });
+        if nfields_set > 1 {
+            let ui_component = self.get_ui_component();
+            Popup::get_error_instance(
+                ui_component.as_deref(),
+                Some("Mutually Exclusive Fields"),
+                Some(err_msg),
+                field_displayer,
+                Some(self.section.clone() as Rc<dyn FieldDisplayer>),
+            )
+            .open();
+            return false;
         }
         true
     }
-    pub fn set_open(&mut self, open: bool) {
-        self.open = open;
+
+    /// Java package-private `validateMutuallyExclusive(boolean, String,
+    /// FieldDisplayer)`.
+    pub fn validate_mutually_exclusive_set(
+        &self,
+        field_set: bool,
+        err_msg: &str,
+        field_displayer: Option<Rc<dyn FieldDisplayer>>,
+    ) -> bool {
+        if !self.is_empty() && field_set {
+            let ui_component = self.get_ui_component();
+            Popup::get_error_instance(
+                ui_component.as_deref(),
+                Some("Mutually Exclusive Fields"),
+                Some(err_msg),
+                field_displayer,
+                Some(self.section.clone() as Rc<dyn FieldDisplayer>),
+            )
+            .open();
+            return false;
+        }
+        true
+    }
+
+    /// Java `setValue(boolean)` (DirectiveInterface).
+    pub fn set_value_boolean(&self, value: bool) {
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.set_selected(value);
+        }
+    }
+
+    /// Java `setValue(String)` (DirectiveInterface).
+    pub fn set_value_string(&self, value: Option<&str>) {
+        if let Some(cb_value) = &self.cb_value {
+            cb_value.set_text_string(value);
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.set_text_string(value);
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.set_text_string(value);
+        }
+    }
+
+    /// Java package-private `setValue(DirectiveFileInterface, boolean, Map<DirectiveDef,
+    /// String>)`.
+    pub fn set_value(
+        &self,
+        directive_files: &dyn DirectiveFileInterface,
+        set_field_highlight_value: bool,
+        template_values: Option<&mut TemplateValues>,
+    ) {
+        let directive_value = if let Some(bcb_value) = &self.bcb_value {
+            batch_tool::set_text_value_efield(
+                Some(&**bcb_value),
+                directive_files,
+                set_field_highlight_value,
+                template_values,
+                true,
+            )
+        } else if let Some(cb_value) = &self.cb_value {
+            batch_tool::set_text_value_efield(
+                Some(&**cb_value),
+                directive_files,
+                set_field_highlight_value,
+                template_values,
+                true,
+            )
+        } else if let Some(bctf_value) = &self.bctf_value {
+            batch_tool::set_text_value_efield(
+                Some(&**bctf_value),
+                directive_files,
+                set_field_highlight_value,
+                template_values,
+                true,
+            )
+        } else if let Some(tf_value) = &self.tf_value {
+            batch_tool::set_text_value_efield(
+                Some(&**tf_value),
+                directive_files,
+                set_field_highlight_value,
+                template_values,
+                true,
+            )
+        } else {
+            None
+        };
+        // Handle overrides
+        let (Some(toggle), Some(directive_value)) = (&self.tbtn_override_toggle, directive_value)
+        else {
+            return;
+        };
+        // Never disable the override toggle. Its too complex to keep track of it.
+        let override_ = directive_value.is_override();
+        // Allow override of template values
+        if set_field_highlight_value && !override_ {
+            toggle.set_enabled(true);
+        } else if directive_value.is_batch() {
+            // Set override from batch file
+            if override_ {
+                toggle.set_enabled(true);
+            }
+            if toggle.is_enabled() {
+                toggle.set_selected(override_);
+            }
+        }
+    }
+
+    /// Java public `getUIComponent()`.
+    pub fn get_ui_component(&self) -> Option<Rc<dyn UIComponent>> {
+        if let Some(bcb_value) = &self.bcb_value {
+            return Some(bcb_value.clone() as Rc<dyn UIComponent>);
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return Some(cb_value.clone() as Rc<dyn UIComponent>);
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return Some(bctf_value.clone() as Rc<dyn UIComponent>);
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return Some(tf_value.clone() as Rc<dyn UIComponent>);
+        }
+        None
+    }
+
+    /// Java `resetValue()` (DirectiveInterface).
+    pub fn reset_value(&self) {
+        self.clear();
+    }
+
+    /// Java package-private `restoreFromBackup()`.
+    pub fn restore_from_backup(&self) {
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.restore_from_backup();
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.restore_from_backup();
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.restore_from_backup();
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.restore_from_backup();
+        }
+    }
+
+    /// Java package-private `isDifferentFromCheckpoint(boolean)`.
+    pub fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.is_different_from_checkpoint(always_check);
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.is_different_from_checkpoint(always_check);
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.is_different_from_checkpoint(always_check);
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.is_different_from_checkpoint(always_check);
+        }
+        false
+    }
+
+    /// Java package-private `getFlagType()`.
+    pub fn get_flag_type(&self) -> Option<&'static FlagType> {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.get_flag_type();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.get_flag_type();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.get_flag_type();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.get_flag_type();
+        }
+        None
+    }
+
+    /// Java package-private `clearValue()`.
+    pub fn clear_value(&self) {
+        self.clear();
+    }
+
+    /// Java private `isEmpty()`.
+    fn is_empty(&self) -> bool {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.is_empty();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.is_empty();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.is_empty();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.is_empty();
+        }
+        true
+    }
+
+    /// Java private `isSet()`.
+    fn is_set(&self) -> bool {
+        if let Some(bcb_value) = &self.bcb_value {
+            return !bcb_value.is_empty() && !bcb_value.is_override() && bcb_value.is_selected();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return !cb_value.is_empty() && !cb_value.is_override();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return !bctf_value.is_empty() && !bctf_value.is_override();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return !tf_value.is_empty() && !tf_value.is_override();
+        }
+        true
+    }
+
+    /// Java package-private `getValue()`.
+    pub fn get_value(&self) -> Option<String> {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.get_text();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.get_text();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.get_text_void();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.get_text_void();
+        }
+        None
+    }
+
+    /// Java private `isTemplateValue()`.
+    fn is_template_value(&self) -> bool {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.is_template_value();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.is_template_value();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.is_template_value();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.is_template_value();
+        }
+        false
+    }
+
+    /// Java private `isOverride()`.
+    fn is_override(&self) -> bool {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.is_override();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.is_override();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.is_override();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.is_override();
+        }
+        false
+    }
+
+    /// Java private `isEnabled()`.
+    #[allow(dead_code)]
+    fn is_enabled(&self) -> bool {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.is_enabled();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.is_enabled();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.is_enabled();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.is_enabled();
+        }
+        true
+    }
+
+    /// Java private `isEditable()`.
+    #[allow(dead_code)]
+    fn is_editable(&self) -> bool {
+        if let Some(bcb_value) = &self.bcb_value {
+            return bcb_value.is_editable();
+        }
+        if let Some(cb_value) = &self.cb_value {
+            return cb_value.is_editable();
+        }
+        if let Some(bctf_value) = &self.bctf_value {
+            return bctf_value.is_editable();
+        }
+        if let Some(tf_value) = &self.tf_value {
+            return tf_value.is_editable();
+        }
+        true
+    }
+
+    /// Java package-private `checkpoint()`.
+    pub fn checkpoint(&self) {
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.checkpoint();
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.checkpoint();
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.checkpoint();
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.checkpoint();
+        }
+    }
+
+    /// Java package-private `clearTemplateValue()`.
+    pub fn clear_template_value(&self) {
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.clear_template_value();
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.clear_template_value();
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.clear_template_value();
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.clear_template_value();
+        }
+    }
+
+    /// Java package-private `clear()`.
+    pub fn clear(&self) {
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.clear();
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.clear();
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.clear();
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.clear();
+        }
+    }
+
+    /// Java package-private `backup()`.
+    pub fn backup(&self) {
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.backup();
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.backup();
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.backup();
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.backup();
+        }
+    }
+
+    /// Java package-private `canDisplay()`.  Returns true if the row is allowed by the
+    /// show panel.
+    pub fn can_display(&self) -> bool {
+        let show_included_only = self.show_included_only.get();
+        let show_if_set = self.show_if_set.get();
+        if show_included_only || show_if_set {
+            let set = !self.is_empty() || self.is_override();
+            if show_included_only && set && !self.is_template_value() {
+                return true;
+            }
+            if show_if_set && set && !show_included_only {
+                return true;
+            }
+            return false;
+        }
+        true
+    }
+
+    /// Java private `updateVisible()`.
+    fn update_visible(&self) {
+        let visible = self.open.get() && self.can_display();
+        self.h_title.set_visible(visible);
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.set_visible(visible);
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.set_visible(visible);
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.set_visible(visible);
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.set_visible(visible);
+        }
+        if let Some(h_empty) = &self.h_empty {
+            h_empty.set_visible(visible);
+        }
+        if let Some(toggle) = &self.tbtn_override_toggle {
+            toggle.set_visible(visible);
+        }
+    }
+
+    /// Java package-private `setOpen(boolean)`.
+    pub fn set_open(&self, open: bool) {
+        self.open.set(open);
         self.update_visible();
     }
-    pub fn get_value(&self) -> Option<String> {
-        if let Some(v) = &self.bcb_value {
-            Some(v.text.clone())
-        } else if let Some(v) = &self.cb_value {
-            Some(v.text.clone())
-        } else if let Some(v) = &self.bctf_value {
-            Some(v.text.clone())
-        } else {
-            self.tf_value.as_ref().map(|v| v.text.clone())
-        }
+
+    /// Java private `setTooltips(String[])`.
+    fn set_tooltips(&self, line_array: Option<&[String]>) {
+        let note = DirectiveDescrElement::get_note(line_array);
+        self.h_title.set_tooltip(Some(&format!(
+            "{} - {} - {}{}",
+            self.directive_def
+                .map(|directive_def| directive_def.to_string())
+                .unwrap_or_else(|| "null".to_owned()),
+            DirectiveDescrElement::get_description_from_line_array(line_array)
+                .unwrap_or_else(|| "null".to_owned()),
+            DirectiveDescrElement::get_value_type_from_line_array(line_array),
+            match note {
+                Some(note) if !note.is_empty() => format!(" - {}", note),
+                _ => String::new(),
+            }
+        )));
     }
-    pub fn validate_mutually_exclusive_rows(
-        &self,
-        row1: Option<&Self>,
-        row2: Option<&Self>,
-    ) -> bool {
-        !(self.is_set() as u8
-            + row1.is_some_and(Self::is_set) as u8
-            + row2.is_some_and(Self::is_set) as u8
-            > 1)
+
+    /// `field.add(pnlTable, layout, constraints)`: the field's `add` and the
+    /// `layout.setConstraints` it makes.
+    fn add_component(
+        add: impl FnOnce(&Rc<JComponent>),
+        component: Rc<JComponent>,
+        pnl_table: &Rc<JComponent>,
+        layout: &GridBagLayout,
+        constraints: &GridBagConstraints,
+    ) {
+        add(pnl_table);
+        layout.set_constraints(&component, constraints);
     }
-    pub fn validate_mutually_exclusive_field(&self, field_set: bool) -> bool {
-        self.is_empty() || !field_set
-    }
-    fn is_empty(&self) -> bool {
-        self.field().is_none_or(|v| v.empty)
-    }
-    fn is_set(&self) -> bool {
-        self.field().map_or(true, |v| {
-            !v.empty && !v.override_value && (self.bcb_value.is_none() || v.selected)
-        })
-    }
-    fn is_template_value(&self) -> bool {
-        self.field().is_some_and(|v| v.template_value)
-    }
-    fn is_override(&self) -> bool {
-        self.field().is_some_and(|v| v.override_value)
-    }
-    fn field(&self) -> Option<&DirectiveFieldBoundary> {
-        self.bcb_value
-            .as_ref()
-            .or(self.cb_value.as_ref())
-            .or(self.bctf_value.as_ref())
-            .or(self.tf_value.as_ref())
-    }
-    /// Java private `updateVisible()`.
-    fn update_visible(&mut self) {
-        let visible = self.open && self.can_display();
-        self.h_title.set_visible(visible);
-        if let Some(v) = &mut self.bcb_value {
-            v.visible = visible;
-        } else if let Some(v) = &mut self.cb_value {
-            v.visible = visible;
-        } else if let Some(v) = &mut self.bctf_value {
-            v.visible = visible;
-        } else if let Some(v) = &mut self.tf_value {
-            v.visible = visible;
-        }
-        if let Some(v) = &mut self.h_empty {
-            v.set_visible(visible);
-        }
-        if let Some(v) = &mut self.tbtn_override_toggle {
-            v.set_visible(visible);
-        }
-    }
-    /// Java private `setTooltips(String[])`, after description-element values
-    /// have been extracted by the storage unit.
-    pub fn set_tooltips(&mut self, description: String) {
-        self.h_title.tooltip = Some(format!("{} - {description}", self.directive_def));
+}
+
+impl std::fmt::Display for DirectivesDirectiveRow {
+    /// Java `toString()`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.h_title.get_text())
     }
 }
 
 impl DirectivesRow for DirectivesDirectiveRow {
-    /// Java `display(JPanel, GridBagLayout, GridBagConstraints)`.  The three
-    /// Swing objects are presentation-boundary handles; the row already owns
-    /// all component insertion order (title, value, then toggle/empty).
+    /// Java `statusChanged(BatchRunTomoStatus)`.
+    fn status_changed(&self, status: Option<BatchRunTomoStatus>) {
+        self.set_editable(status.is_none() || status == Some(BatchRunTomoStatus::Open));
+    }
+
+    /// Java `remove()`.
+    fn remove(&self) {
+        self.h_title.remove();
+        if let Some(bcb_value) = &self.bcb_value {
+            bcb_value.remove();
+        } else if let Some(cb_value) = &self.cb_value {
+            cb_value.remove();
+        } else if let Some(bctf_value) = &self.bctf_value {
+            bctf_value.remove();
+        } else if let Some(tf_value) = &self.tf_value {
+            tf_value.remove();
+        }
+        if let Some(h_empty) = &self.h_empty {
+            h_empty.remove();
+        }
+        if let Some(toggle) = &self.tbtn_override_toggle {
+            toggle.remove();
+        }
+    }
+
+    /// Java `display(JPanel, GridBagLayout, GridBagConstraints)`.
     fn display(
-        &mut self,
-        _pnl_table: &mut CellPanelBoundary,
-        _layout: &mut CellGridBagLayoutBoundary,
-        _constraints: &mut CellGridBagConstraintsBoundary,
+        &self,
+        pnl_table: &Rc<JComponent>,
+        layout: &GridBagLayout,
+        constraints: &mut GridBagConstraints,
     ) {
-        // Java sets gridwidth to 1 for title/value then REMAINDER for the
-        // trailing toggle or empty header.  The opaque boundary owns those
-        // actual GridBag mutations.
-    }
-
-    fn remove(&mut self) {
-        DirectivesDirectiveRow::remove(self);
-    }
-
-    fn status_changed(&mut self, status: BatchRunTomoStatus) {
-        self.status_changed_nullable(Some(status));
+        constraints.gridwidth = 1;
+        Self::add_component(
+            |panel| self.h_title.add(panel),
+            self.h_title.get_component(),
+            pnl_table,
+            layout,
+            constraints,
+        );
+        if let Some(bcb_value) = &self.bcb_value {
+            Self::add_component(
+                |panel| bcb_value.add(panel),
+                bcb_value.get_component(),
+                pnl_table,
+                layout,
+                constraints,
+            );
+        } else if let Some(cb_value) = &self.cb_value {
+            Self::add_component(
+                |panel| cb_value.add(panel),
+                cb_value.get_component(),
+                pnl_table,
+                layout,
+                constraints,
+            );
+        } else if let Some(bctf_value) = &self.bctf_value {
+            Self::add_component(
+                |panel| bctf_value.add(panel),
+                bctf_value.get_component(),
+                pnl_table,
+                layout,
+                constraints,
+            );
+        } else if let Some(tf_value) = &self.tf_value {
+            Self::add_component(
+                |panel| tf_value.add(panel),
+                tf_value.get_component(),
+                pnl_table,
+                layout,
+                constraints,
+            );
+        }
+        constraints.gridwidth = GRID_BAG_REMAINDER;
+        if let Some(toggle) = &self.tbtn_override_toggle {
+            Self::add_component(
+                |panel| toggle.add(panel),
+                toggle.get_component(),
+                pnl_table,
+                layout,
+                constraints,
+            );
+        } else if let Some(h_empty) = &self.h_empty {
+            Self::add_component(
+                |panel| h_empty.add(panel),
+                h_empty.get_component(),
+                pnl_table,
+                layout,
+                constraints,
+            );
+        }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn visibility_follows_open_and_included_only_value_rules() {
-        let def = DirectiveDef("Test".into());
-        let mut row = DirectivesDirectiveRow::new_description(
-            None,
-            "Test".into(),
-            "Section".into(),
-            DirectiveValueType::String,
-            false,
-            def,
-            false,
-        );
-        row.set_open(true);
-        assert!(row.h_title.visible);
-        row.row_event_values(true, true, false);
-        assert!(!row.h_title.visible);
-        row.set_value_string("value");
-        row.row_event_values(true, true, false);
-        assert!(row.h_title.visible);
-        row.tf_value.as_mut().unwrap().template_value = true;
-        row.row_event_values(true, true, false);
-        assert!(!row.h_title.visible);
-    }
-    #[test]
-    fn override_toggle_only_changes_for_the_source_cases() {
-        let mut row = DirectivesDirectiveRow::new_description(
-            None,
-            "Choice".into(),
-            "S".into(),
-            DirectiveValueType::String,
-            true,
-            DirectiveDef("d".into()),
-            false,
-        );
-        row.set_value_from_directive_value(
-            Some(DirectiveValue {
-                override_value: false,
-                batch: false,
-            }),
-            true,
-        );
-        assert!(row.tbtn_override_toggle.as_ref().unwrap().is_enabled());
-        row.set_value_from_directive_value(
-            Some(DirectiveValue {
-                override_value: true,
-                batch: true,
-            }),
-            false,
-        );
-        assert!(row.tbtn_override_toggle.as_ref().unwrap().is_selected());
-    }
-    #[test]
-    fn constructors_preserve_the_four_java_value_widget_branches() {
-        let def = DirectiveDef("d".into());
-        let boolean = DirectivesDirectiveRow::new_description(
-            None,
-            "b".into(),
-            "s".into(),
-            DirectiveValueType::Boolean,
-            false,
-            def.clone(),
-            false,
-        );
-        assert!(boolean.bcb_value.is_some() && boolean.h_empty.is_some());
-        let file = DirectivesDirectiveRow::new_description(
-            None,
-            "f".into(),
-            "s".into(),
-            DirectiveValueType::File,
-            false,
-            def,
-            false,
-        );
-        assert!(file.bctf_value.is_some() && file.tbtn_override_toggle.is_some());
+impl RowListener for DirectivesDirectiveRow {
+    /// Java `rowEvent()`.
+    fn row_event(&self) {
+        if let Some(dialog) = self.dialog() {
+            self.show_for_template_only
+                .set(dialog.is_show_for_template_only());
+            self.show_included_only.set(dialog.is_show_included_only());
+            self.show_if_set.set(dialog.is_show_if_set());
+        }
+        self.update_visible();
     }
 }

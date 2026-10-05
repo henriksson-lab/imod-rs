@@ -31,6 +31,7 @@ use super::file_chooser::{self, FileChooser};
 use super::file_text_field::FileTextField;
 use super::file_text_field_interface::FileTextFieldInterface;
 use super::flatten_warp_display::FlattenWarpDisplay;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::labeled_text_field::LabeledTextField;
 use super::multi_line_button::MultiLineButton;
 use super::radio_button::RadioButton;
@@ -56,11 +57,7 @@ use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
 use crate::imod::etomo::storage::autodoc::autodoc_factory;
 use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
 use crate::imod::etomo::storage::log_file::LogFileError;
-// TODO(unit): needs etomo/storage/ReduceFiltVolFileFilter.java - the reducefiltvol
-// output file name filter `getInputFile` lists the dataset directory with.
 use crate::imod::etomo::storage::reduce_filt_vol_file_filter::ReduceFiltVolFileFilter;
-// TODO(unit): needs etomo/storage/TomogramFileFilter.java - the file chooser filter of
-// the tools input file.
 use crate::imod::etomo::storage::tomogram_file_filter::TomogramFileFilter;
 use crate::imod::etomo::tools_manager::ToolsManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
@@ -76,8 +73,6 @@ use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHand
 use crate::imod::etomo::ui::field::Field;
 use crate::imod::etomo::ui::field_type::FieldType;
 use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
-// TODO(unit): needs etomo/util/FrontEndLogic.java - `isRotated(BaseManager, AxisID,
-// File)`, which reads the file's MRC header.
 use crate::imod::etomo::util::front_end_logic;
 use crate::imod::etomo::util::utilities;
 
@@ -348,11 +343,10 @@ impl FlattenVolumePanel {
     }
 
     /// Java private `addListeners()`.
-    fn add_listeners(&self) {
-        // Swing mouse: pnlRoot.addMouseListener(new GenericMouseAdapter(this)).
-        // Mouse events are not modelled; the adapter's only effect is to call
-        // popUpContextMenu on a right-button press, which a driver calls
-        // directly.
+    fn add_listeners(self: &Rc<Self>) {
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.pnl_root
+            .add_mouse_listener(GenericMouseAdapter::new(context_menu));
         self.btn_make_surface_model
             .add_action_listener(self.action_listener.clone());
         self.btn_flatten_warp

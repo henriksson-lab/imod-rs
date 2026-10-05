@@ -1,377 +1,265 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/BatchRunTomoStepPanel.java`.
 //!
-//! Swing layout, listener dispatch, the table, and the series-watcher parent
-//! stay explicit boundaries.  The selection and enablement rules are retained
-//! here because they are the behaviour owned by `BatchRunTomoStepPanel`.
-#![allow(dead_code)]
+//! Batchruntomo StartingStep and EndingStep: the "Subset of Steps to Run" panel of the
+//! batchruntomo dialog's Run tab.  An event dispatch thread object, created as
+//! `Rc<Self>` by [`BatchRunTomoStepPanel::get_instance`].
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::cell::Cell;
+use std::rc::{Rc, Weak};
 
+use super::batch_run_tomo_table::BatchRunTomoTable;
 use super::check_box::CheckBox;
-use super::radio_button::{EnumeratedTypeBoundary, RadioButton, RadioButtonGroup};
+use super::etched_border::EtchedBorder;
+use super::radio_button::{RadioButton, RadioButtonModel};
+use super::radio_button_interface::EnumeratedTypeRef;
 use super::series_watcher_parent::SeriesWatcherParent;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::batchruntomo_param::BatchruntomoParam;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent};
+use super::abstract_radio_button_model::AbstractRadioButtonModel;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::batch_run_tomo_meta_data::BatchRunTomoMetaData;
+use crate::imod::etomo::r#type::batch_run_tomo_status::{self, BatchRunTomoStatus};
+use crate::imod::etomo::r#type::ending_step::EndingStep;
+use crate::imod::etomo::r#type::enumerated_type::EnumeratedType;
+use crate::imod::etomo::r#type::starting_step::StartingStep;
+use crate::imod::etomo::r#type::status::StatusRef;
+use crate::imod::etomo::r#type::status_change_event::StatusChangeEvent;
+use crate::imod::etomo::r#type::status_change_listener::StatusChangeListener;
 
+/// Java package-private static final `STEP_PAIRS`.
 pub const STEP_PAIRS: usize = 5;
 
-/// `EndingStep`, at the not-yet-translated `etomo.type` boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum EndingStep {
-    BeadTracking,
-    FineAlignment,
-    Positioning,
-    GoldDetection3d,
-    TwoDFiltering,
+/// Java `final class BatchRunTomoStepPanel implements ActionListener,
+/// StatusChangeListener`.
+pub struct BatchRunTomoStepPanel {
+    /// Java private final `pnlRoot`.
+    pnl_root: Rc<JComponent>,
+    /// Java private final `cbEndingStep`.
+    cb_ending_step: Rc<CheckBox>,
+    /// Java private final `bgEndingStep`.
+    bg_ending_step: Rc<ButtonGroup>,
+    /// Java private final `rbEndingStep[]`.
+    rb_ending_step: Vec<Rc<RadioButton>>,
+    /// Java private final `cbStartingStep`.
+    cb_starting_step: Rc<CheckBox>,
+    /// Java private final `bgStartingStep`.
+    bg_starting_step: Rc<ButtonGroup>,
+    /// Java private final `rbStartingStep[]`.
+    rb_starting_step: Vec<Rc<RadioButton>>,
+    /// Java private final `cbEnableStartingStep`.
+    cb_enable_starting_step: Rc<CheckBox>,
+
+    /// Java private final `manager`.
+    #[allow(dead_code)]
+    manager: &'static dyn BaseManager,
+    /// Java private final `axisID`.
+    #[allow(dead_code)]
+    axis_id: AxisID,
+    /// Java private final `table`.
+    table: Weak<BatchRunTomoTable>,
+    /// Java private final `seriesWatcherParent`.
+    series_watcher_parent: Weak<dyn SeriesWatcherParent>,
+
+    /// Java private `status`, initially `BatchRunTomoStatus.DEFAULT`.
+    status: Cell<Option<BatchRunTomoStatus>>,
+    /// Java `this`.
+    this: Weak<BatchRunTomoStepPanel>,
 }
 
-impl EndingStep {
-    pub fn get_instance(index: usize) -> Option<Self> {
-        [
-            Self::BeadTracking,
-            Self::FineAlignment,
-            Self::Positioning,
-            Self::GoldDetection3d,
-            Self::TwoDFiltering,
-        ]
-        .get(index)
-        .copied()
-    }
-    pub fn get_index(self) -> usize {
-        match self {
-            Self::BeadTracking => 0,
-            Self::FineAlignment => 1,
-            Self::Positioning => 2,
-            Self::GoldDetection3d => 3,
-            Self::TwoDFiltering => 4,
-        }
-    }
-    pub fn is_default(self) -> bool {
-        self == Self::GoldDetection3d
-    }
-    pub fn get_label(self) -> &'static str {
-        match self {
-            Self::BeadTracking => "Fiducial model generation",
-            Self::FineAlignment => "Fine alignment",
-            Self::Positioning => "Tomogram positioning",
-            Self::GoldDetection3d => "CTF estimation and gold detection in 3D",
-            Self::TwoDFiltering => "2D filtering",
-        }
-    }
-    pub fn get_tooltip(self) -> &'static str {
-        match self {
-            Self::BeadTracking => "Stop after fiducial model generation or patch tracking.",
-            Self::FineAlignment => "Stop after fine alignment with Tiltalign.",
-            Self::Positioning => "Stop after tomogram positioning (if any).",
-            Self::GoldDetection3d => {
-                "Stop after CTF estimation and detection of gold in 3D (if any)."
-            }
-            Self::TwoDFiltering => "Stop when all steps on the aligned stack are completed.",
-        }
-    }
-}
-
-/// `StartingStep`, at the not-yet-translated `etomo.type` boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StartingStep {
-    FineAlignment,
-    Positioning,
-    AlignedStackGeneration,
-    CtfCorrection,
-    Reconstruction,
-}
-
-impl StartingStep {
-    pub fn get_instance(index: usize) -> Option<Self> {
-        [
-            Self::FineAlignment,
-            Self::Positioning,
-            Self::AlignedStackGeneration,
-            Self::CtfCorrection,
-            Self::Reconstruction,
-        ]
-        .get(index)
-        .copied()
-    }
-    pub fn get_index(self) -> usize {
-        match self {
-            Self::FineAlignment => 0,
-            Self::Positioning => 1,
-            Self::AlignedStackGeneration => 2,
-            Self::CtfCorrection => 3,
-            Self::Reconstruction => 4,
-        }
-    }
-    pub fn is_default(self) -> bool {
-        self == Self::CtfCorrection
-    }
-    pub fn get_label(self) -> &'static str {
-        match self {
-            Self::FineAlignment => "Fine alignment",
-            Self::Positioning => "Tomogram positioning",
-            Self::AlignedStackGeneration => "Aligned stack generation",
-            Self::CtfCorrection => "CTF correction",
-            Self::Reconstruction => "Reconstruction",
-        }
-    }
-    pub fn get_tooltip(self) -> &'static str {
-        match self {
-            Self::FineAlignment => "Start from fine alignment with Tiltalign.",
-            Self::Positioning => "Start with tomogram positioning (if any).",
-            Self::AlignedStackGeneration => {
-                "Start with generating the aligned stack from the raw stack."
-            }
-            Self::CtfCorrection => "Start with correcting the CTF then erasing the gold (if any).",
-            Self::Reconstruction => "Start with making the reconstruction.",
-        }
-    }
-}
-
-/// `BatchRunTomoStatus`, at the `etomo.type` boundary.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum BatchRunTomoStatus {
-    Open,
-    Running,
-    Pausing,
-    Killing,
-    Done,
-    KilledOrPaused,
-    KilledOrPausedProcessChunks,
-    KilledOrPausedSeriesWatcher,
-    Stopped,
-    Failed,
-}
-
-impl BatchRunTomoStatus {
-    pub const DEFAULT: Self = Self::Open;
-    pub fn is_end_status(self) -> bool {
-        matches!(
-            self,
-            Self::Done
-                | Self::KilledOrPaused
-                | Self::KilledOrPausedProcessChunks
-                | Self::KilledOrPausedSeriesWatcher
-                | Self::Stopped
-                | Self::Failed
-        )
-    }
-    pub fn is_error_status(self) -> bool {
-        self == Self::Failed
-    }
-    /// Java `BatchRunTomoStatus.getInstance(curStatus, newStatus)`.
-    pub fn get_instance(current: Option<Self>, new_status: Option<Self>) -> Option<Self> {
-        if current.is_none()
-            || new_status.is_none()
-            || !current.is_some_and(Self::is_end_status)
-            || !new_status.is_some_and(Self::is_end_status)
-        {
-            return new_status;
-        }
-        if new_status.is_some_and(Self::is_error_status) {
-            current
-        } else {
-            new_status
-        }
-    }
-}
-
-/// Narrow `BatchRunTomoTable` boundary used by this source unit.
-#[derive(Clone, Debug, Default)]
-pub struct BatchRunTomoTableBoundary {
-    pub earliest_run_ending_step: Option<EndingStep>,
-    pub row_list_status_listener_count: usize,
-    pub rows_status_listener_count: usize,
-}
-
-impl BatchRunTomoTableBoundary {
-    pub fn get_earliest_run_ending_step(&self) -> Option<EndingStep> {
-        self.earliest_run_ending_step
-    }
-    pub fn add_status_change_listener_to_row_list(&mut self) {
-        self.row_list_status_listener_count += 1;
-    }
-    pub fn add_status_change_listener_to_rows(&mut self) {
-        self.rows_status_listener_count += 1;
-    }
-}
-
-/// `BatchRunTomoMetaData` fields read/written by this source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct BatchRunTomoMetaDataBoundary {
-    pub use_ending_step: bool,
-    pub ending_step: Option<EndingStep>,
-    pub use_starting_step: bool,
-    pub starting_step: Option<StartingStep>,
-    pub enable_starting_step: bool,
-    pub status: Option<BatchRunTomoStatus>,
-    pub earliest_run_ending_step: Option<EndingStep>,
-}
-
-/// `BatchruntomoParam` subset read/written by this source unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct BatchruntomoParamBoundary {
-    pub ending_step: Option<usize>,
-    pub starting_step: Option<usize>,
-}
-
-/// Java package-private `BatchRunTomoStepPanel`.
-pub struct BatchRunTomoStepPanel<'a> {
-    pub pnl_root_layout: Vec<&'static str>,
-    pub cb_ending_step: CheckBox,
-    pub bg_ending_step: Rc<RefCell<RadioButtonGroup>>,
-    pub rb_ending_step: [RadioButton; STEP_PAIRS],
-    pub cb_starting_step: CheckBox,
-    pub bg_starting_step: Rc<RefCell<RadioButtonGroup>>,
-    pub rb_starting_step: [RadioButton; STEP_PAIRS],
-    pub cb_enable_starting_step: CheckBox,
-    pub manager: &'a dyn BaseManager,
-    pub axis_id: AxisID,
-    pub table: &'a RefCell<BatchRunTomoTableBoundary>,
-    pub series_watcher_parent: &'a dyn SeriesWatcherParent,
-    pub status: Option<BatchRunTomoStatus>,
-}
-
-impl<'a> BatchRunTomoStepPanel<'a> {
+impl BatchRunTomoStepPanel {
+    /// Java private `BatchRunTomoStepPanel(BaseManager, AxisID, BatchRunTomoTable,
+    /// SeriesWatcherParent)`, with the field initialisers.  The radio buttons, which
+    /// Java creates in `createPanel`, are created here with the same arguments and in the
+    /// same order.
     fn new(
-        manager: &'a dyn BaseManager,
+        manager: &'static dyn BaseManager,
         axis_id: AxisID,
-        table: &'a RefCell<BatchRunTomoTableBoundary>,
-        series_watcher_parent: &'a dyn SeriesWatcherParent,
-    ) -> Self {
-        let bg_ending_step = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        let bg_starting_step = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        Self {
-            pnl_root_layout: Vec::new(),
-            cb_ending_step: CheckBox::new_with_text("Stop after"),
-            bg_ending_step: bg_ending_step.clone(),
-            rb_ending_step: std::array::from_fn(|index| {
-                let step = EndingStep::get_instance(index).unwrap();
-                RadioButton::new_with_enumerated_type(
-                    Some(step.get_label().into()),
-                    EnumeratedTypeBoundary {
-                        label: step.get_label().into(),
-                        default: step.is_default(),
-                        value: Some(step.get_index().to_string()),
-                    },
-                    Some(bg_ending_step.clone()),
-                )
-            }),
-            cb_starting_step: CheckBox::new_with_text("Start from"),
-            bg_starting_step: bg_starting_step.clone(),
-            rb_starting_step: std::array::from_fn(|index| {
-                let step = StartingStep::get_instance(index).unwrap();
-                RadioButton::new_with_enumerated_type(
-                    Some(step.get_label().into()),
-                    EnumeratedTypeBoundary {
-                        label: step.get_label().into(),
-                        default: step.is_default(),
-                        value: Some(step.get_index().to_string()),
-                    },
-                    Some(bg_starting_step.clone()),
-                )
-            }),
-            cb_enable_starting_step: CheckBox::new_with_text("Enable starting from any step"),
+        table: Weak<BatchRunTomoTable>,
+        series_watcher_parent: Weak<dyn SeriesWatcherParent>,
+    ) -> Rc<BatchRunTomoStepPanel> {
+        let bg_ending_step = ButtonGroup::new();
+        let bg_starting_step = ButtonGroup::new();
+        let cb_ending_step = CheckBox::new_string(Some("Stop after"));
+        let cb_starting_step = CheckBox::new_string(Some("Start from"));
+        let cb_enable_starting_step =
+            CheckBox::new_string(Some("Enable starting from any step"));
+        // createPanel: Step
+        let mut rb_ending_step = Vec::with_capacity(STEP_PAIRS);
+        let mut rb_starting_step = Vec::with_capacity(STEP_PAIRS);
+        for i in 0..STEP_PAIRS {
+            if let Some(ending_step) = EndingStep::get_instance(Some(i as i32)) {
+                // init
+                let rb = RadioButton::new_string_enumerated_type_button_group(
+                    ending_step.get_label().as_deref(),
+                    Some(EnumeratedTypeRef::new(ending_step)),
+                    Some(&bg_ending_step),
+                );
+                if ending_step.is_default() {
+                    rb.set_selected_boolean(true);
+                }
+                rb.set_tool_tip_text_string(Some(ending_step.get_tooltip()));
+                rb_ending_step.push(rb);
+            }
+            if let Some(starting_step) = StartingStep::get_instance(i as i32) {
+                let rb = RadioButton::new_string_enumerated_type_button_group(
+                    starting_step.get_label().as_deref(),
+                    Some(EnumeratedTypeRef::new(starting_step)),
+                    Some(&bg_starting_step),
+                );
+                if starting_step.is_default() {
+                    rb.set_selected_boolean(true);
+                }
+                rb.set_tool_tip_text_string(Some(starting_step.get_tooltip()));
+                rb_starting_step.push(rb);
+            }
+        }
+        Rc::new_cyclic(|this| BatchRunTomoStepPanel {
+            pnl_root: JComponent::new_panel(),
+            cb_ending_step,
+            bg_ending_step,
+            rb_ending_step,
+            cb_starting_step,
+            bg_starting_step,
+            rb_starting_step,
+            cb_enable_starting_step,
             manager,
             axis_id,
             table,
             series_watcher_parent,
-            status: Some(BatchRunTomoStatus::DEFAULT),
-        }
+            status: Cell::new(Some(batch_run_tomo_status::DEFAULT)),
+            this: this.clone(),
+        })
     }
 
-    /// Java `getInstance`.
+    /// Java package-private static `getInstance(BaseManager, AxisID, BatchRunTomoTable,
+    /// SeriesWatcherParent)`.
     pub fn get_instance(
-        manager: &'a dyn BaseManager,
+        manager: &'static dyn BaseManager,
         axis_id: AxisID,
-        table: &'a RefCell<BatchRunTomoTableBoundary>,
-        series_watcher_parent: &'a dyn SeriesWatcherParent,
-    ) -> Self {
-        let mut instance = Self::new(manager, axis_id, table, series_watcher_parent);
+        table: Weak<BatchRunTomoTable>,
+        series_watcher_parent: Weak<dyn SeriesWatcherParent>,
+    ) -> Rc<BatchRunTomoStepPanel> {
+        let instance = BatchRunTomoStepPanel::new(manager, axis_id, table, series_watcher_parent);
         instance.create_panel();
         instance.set_tooltips();
         instance.add_listeners();
         instance
     }
 
-    /// Java `createPanel`; Swing component construction is retained as ordered layout state.
-    fn create_panel(&mut self) {
-        self.pnl_root_layout = vec![
-            "Y_AXIS",
-            "vertical-strut:8",
-            "body",
-            "vertical-glue",
-            "body:Y_AXIS:etched:Subset of Steps to Run",
-            "step:X_AXIS",
-            "ending:Y_AXIS",
-            "starting:Y_AXIS",
-            "enable-starting:X_AXIS",
-            "horizontal-glue",
-            "align-left",
-            "shrink-wrap-horizontal",
-        ];
-        for index in 0..STEP_PAIRS {
-            self.rb_ending_step[index]
-                .set_tooltip(Some(EndingStep::get_instance(index).unwrap().get_tooltip()));
-            self.rb_starting_step[index].set_tooltip(Some(
-                StartingStep::get_instance(index).unwrap().get_tooltip(),
-            ));
-        }
-        self.update_display();
+    fn table(&self) -> Rc<BatchRunTomoTable> {
+        self.table.upgrade().expect("the dialog owns its table")
     }
 
-    fn add_listeners(&mut self) {
-        self.cb_ending_step.add_action_listener();
-        self.cb_starting_step.add_action_listener();
-        for index in 0..STEP_PAIRS {
-            self.rb_ending_step[index].add_action_listener();
-            self.rb_starting_step[index].add_action_listener();
-        }
-        self.cb_enable_starting_step.add_action_listener();
-        let mut table = self.table.borrow_mut();
-        table.add_status_change_listener_to_row_list();
-        table.add_status_change_listener_to_rows();
-    }
-
-    pub fn action_performed(&mut self) {
-        self.update_display();
-    }
-    pub fn start_over(&mut self) {
-        self.status_changed(Some(BatchRunTomoStatus::Open));
-    }
-    pub fn status_changed(&mut self, new_status: Option<BatchRunTomoStatus>) {
-        if let Some(new_status) = new_status {
-            self.status = BatchRunTomoStatus::get_instance(self.status, Some(new_status));
-            let editable = self.status.is_none()
-                || self.status == Some(BatchRunTomoStatus::Open)
-                || (self.status.is_some_and(BatchRunTomoStatus::is_end_status)
-                    && self.status != Some(BatchRunTomoStatus::KilledOrPaused));
-            self.update_display();
-            self.cb_starting_step.set_editable(editable);
-            for index in 0..STEP_PAIRS {
-                self.rb_starting_step[index].set_editable(editable);
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // panels
+        let pnl_ending_step = JComponent::new_panel();
+        let pnl_starting_step = JComponent::new_panel();
+        let pnl_step = JComponent::new_panel();
+        let pnl_body = JComponent::new_panel();
+        let pnl_enable_starting_step = JComponent::new_panel();
+        // Root
+        self.pnl_root.add(&pnl_body);
+        // Body
+        pnl_body.set_border_title(
+            EtchedBorder::new(Some("Subset of Steps to Run"))
+                .get_border()
+                .get_title()
+                .as_deref(),
+        );
+        pnl_body.add(&pnl_step);
+        pnl_body.add(&pnl_enable_starting_step);
+        // EnableStartingStep
+        pnl_enable_starting_step.add(&self.cb_enable_starting_step.get_component());
+        // Step
+        pnl_step.add(&pnl_ending_step);
+        pnl_step.add(&pnl_starting_step);
+        // EndingStep
+        pnl_ending_step.add(&self.cb_ending_step.get_component());
+        // StartingStep
+        pnl_starting_step.add(&self.cb_starting_step.get_component());
+        // Step: the buttons were built by the constructor; add the pairs.
+        for i in 0..STEP_PAIRS {
+            if let (Some(rb_ending), Some(rb_starting)) =
+                (self.rb_ending_step.get(i), self.rb_starting_step.get(i))
+            {
+                // EndingStep
+                pnl_ending_step.add(&rb_ending.get_component());
+                // StartingStep
+                pnl_starting_step.add(&rb_starting.get_component());
             }
-            self.cb_ending_step.set_editable(editable);
-            for index in 0..STEP_PAIRS {
-                self.rb_ending_step[index].set_editable(editable);
-            }
-            self.cb_enable_starting_step.set_editable(editable);
         }
-        self.update_display();
-    }
-    pub fn status_changed_event(&mut self) {
+        // update
         self.update_display();
     }
 
-    /// Java `updateDisplay`.
-    pub fn update_display(&mut self) {
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        let this = self.this.clone();
+        let listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            if let Some(panel) = this.upgrade() {
+                panel.action_performed(event);
+            }
+        });
+        self.cb_ending_step.add_action_listener(Some(listener.clone()));
+        self.cb_starting_step.add_action_listener(Some(listener.clone()));
+        for i in 0..STEP_PAIRS {
+            self.rb_ending_step[i].add_action_listener(listener.clone());
+            self.rb_starting_step[i].add_action_listener(listener.clone());
+        }
+        self.cb_enable_starting_step
+            .add_action_listener(Some(listener.clone()));
+        if let Some(this) = self.this.upgrade() {
+            let table = self.table();
+            table.add_status_change_listener_to_row_list(Some(this.clone()));
+            table.add_status_change_listener_to_rows(Some(this));
+        }
+    }
+
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.clone()
+    }
+
+    /// Java `actionPerformed(ActionEvent)`.
+    pub fn action_performed(&self, _e: &ActionEvent) {
+        self.update_display();
+    }
+
+    /// The selected button's model, Java
+    /// `(RadioButton.RadioButtonModel) group.getSelection()`, with the model's enabled
+    /// state (the component's).
+    fn selection(group: &ButtonGroup) -> Option<(Rc<JComponent>, Option<EnumeratedTypeRef>)> {
+        let selection = group.get_selection()?;
+        let enumerated_type = selection.get_model().and_then(|model| {
+            model
+                .as_any()
+                .downcast_ref::<RadioButtonModel>()
+                .and_then(AbstractRadioButtonModel::get_enumerated_type)
+        });
+        Some((selection, enumerated_type))
+    }
+
+    /// Java private `updateDisplay()`.
+    fn update_display(&self) {
+        // Don't update the display while it is ineditable during the run.
         if !self.cb_starting_step.is_editable() {
             return;
         }
+        // Starting Step - dependent on defined stop point
         let mut starting_step_selection_changed = false;
+        let mut starting_step_model: Option<(Rc<JComponent>, Option<EnumeratedTypeRef>)> = None;
         let enabled_starting_step = self.cb_enable_starting_step.is_selected();
-        let series_watcher_on = self.series_watcher_parent.is_series_watcher_on();
-        let earliest_run_ending_step = self.table.borrow().get_earliest_run_ending_step();
+        let series_watcher_on = self
+            .series_watcher_parent
+            .upgrade()
+            .is_some_and(|parent| parent.is_series_watcher_on());
+        let earliest_run_ending_step = self
+            .table
+            .upgrade()
+            .and_then(|table| table.get_earliest_run_ending_step());
+        // Disable starting step if none of the radio buttons are available.
         self.cb_enable_starting_step.set_enabled(!series_watcher_on);
         self.cb_starting_step.set_enabled(
             (enabled_starting_step || earliest_run_ending_step.is_some()) && !series_watcher_on,
@@ -379,201 +267,234 @@ impl<'a> BatchRunTomoStepPanel<'a> {
         let starting_step_selected =
             self.cb_starting_step.is_enabled() && self.cb_starting_step.is_selected();
         if !starting_step_selected {
-            for index in 0..STEP_PAIRS {
-                self.rb_starting_step[index].set_enabled(false);
+            // Checkbox is not checked - yeay - just disable everything
+            for i in 0..STEP_PAIRS {
+                self.rb_starting_step[i].set_enabled(false);
             }
         } else if enabled_starting_step {
-            for index in 0..STEP_PAIRS {
-                self.rb_starting_step[index].set_enabled(true);
+            for i in 0..STEP_PAIRS {
+                self.rb_starting_step[i].set_enabled(true);
             }
         } else {
-            let max_enabled = earliest_run_ending_step.map_or(0, |step| step.get_index() + 1);
-            for index in 0..max_enabled {
-                self.rb_starting_step[index].set_enabled(true);
+            // Rule:
+            // Disable past the defined stop point (paired with run to)
+            // Don't jump ahead when restarting
+            // defined stop point:
+            // earliest completion status of all run checked datasets (disabled or enabled)
+            let mut max_enabled = 0;
+            // earliestRunStep is the defined stop point
+            if let Some(earliest_run_ending_step) = earliest_run_ending_step {
+                max_enabled = (earliest_run_ending_step.get_index() + 1) as usize;
             }
-            for index in max_enabled..STEP_PAIRS {
-                self.rb_starting_step[index].set_enabled(false);
+            for i in 0..max_enabled.min(STEP_PAIRS) {
+                self.rb_starting_step[i].set_enabled(true);
+            }
+            for i in max_enabled..STEP_PAIRS {
+                self.rb_starting_step[i].set_enabled(false);
             }
             if max_enabled < STEP_PAIRS && max_enabled > 0 {
-                if self
-                    .rb_starting_step
-                    .iter()
-                    .position(RadioButton::is_selected)
-                    .is_some_and(|index| !self.rb_starting_step[index].is_enabled())
+                // At least one radio button was disabled
+                // Rule:
+                // Move the selection to the first enabled one
+                // Move it only if the selected button is disabled
+                starting_step_model = Self::selection(&self.bg_starting_step);
+                if let Some((selection, _)) = &starting_step_model
+                    && !selection.is_enabled()
                 {
-                    self.rb_starting_step[max_enabled - 1].set_selected(true);
+                    // The selected radio button is now disabled - move it
+                    self.rb_starting_step[max_enabled - 1].set_selected_boolean(true);
                     starting_step_selection_changed = true;
                 }
             }
         }
+        // Ending Step - dependent on Starting Step
         let enable_ending_step =
             self.cb_ending_step.is_enabled() && self.cb_ending_step.is_selected();
         if !enable_ending_step {
-            for index in 0..STEP_PAIRS {
-                self.rb_ending_step[index].set_enabled(false);
+            // Checkbox is not checked - yeay - just disable everything
+            for i in 0..STEP_PAIRS {
+                self.rb_ending_step[i].set_enabled(false);
             }
         } else {
-            let mut enabled_start_index = 0;
+            // Rule:
+            // disable up to checked & enabled start from (can't go backwards)
+            // End has to be at least one more then start
+            let mut enabled_start_index: usize = 0;
             if starting_step_selected {
-                if starting_step_selection_changed
-                    || self.rb_starting_step.iter().any(RadioButton::is_selected)
+                // Get the starting step model if it has changed or wasn't already
+                // retrieved
+                if starting_step_model.is_none() || starting_step_selection_changed {
+                    starting_step_model = Self::selection(&self.bg_starting_step);
+                }
+                if let Some((selection, enumerated_type)) = &starting_step_model
+                    && selection.is_enabled()
                 {
-                    if let Some(index) = self
-                        .rb_starting_step
-                        .iter()
-                        .position(|button| button.is_selected() && button.is_enabled())
+                    // Java casts the enumerated type to StartingStep.
+                    if let Some(starting_step) = enumerated_type
+                        .as_ref()
+                        .and_then(|enumerated_type| enumerated_type.downcast_ref::<StartingStep>())
                     {
-                        enabled_start_index = index + 1;
+                        enabled_start_index = (starting_step.get_index() + 1) as usize;
                     }
                 }
             }
-            for index in 0..enabled_start_index {
-                self.rb_ending_step[index].set_enabled(false);
+            for i in 0..enabled_start_index.min(STEP_PAIRS) {
+                self.rb_ending_step[i].set_enabled(false);
             }
-            for index in enabled_start_index..STEP_PAIRS {
-                self.rb_ending_step[index].set_enabled(true);
+            for i in enabled_start_index..STEP_PAIRS {
+                self.rb_ending_step[i].set_enabled(true);
             }
             if enabled_start_index > 0 && enabled_start_index < STEP_PAIRS {
-                if self
-                    .rb_ending_step
-                    .iter()
-                    .position(RadioButton::is_selected)
-                    .is_some_and(|index| !self.rb_ending_step[index].is_enabled())
+                // some radio buttons where disabled
+                // Move the selection to the first enabled one
+                // I think this should read "last enabled one"
+                // Move it only if the selected button is disabled
+                if let Some((selection, _)) = Self::selection(&self.bg_ending_step)
+                    && !selection.is_enabled()
                 {
-                    self.rb_ending_step[enabled_start_index].set_selected(true);
+                    // The selected radio button is now disabled - move it
+                    self.rb_ending_step[enabled_start_index].set_selected_boolean(true);
                 }
             }
         }
     }
 
-    pub fn get_parameters_meta_data(&self, meta_data: &mut BatchRunTomoMetaDataBoundary) {
-        meta_data.use_ending_step = self.cb_ending_step.is_selected();
-        meta_data.ending_step = self
-            .rb_ending_step
-            .iter()
-            .position(RadioButton::is_selected)
-            .and_then(EndingStep::get_instance);
-        meta_data.use_starting_step = self.cb_starting_step.is_selected();
-        meta_data.starting_step = self
-            .rb_starting_step
-            .iter()
-            .position(RadioButton::is_selected)
-            .and_then(StartingStep::get_instance);
-        meta_data.enable_starting_step = self.cb_enable_starting_step.is_selected();
+    /// Java package-private `getParameters(BatchRunTomoMetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &BatchRunTomoMetaData) {
+        meta_data.set_use_ending_step(self.cb_ending_step.is_selected());
+        if let Some((_, enumerated_type)) = Self::selection(&self.bg_ending_step)
+            && let Some(ending_step) = enumerated_type
+                .as_ref()
+                .and_then(|enumerated_type| enumerated_type.downcast_ref::<EndingStep>())
+        {
+            meta_data.set_ending_step(Some(*ending_step));
+        }
+        meta_data.set_use_starting_step(self.cb_starting_step.is_selected());
+        if let Some((_, enumerated_type)) = Self::selection(&self.bg_starting_step)
+            && let Some(starting_step) = enumerated_type
+                .as_ref()
+                .and_then(|enumerated_type| enumerated_type.downcast_ref::<StartingStep>())
+        {
+            meta_data.set_starting_step(Some(*starting_step));
+        }
+        meta_data.set_enable_starting_step(self.cb_enable_starting_step.is_selected());
     }
-    pub fn set_parameters_meta_data(&mut self, meta_data: &BatchRunTomoMetaDataBoundary) {
-        self.cb_ending_step.set_selected(meta_data.use_ending_step);
-        if let Some(step) = meta_data.ending_step {
-            self.rb_ending_step[step.get_index()].set_selected(true);
+
+    /// Java package-private `setParameters(BatchRunTomoMetaData)`.
+    pub fn set_parameters_meta_data(&self, meta_data: &BatchRunTomoMetaData) {
+        self.cb_ending_step
+            .set_selected_boolean(meta_data.is_use_ending_step());
+        if let Some(ending_step) = meta_data.get_ending_step() {
+            self.rb_ending_step[ending_step.get_index() as usize].set_selected_boolean(true);
         }
         self.cb_starting_step
-            .set_selected(meta_data.use_starting_step);
-        if let Some(step) = meta_data.starting_step {
-            self.rb_starting_step[step.get_index()].set_selected(true);
+            .set_selected_boolean(meta_data.is_use_starting_step());
+        if let Some(starting_step) = meta_data.get_starting_step() {
+            self.rb_starting_step[starting_step.get_index() as usize].set_selected_boolean(true);
         }
         self.cb_enable_starting_step
-            .set_selected(meta_data.enable_starting_step);
-        self.status_changed(meta_data.status);
+            .set_selected_boolean(meta_data.is_enable_starting_step());
+        self.status_changed_status(meta_data.get_status().map(StatusRef::BatchRunTomoStatus));
+        self.status_changed_status(
+            meta_data
+                .get_earliest_run_ending_step()
+                .map(StatusRef::EndingStep),
+        );
+    }
+
+    /// Java package-private `setParameters(BatchruntomoParam)`.
+    pub fn set_parameters_param(&self, param: &BatchruntomoParam) {
+        if let Some(ending_step) =
+            EndingStep::get_instance_from_step_value(Some(&param.get_ending_step()))
+        {
+            self.rb_ending_step[ending_step.get_index() as usize].set_selected_boolean(true);
+        }
+        if let Some(starting_step) =
+            StartingStep::get_instance_from_step_value(Some(&param.get_starting_step()))
+        {
+            self.rb_starting_step[starting_step.get_index() as usize].set_selected_boolean(true);
+        }
         self.update_display();
     }
-    pub fn set_parameters_batchruntomo(&mut self, param: &BatchruntomoParamBoundary) {
-        if let Some(step) = param.ending_step.and_then(EndingStep::get_instance) {
-            self.rb_ending_step[step.get_index()].set_selected(true);
+
+    /// Java package-private `getParameters(BatchruntomoParam, boolean)`.
+    pub fn get_parameters_param(&self, param: &mut BatchruntomoParam, _validate_only: bool) {
+        param.reset_ending_step();
+        if self.cb_ending_step.is_enabled()
+            && self.cb_ending_step.is_selected()
+            && let Some((selection, enumerated_type)) = Self::selection(&self.bg_ending_step)
+        {
+            // `model.getButton().isEnabled()`: the button's own enabled state.
+            if selection.is_enabled()
+                && let Some(enumerated_type) = enumerated_type
+            {
+                param.set_ending_step(Some(&enumerated_type.get_value()));
+            }
         }
-        if let Some(step) = param.starting_step.and_then(StartingStep::get_instance) {
-            self.rb_starting_step[step.get_index()].set_selected(true);
-        }
-        self.update_display();
-    }
-    pub fn get_parameters_batchruntomo(
-        &self,
-        param: &mut BatchruntomoParamBoundary,
-        _validate_only: bool,
-    ) {
-        param.ending_step = None;
-        if self.cb_ending_step.is_enabled() && self.cb_ending_step.is_selected() {
-            param.ending_step = self
-                .rb_ending_step
-                .iter()
-                .position(|button| button.is_selected() && button.is_enabled());
-        }
-        param.starting_step = None;
-        if self.cb_starting_step.is_enabled() && self.cb_starting_step.is_selected() {
-            param.starting_step = self
-                .rb_starting_step
-                .iter()
-                .position(|button| button.is_selected() && button.is_enabled());
+        param.reset_starting_step();
+        if self.cb_starting_step.is_enabled()
+            && self.cb_starting_step.is_selected()
+            && let Some((selection, enumerated_type)) = Self::selection(&self.bg_starting_step)
+        {
+            if selection.is_enabled()
+                && let Some(enumerated_type) = enumerated_type
+            {
+                param.set_starting_step(Some(&enumerated_type.get_value()));
+            }
         }
     }
-    fn set_tooltips(&mut self) {
+
+    /// Java private `setTooltips()`.
+    fn set_tooltips(&self) {
         self.cb_ending_step
-            .set_tooltip(Some("Process all datasets through the selected step."));
+            .set_tool_tip_text_string(Some("Process all datasets through the selected step."));
         self.cb_starting_step
-            .set_tooltip(Some("Start all datasets from the selected step."));
-        self.cb_enable_starting_step.set_tooltip(Some(
+            .set_tool_tip_text_string(Some("Start all datasets from the selected step."));
+        self.cb_enable_starting_step.set_tool_tip_text_string(Some(
             "Allow 'Start from' to be set past the point reached by all datasets.",
         ));
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
-    struct Parent(bool);
-    impl SeriesWatcherParent for Parent {
-        fn is_series_watcher_on(&self) -> bool {
-            self.0
+impl StatusChangeListener for BatchRunTomoStepPanel {
+    /// Java `statusChanged(Status)`.
+    fn status_changed_status(&self, new_status: Option<StatusRef>) {
+        if let Some(StatusRef::BatchRunTomoStatus(new_status)) = new_status {
+            // Avoid overriding an end state with an error state.
+            let status = BatchRunTomoStatus::get_instance_from_statuses(
+                self.status.get(),
+                Some(new_status),
+            );
+            self.status.set(status);
+            let editable = match status {
+                None => true,
+                Some(status) => {
+                    status == BatchRunTomoStatus::Open
+                        || (status.is_end_status() && status != BatchRunTomoStatus::KilledOrPaused)
+                }
+            };
+            self.update_display();
+            self.cb_starting_step.set_editable(editable);
+            for i in 0..self.rb_starting_step.len() {
+                self.rb_starting_step[i].set_editable(editable);
+            }
+            self.cb_ending_step.set_editable(editable);
+            for i in 0..self.rb_starting_step.len() {
+                self.rb_ending_step[i].set_editable(editable);
+            }
+            self.cb_enable_starting_step.set_editable(editable);
         }
-        fn equals_series_watcher_action_command(&self, _: &str) -> bool {
-            false
-        }
+        self.update_display();
     }
-    #[test]
-    fn source_defaults_and_listeners_are_constructed() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let table = RefCell::new(BatchRunTomoTableBoundary::default());
-        let parent = Parent(false);
-        let panel = BatchRunTomoStepPanel::get_instance(manager, AxisID::Only, &table, &parent);
-        assert!(panel.rb_ending_step[3].is_selected());
-        assert!(panel.rb_starting_step[3].is_selected());
-        assert_eq!(table.borrow().row_list_status_listener_count, 1);
-        assert_eq!(table.borrow().rows_status_listener_count, 1);
+
+    /// Java `statusChanged(StatusChangeEvent)`.
+    fn status_changed_event(&self, _status_change_event: Option<&dyn StatusChangeEvent>) {
+        self.update_display();
     }
-    #[test]
-    fn start_from_cannot_pass_earliest_run_stop() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let table = RefCell::new(BatchRunTomoTableBoundary {
-            earliest_run_ending_step: Some(EndingStep::Positioning),
-            ..Default::default()
-        });
-        let parent = Parent(false);
-        let mut panel = BatchRunTomoStepPanel::get_instance(manager, AxisID::Only, &table, &parent);
-        panel.cb_starting_step.set_selected(true);
-        panel.rb_starting_step[4].set_selected(true);
-        panel.update_display();
-        assert!(panel.rb_starting_step[0].is_enabled());
-        assert!(panel.rb_starting_step[2].is_enabled());
-        assert!(!panel.rb_starting_step[3].is_enabled());
-        assert!(panel.rb_starting_step[2].is_selected());
-    }
-    #[test]
-    fn series_watcher_disables_start_controls_and_param_uses_enabled_selection() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let table = RefCell::new(BatchRunTomoTableBoundary {
-            earliest_run_ending_step: Some(EndingStep::TwoDFiltering),
-            ..Default::default()
-        });
-        let parent = Parent(true);
-        let mut panel = BatchRunTomoStepPanel::get_instance(manager, AxisID::Only, &table, &parent);
-        panel.cb_starting_step.set_selected(true);
-        panel.cb_ending_step.set_selected(true);
-        panel.update_display();
-        let mut param = BatchruntomoParamBoundary::default();
-        panel.get_parameters_batchruntomo(&mut param, false);
-        assert!(!panel.cb_enable_starting_step.is_enabled());
-        assert!(!panel.cb_starting_step.is_enabled());
-        assert_eq!(param.starting_step, None);
-        assert_eq!(param.ending_step, Some(3));
+
+    /// Java `startOver()`.
+    fn start_over(&self) {
+        self.status_changed_status(Some(StatusRef::BatchRunTomoStatus(BatchRunTomoStatus::Open)));
     }
 }
+

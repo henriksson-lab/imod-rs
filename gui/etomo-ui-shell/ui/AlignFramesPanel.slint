@@ -142,7 +142,7 @@ export component AlignFramesPanel inherits VerticalLayout {
             // (`:498-514`).
             // ======================================================
             if root.current-tab == 0: VerticalLayout {
-                spacing: EtomoStyle.gap;
+                spacing: EtomoStyle.row-gap;
                 alignment: start;
 
                 // `pnlBtnLoadComFile`: FlowLayout(CENTER).
@@ -166,13 +166,12 @@ export component AlignFramesPanel inherits VerticalLayout {
 
                             // `pnlInputFileSpecLeft`: Y_AXIS.
                             VerticalLayout {
-                                spacing: EtomoStyle.gap;
+                                spacing: EtomoStyle.row-gap;
                                 alignment: start;
 
                                 // `pnlMetadataFile`: FlowLayout(LEADING).
                                 HorizontalLayout {
                                     spacing: EtomoStyle.gap;
-                                    alignment: start;
                                     RadioButton {
                                         text: "Metadata (.mdoc) file:";
                                         selected: true;
@@ -190,7 +189,6 @@ export component AlignFramesPanel inherits VerticalLayout {
                                 // `pnlListOfInputFiles`: FlowLayout(LEADING).
                                 HorizontalLayout {
                                     spacing: EtomoStyle.gap;
-                                    alignment: start;
                                     RadioButton {
                                         text: "Text file with list of files:";
                                         selected: false;
@@ -235,7 +233,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                             // `pnlInputFileSpecRight`: Y_AXIS -- the label then
                             // the scroll pane over `textAreaInputFiles`.
                             VerticalLayout {
-                                spacing: EtomoStyle.gap;
+                                spacing: EtomoStyle.row-gap;
                                 alignment: start;
                                 Label { text: "Input File(s):"; }
                                 // new TextArea(INPUT_FILES_LABEL, 7, 15), not
@@ -259,7 +257,6 @@ export component AlignFramesPanel inherits VerticalLayout {
                 // ---- `getPnlPathToFramesInMdoc()` (`:930-945`) ----
                 // `updateAdvanced` hides the whole outer panel (`:1101`).
                 if root.advanced: HorizontalLayout {
-                    alignment: start;
                     // `pnlPathToFramesInMdoc`: FlowLayout(LEADING); the field
                     // is labeled and carries a clear button, preferred
                     // width 245.  Enabled -- `updateDisplay` `:1122`.
@@ -275,85 +272,87 @@ export component AlignFramesPanel inherits VerticalLayout {
                 // ---- `getPnlOtherSourceOfMetadata()` (`:824-889`) ----
                 // Y_AXIS, BorderFactory.createEtchedBorder(), untitled.
                 EtchedBorder {
-                    PanelHeader {
+                    ph-body-25 := PanelHeader {
                         title: "Other sources of metadata";
                         open: root.other-source-of-metadata-open;
                     }
-                    if root.other-source-of-metadata-open: VerticalLayout {
-                        spacing: EtomoStyle.gap;
-                        alignment: start;
-
-                        // `pnlCorrespondingStack`: FlowLayout(LEADING).
-                        HorizontalLayout {
-                            spacing: EtomoStyle.gap;
+                    // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+                    if ph-body-25.shown-open: VerticalLayout {
+                        spacing: EtomoStyle.row-gap;
+                        if root.other-source-of-metadata-open: VerticalLayout {
+                            spacing: EtomoStyle.row-gap;
                             alignment: start;
-                            // Disabled: rbMetadataFile is selected (`:1123`).
-                            CheckBox {
-                                text: "Matching tilt series file: ";
-                                checked: false;
-                                enabled: false;
-                            }
-                            ButtonControlTextEfield {
-                                text: "";
-                                field-width: 250px;
-                                clear-button: true;
-                                enabled: false;
-                            }
-                        }
 
-                        // `pnlTiltAngleFile`: FlowLayout(LEADING).
-                        HorizontalLayout {
-                            spacing: EtomoStyle.gap;
-                            alignment: start;
-                            CheckBox {
-                                text: "Text file with tilt angles:";
-                                checked: false;
-                                enabled: false;
+                            // `pnlCorrespondingStack`: FlowLayout(LEADING).
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                // Disabled: rbMetadataFile is selected (`:1123`).
+                                CheckBox {
+                                    text: "Matching tilt series file: ";
+                                    checked: false;
+                                    enabled: false;
+                                }
+                                ButtonControlTextEfield {
+                                    text: "";
+                                    field-width: 250px;
+                                    clear-button: true;
+                                    enabled: false;
+                                }
                             }
-                            ButtonControlTextEfield {
-                                text: "";
-                                field-width: 250px;
-                                clear-button: true;
-                                enabled: false;
-                            }
-                        }
 
-                        // `pnlAnglesInFilenames`: FlowLayout(LEADING).
-                        HorizontalLayout {
-                            alignment: start;
-                            CheckBox {
-                                text: "Tilt angles in filenames";
-                                checked: false;
-                                enabled: false;
+                            // `pnlTiltAngleFile`: FlowLayout(LEADING).
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                CheckBox {
+                                    text: "Text file with tilt angles:";
+                                    checked: false;
+                                    enabled: false;
+                                }
+                                ButtonControlTextEfield {
+                                    text: "";
+                                    field-width: 250px;
+                                    clear-button: true;
+                                    enabled: false;
+                                }
                             }
-                        }
 
-                        // `pnlDelimiterOpenClose`: FlowLayout(LEADING).
-                        HorizontalLayout {
-                            spacing: EtomoStyle.gap;
-                            alignment: start;
-                            InlineTextField {
-                                label: "Delimiting character at start ";
-                                text: "[";
-                                field-width: 100px;
-                                enabled: false;
+                            // `pnlAnglesInFilenames`: FlowLayout(LEADING).
+                            HorizontalLayout {
+                                alignment: start;
+                                CheckBox {
+                                    text: "Tilt angles in filenames";
+                                    checked: false;
+                                    enabled: false;
+                                }
                             }
-                            InlineTextField {
-                                label: "and end ";
-                                text: "]";
-                                field-width: 100px;
-                                enabled: false;
-                            }
-                        }
 
-                        // `pnlAxisRotationAngle`: FlowLayout(LEADING).
-                        HorizontalLayout {
-                            alignment: start;
-                            InlineTextField {
-                                label: "Tilt axis rotation: ";
-                                text: "";
-                                field-width: 350px;
-                                enabled: false;
+                            // `pnlDelimiterOpenClose`: FlowLayout(LEADING).
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                InlineTextField {
+                                    label: "Delimiting character at start ";
+                                    text: "[";
+                                    field-width: 100px;
+                                    enabled: false;
+                                }
+                                InlineTextField {
+                                    label: "and end ";
+                                    text: "]";
+                                    field-width: 100px;
+                                    enabled: false;
+                                }
+                            }
+
+                            // `pnlAxisRotationAngle`: FlowLayout(LEADING).
+                            HorizontalLayout {
+                                alignment: start;
+                                InlineTextField {
+                                    label: "Tilt axis rotation: ";
+                                    text: "";
+                                    field-width: 350px;
+                                    enabled: false;
+                                }
                             }
                         }
                     }
@@ -370,7 +369,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                     alignment: start;
                     // `pnlGainReference`: Y_AXIS.
                     VerticalLayout {
-                        spacing: EtomoStyle.gap;
+                        spacing: EtomoStyle.row-gap;
                         alignment: start;
 
                         // `pnlRefAndDefect`: FlowLayout(LEADING).
@@ -386,7 +385,6 @@ export component AlignFramesPanel inherits VerticalLayout {
                         // by `updateAdvanced` (`:1102`).  Labeled field with a
                         // clear button, preferred width 307.
                         if root.advanced: HorizontalLayout {
-                            alignment: start;
                             ButtonControlTextEfield {
                                 label: "Gain reference file: ";
                                 text: "";
@@ -420,7 +418,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                             // to the spinner's value, index 0 (`:903-904`).
                             ComboBox {
                                 label: "";
-                                label-width: 0px;
+                                
                                 box-width: 180px;
                                 text: "0 degrees, No flip";
                                 enabled: false;
@@ -432,7 +430,6 @@ export component AlignFramesPanel inherits VerticalLayout {
                 // ---- `getPnlCameraDefectFile()` (`:947-962`) ----
                 // Hidden by `updateAdvanced` (`:1104`).
                 if root.advanced: HorizontalLayout {
-                    alignment: start;
                     ButtonControlTextEfield {
                         label: "Defect file: ";
                         text: "";
@@ -471,7 +468,7 @@ export component AlignFramesPanel inherits VerticalLayout {
             // `pnlTabBodyArray[Tab.ALIGNMENT.index]`: Y_AXIS (`:516-534`).
             // ======================================================
             if root.current-tab == 1: VerticalLayout {
-                spacing: EtomoStyle.gap;
+                spacing: EtomoStyle.row-gap;
                 alignment: start;
 
                 // ---- `pnlFitPairwiseShifts` (`:566-580`) ----
@@ -661,56 +658,60 @@ export component AlignFramesPanel inherits VerticalLayout {
                     // phDoseWeighting =
                     // PanelHeader.getAdvancedBasicInstance("Dose Weighting",
                     // this, dialogType, btnAdvanced) (`:410-411`).
-                    PanelHeader {
+                    ph-body-26 := PanelHeader {
                         title: "Dose Weighting";
                         open: root.dose-weighting-open;
                     }
-                    if root.dose-weighting-open: VerticalLayout {
-                        spacing: EtomoStyle.gap;
-                        alignment: start;
-
-                        // `pnlFixedTotalDose`: X_AXIS.  Everything here is
-                        // disabled: cbDoDoseWeighting is unchecked
-                        // (`:1170-1176`).
-                        HorizontalLayout {
+                    // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+                    if ph-body-26.shown-open: VerticalLayout {
+                        spacing: EtomoStyle.row-gap;
+                        if root.dose-weighting-open: VerticalLayout {
+                            spacing: EtomoStyle.row-gap;
                             alignment: start;
+
+                            // `pnlFixedTotalDose`: X_AXIS.  Everything here is
+                            // disabled: cbDoDoseWeighting is unchecked
+                            // (`:1170-1176`).
+                            HorizontalLayout {
+                                alignment: start;
+                                RadioButton {
+                                    text: "Dose weighting with fixed dose/image of ";
+                                    selected: true;
+                                    enabled: false;
+                                }
+                                TextField { label: "Dose weighting with fixed dose/image of "; text: ""; width: 100px; enabled: false; }
+                                Rectangle { width: 2px; }
+                                Label { text: "e/A2"; enabled: false; }
+                                Rectangle { width: 2px; }
+                            }
                             RadioButton {
-                                text: "Dose weighting with fixed dose/image of ";
-                                selected: true;
+                                text: "Dose weighting with doses from .mdoc file";
+                                selected: false;
                                 enabled: false;
                             }
-                            TextField { label: "Dose weighting with fixed dose/image of "; text: ""; width: 100px; enabled: false; }
-                            Rectangle { width: 2px; }
-                            Label { text: "e/A2"; enabled: false; }
-                            Rectangle { width: 2px; }
-                        }
-                        RadioButton {
-                            text: "Dose weighting with doses from .mdoc file";
-                            selected: false;
-                            enabled: false;
-                        }
-                        CheckBox {
-                            text: "Normalize within each set of frames";
-                            checked: true;
-                            enabled: false;
-                        }
-                        CheckBox {
-                            text: "Microscope voltage is 200 kV";
-                            checked: false;
-                            enabled: false;
-                        }
-                        // ltfOptimalDoseScaling and cbUnweightedOutputFile are
-                        // hidden by `setDoseWeightingAdvanced` (`:1091-1092`).
-                        if root.dose-weighting-advanced: InlineTextField {
-                            label: " Optimal dose scaling: ";
-                            text: "";
-                            field-width: 100px;
-                            enabled: false;
-                        }
-                        if root.dose-weighting-advanced: CheckBox {
-                            text: "Non-dose weighted output also";
-                            checked: false;
-                            enabled: false;
+                            CheckBox {
+                                text: "Normalize within each set of frames";
+                                checked: true;
+                                enabled: false;
+                            }
+                            CheckBox {
+                                text: "Microscope voltage is 200 kV";
+                                checked: false;
+                                enabled: false;
+                            }
+                            // ltfOptimalDoseScaling and cbUnweightedOutputFile are
+                            // hidden by `setDoseWeightingAdvanced` (`:1091-1092`).
+                            if root.dose-weighting-advanced: InlineTextField {
+                                label: " Optimal dose scaling: ";
+                                text: "";
+                                field-width: 100px;
+                                enabled: false;
+                            }
+                            if root.dose-weighting-advanced: CheckBox {
+                                text: "Non-dose weighted output also";
+                                checked: false;
+                                enabled: false;
+                            }
                         }
                     }
                 }
@@ -757,7 +758,7 @@ export component AlignFramesPanel inherits VerticalLayout {
                     // disabled (`:1192`).
                     ComboBox {
                         label: "";
-                        label-width: 0px;
+                        
                         box-width: 180px;
                         text: "0 degrees, No flip";
                         enabled: false;
@@ -817,7 +818,7 @@ export component AlignFramesPanel inherits VerticalLayout {
             // btnAdvanced = GlobalExpandButton.getInstance("Advanced", "Basic")
             // (`:318-319`): a SingleLineButton showing the contracted label
             // until it is expanded (`GlobalExpandButton.java:43-48`).
-            SingleLineButton { text: root.advanced ? "Basic" : "Advanced"; }
+            SingleLineButton { text: root.advanced ? "Basic" : "Advanced"; labels: "Advanced|Basic"; }
         }
     }
 }

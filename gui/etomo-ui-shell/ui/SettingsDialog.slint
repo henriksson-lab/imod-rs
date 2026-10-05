@@ -21,8 +21,9 @@ import {
     BeveledBorder,
     LabeledTextField,
     CheckBox,
+    BridgedList,
 } from "../../etomo-ui-common/ui/widgets.slint";
-import { ComboBox, FileTextField, PlainButton, ScrollList, InlineTextField } from "ShellWidgets.slint";
+import { ComboBox, FileTextField, PlainButton, InlineTextField } from "ShellWidgets.slint";
 
 export component SettingsDialog inherits Rectangle {
     background: EtomoStyle.background;
@@ -30,16 +31,15 @@ export component SettingsDialog inherits Rectangle {
     // `pnlMain`: SpacedPanel, BoxLayout.Y_AXIS.
     VerticalLayout {
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
         alignment: start;
 
         // `panelFontSelect`: SpacedPanel, BoxLayout.X_AXIS --
         // JLabel "Font family:", the font family JList in a JScrollPane
         // (SINGLE_SELECTION, visible row count 3), then `ltfFontSize`
-        // (3 columns).  The list contents come from
-        // GraphicsEnvironment.getAvailableFontFamilyNames() at run time; three
-        // static placeholder rows stand in, with "Dialog" -- FontFamilies'
-        // default -- selected.
+        // (3 columns).  The list contents come from `FontFamilies` at run time
+        // (wired: the Swing list's items and selection); unwired, three
+        // placeholder rows with "Dialog" -- FontFamilies' default -- selected.
         HorizontalLayout {
             spacing: EtomoStyle.gap;
             alignment: start;
@@ -49,8 +49,9 @@ export component SettingsDialog inherits Rectangle {
                 color: EtomoStyle.text;
                 font-size: EtomoStyle.font-size-pt * 1px;
             }
-            ScrollList {
+            BridgedList {
                 width: 200px;
+                label: "Font family:";
                 visible-rows: 3;
                 rows: ["Dialog", "DialogInput", "Monospaced"];
                 selected: 0;
@@ -78,7 +79,7 @@ export component SettingsDialog inherits Rectangle {
 
             // `pnlGeneralSettings`: BoxLayout.Y_AXIS, no border.
             VerticalLayout {
-                spacing: EtomoStyle.gap;
+                spacing: EtomoStyle.row-gap;
                 alignment: start;
                 // cbAutoFit.setEnabled(false) -- "TEMP bug# 614".
                 CheckBox { text: "Auto-fit"; enabled: false; }
@@ -97,14 +98,14 @@ export component SettingsDialog inherits Rectangle {
                     alignment: end;
                     CheckBox { text: "Enable parallel processing"; }
                 }
-                LabeledTextField { label: "# of true CPU cores: "; text: ""; }
+                LabeledTextField { label: "# of true CPU cores: "; text: ""; min-width: 210px; }
                 HorizontalLayout {
                     alignment: end;
                     CheckBox { text: "Enable graphics processing"; }
                 }
                 HorizontalLayout {
                     alignment: end;
-                    LabeledTextField { label: "# of local GPUs: "; text: ""; }
+                    LabeledTextField { label: "# of local GPUs: "; text: ""; min-width: 210px; }
                 }
             }
         }

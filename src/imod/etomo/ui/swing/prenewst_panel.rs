@@ -10,6 +10,7 @@ use super::blendmont_display::{BlendmontDisplay, BlendmontDisplayException};
 use super::check_box::CheckBox;
 use super::coarse_align_dialog::CoarseAlignDialog;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::etomo_panel::EtomoPanel;
@@ -221,8 +222,12 @@ impl PrenewstPanel {
             panel.update_enabled();
         });
         panel.spin_binning.add_change_listener(change_listener);
-        // `pnlPrenewst.addMouseListener(new GenericMouseAdapter(this))`: mouse
-        // events are not modelled.
+        // `pnlPrenewst.addMouseListener(new GenericMouseAdapter(this))`.
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(&panel) as Weak<dyn ContextMenu>;
+        panel
+            .pnl_prenewst
+            .get_component()
+            .add_mouse_listener(GenericMouseAdapter::new(context_menu));
         panel.set_tool_tip_text();
         panel
     }

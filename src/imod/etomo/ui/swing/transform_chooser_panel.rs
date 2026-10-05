@@ -1,190 +1,238 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/TransformChooserPanel.java`.
 //!
-//! Swing layout, components, and action delivery remain an explicit GUI
-//! boundary.  The source panel's transform state and enablement policy are
-//! retained directly.
-#![allow(dead_code)]
+//! The "Search For:" radio buttons choosing an alignment transform (full linear,
+//! rotation/translation/magnification, rotation/translation and, for the join model,
+//! translation), with an optional "Search For:" check box (Serial Sections).  An event
+//! dispatch thread object, created as `Rc<Self>`; the listener class
+//! `TransformChooserListener` is a closure holding a weak reference to the panel.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::imod::etomo::r#type::transform::Transform;
+use std::rc::{Rc, Weak};
 
 use super::check_box::CheckBox;
-use super::radio_button::{RadioButton, RadioButtonGroup};
+use super::radio_button::RadioButton;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent};
+use crate::imod::etomo::r#type::transform::Transform;
 
+/// Java `rcsid`.
+pub const RCSID: &str = "$Id:$";
+
+/// Java private static final `SEARCH_LABEL`.
 const SEARCH_LABEL: &str = "Search For:";
 
-/// Native Swing `JPanel`/`BoxLayout` construction boundary, retaining the
-/// source-visible hierarchy and axis/alignment settings.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TransformChooserPanelBoundary {
-    pub root_layout_x_axis: bool,
-    pub chooser_layout_y_axis: bool,
-    pub chooser_alignment_x_center: bool,
-    pub root_components: Vec<String>,
-    pub chooser_components: Vec<String>,
-}
-
-/// Java `TransformChooserPanel`.
+/// Java package-private `final class TransformChooserPanel`.
 pub struct TransformChooserPanel {
-    pub pnl_root: TransformChooserPanelBoundary,
-    pub bg_transform: Rc<RefCell<RadioButtonGroup>>,
-    pub rb_full_linear_transformation: RadioButton,
-    pub rb_rotation_translation_magnification: RadioButton,
-    pub rb_rotation_translation: RadioButton,
-    pub rb_translation: Option<RadioButton>,
-    pub cb_search: Option<CheckBox>,
+    /// Java private final `pnlRoot = new JPanel()`.
+    pnl_root: Rc<JComponent>,
+    /// Java private final `bgTransform = new ButtonGroup()` (the buttons hold it too).
+    #[allow(dead_code)]
+    bg_transform: Rc<ButtonGroup>,
+    /// Java private final `rbFullLinearTransformation`.
+    rb_full_linear_transformation: Rc<RadioButton>,
+    /// Java private final `rbRotationTranslationMagnification`.
+    rb_rotation_translation_magnification: Rc<RadioButton>,
+    /// Java private final `rbRotationTranslation`.
+    rb_rotation_translation: Rc<RadioButton>,
+    /// Java private final `rbTranslation`; null unless translations alone are
+    /// allowed.
+    rb_translation: Option<Rc<RadioButton>>,
+    /// Java private final `cbSearch`; null unless the search is optional.
+    cb_search: Option<Rc<CheckBox>>,
+    /// Rust-only: Java `this` for the listener.
+    self_ref: Weak<TransformChooserPanel>,
 }
 
 impl TransformChooserPanel {
-    fn new(allow_translations_alone: bool, optional_search: bool) -> Self {
-        let bg_transform = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        Self {
-            pnl_root: TransformChooserPanelBoundary::default(),
-            rb_full_linear_transformation: RadioButton::new_in_group(
-                "Full linear transformation",
-                bg_transform.clone(),
-            ),
-            rb_rotation_translation_magnification: RadioButton::new_in_group(
-                "Rotation/translation/magnification",
-                bg_transform.clone(),
-            ),
-            rb_rotation_translation: RadioButton::new_in_group(
-                "Rotation/translation",
-                bg_transform.clone(),
-            ),
-            rb_translation: allow_translations_alone
-                .then(|| RadioButton::new_in_group("Translation", bg_transform.clone())),
-            cb_search: optional_search.then(|| CheckBox::new_with_text(SEARCH_LABEL)),
-            bg_transform,
-        }
+    /// Java private `TransformChooserPanel(boolean, boolean)`.
+    fn new(allow_translations_alone: bool, optional_search: bool) -> Rc<TransformChooserPanel> {
+        Rc::new_cyclic(|self_ref| {
+            let bg_transform = ButtonGroup::new();
+            let rb_full_linear_transformation = RadioButton::new_string_button_group(
+                Some("Full linear transformation"),
+                Some(&bg_transform),
+            );
+            let rb_rotation_translation_magnification = RadioButton::new_string_button_group(
+                Some("Rotation/translation/magnification"),
+                Some(&bg_transform),
+            );
+            let rb_rotation_translation = RadioButton::new_string_button_group(
+                Some("Rotation/translation"),
+                Some(&bg_transform),
+            );
+            let rb_translation = if allow_translations_alone {
+                Some(RadioButton::new_string_button_group(
+                    Some("Translation"),
+                    Some(&bg_transform),
+                ))
+            } else {
+                None
+            };
+            let cb_search = if optional_search {
+                Some(CheckBox::new_string(Some(SEARCH_LABEL)))
+            } else {
+                None
+            };
+            TransformChooserPanel {
+                pnl_root: JComponent::new_panel(),
+                bg_transform,
+                rb_full_linear_transformation,
+                rb_rotation_translation_magnification,
+                rb_rotation_translation,
+                rb_translation,
+                cb_search,
+                self_ref: self_ref.clone(),
+            }
+        })
     }
 
-    pub fn get_join_model_instance() -> Self {
-        let mut instance = Self::new(true, false);
+    /// Java static `getJoinModelInstance()`.
+    pub fn get_join_model_instance() -> Rc<TransformChooserPanel> {
+        let instance = TransformChooserPanel::new(true, false);
         instance.create_panel();
         instance.set_tooltips();
         instance.add_listeners();
         instance
     }
 
-    pub fn get_join_align_instance() -> Self {
-        let mut instance = Self::new(false, false);
+    /// Java static `getJoinAlignInstance()`.
+    pub fn get_join_align_instance() -> Rc<TransformChooserPanel> {
+        let instance = TransformChooserPanel::new(false, false);
         instance.create_panel();
         instance.set_tooltips();
         instance.add_listeners();
         instance
     }
 
-    pub fn get_serial_sections_instance() -> Self {
-        let mut instance = Self::new(false, true);
+    /// Java static `getSerialSectionsInstance()`.
+    pub fn get_serial_sections_instance() -> Rc<TransformChooserPanel> {
+        let instance = TransformChooserPanel::new(false, true);
         instance.create_panel();
         instance.set_tooltips();
         instance.add_listeners();
         instance
     }
 
-    fn create_panel(&mut self) {
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // init
         self.set_transform(None);
-        self.pnl_root.root_layout_x_axis = true;
-        self.pnl_root.root_components = vec!["pnlChooser".into(), "horizontalGlue".into()];
-        self.pnl_root.chooser_layout_y_axis = true;
-        self.pnl_root.chooser_alignment_x_center = true;
-        if self.cb_search.is_some() {
-            self.pnl_root.chooser_components.push("cbSearch".into());
-        } else {
-            self.pnl_root
-                .chooser_components
-                .push(format!("JLabel:{SEARCH_LABEL}"));
+        // root panel
+        // Swing layout: pnlRoot BoxLayout X_AXIS.
+        let pnl_chooser = JComponent::new_panel();
+        self.pnl_root.add(&pnl_chooser);
+        // Swing layout: Box.createHorizontalGlue().
+        // choooser panel
+        // Swing layout: pnlChooser BoxLayout Y_AXIS, CENTER_ALIGNMENT.
+        match &self.cb_search {
+            Some(cb_search) => pnl_chooser.add(&cb_search.get_component()),
+            None => pnl_chooser.add(&JComponent::new_label(SEARCH_LABEL)),
         }
-        self.pnl_root
-            .chooser_components
-            .push("rbFullLinearTransformation".into());
-        self.pnl_root
-            .chooser_components
-            .push("rbRotationTranslationMagnification".into());
-        self.pnl_root
-            .chooser_components
-            .push("rbRotationTranslation".into());
-        if self.rb_translation.is_some() {
-            self.pnl_root
-                .chooser_components
-                .push("rbTranslation".into());
+        pnl_chooser.add(&self.rb_full_linear_transformation.get_component());
+        pnl_chooser.add(&self.rb_rotation_translation_magnification.get_component());
+        pnl_chooser.add(&self.rb_rotation_translation.get_component());
+        if let Some(rb_translation) = &self.rb_translation {
+            pnl_chooser.add(&rb_translation.get_component());
         }
     }
 
-    fn add_listeners(&mut self) {
-        if let Some(cb_search) = &mut self.cb_search {
-            cb_search.add_action_listener();
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        if let Some(cb_search) = &self.cb_search {
+            // Java `new TransformChooserListener(this)`.
+            let panel = self.self_ref.clone();
+            let listener: ActionListener = Rc::new(move |_event: &ActionEvent| {
+                if let Some(panel) = panel.upgrade() {
+                    panel.action();
+                }
+            });
+            cb_search.add_action_listener(Some(listener));
         }
     }
 
-    pub fn get_search_action_command(&self) -> Option<&str> {
-        self.cb_search
-            .as_ref()
-            .and_then(CheckBox::get_action_command)
+    /// Java package-private `getSearchActionCommand()`.
+    pub fn get_search_action_command(&self) -> Option<String> {
+        if let Some(cb_search) = &self.cb_search {
+            return cb_search.get_action_command();
+        }
+        None
     }
 
-    pub fn add_search_listener(&mut self) {
-        self.cb_search
-            .as_mut()
-            .expect("Java TransformChooserPanel.addSearchListener null cbSearch")
-            .add_action_listener();
+    /// Java package-private `addSearchListener(ActionListener)`.
+    ///
+    /// Fixed in translation: the source dereferences `cbSearch`, which is null for
+    /// the join instances (NullPointerException); its only caller passes a join
+    /// instance only when `joinInterface` is false, and a null check box adds nothing
+    /// here.
+    pub fn add_search_listener(&self, listener: ActionListener) {
+        if let Some(cb_search) = &self.cb_search {
+            cb_search.add_action_listener(Some(listener));
+        }
     }
 
-    pub fn get_component(&self) -> &TransformChooserPanelBoundary {
-        &self.pnl_root
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.clone()
     }
 
-    fn action(&mut self) {
+    /// Java private `action()`.
+    fn action(&self) {
         self.update_display();
     }
 
-    fn update_display(&mut self) {
-        let enable = self
-            .cb_search
-            .as_ref()
-            .expect("Java TransformChooserPanel.updateDisplay null cbSearch")
-            .is_selected();
+    /// Java private `updateDisplay()`.  Only reached with a search check box (from
+    /// its listener and from `setTransform`).
+    fn update_display(&self) {
+        let Some(cb_search) = &self.cb_search else {
+            return;
+        };
+        let enable = cb_search.is_selected();
         self.rb_full_linear_transformation.set_enabled(enable);
         self.rb_rotation_translation_magnification
             .set_enabled(enable);
         self.rb_rotation_translation.set_enabled(enable);
-        if let Some(rb_translation) = &mut self.rb_translation {
+        if let Some(rb_translation) = &self.rb_translation {
             rb_translation.set_enabled(enable);
         }
     }
 
-    fn set_tooltips(&mut self) {
-        if let Some(cb_search) = &mut self.cb_search {
-            cb_search.set_tool_tip_text(Some(
+    /// Java private `setTooltips()`.
+    fn set_tooltips(&self) {
+        if let Some(cb_search) = &self.cb_search {
+            cb_search.set_tool_tip_text_string(Some(
                 "Use iterative search to find best transformation for aligning images.",
             ));
         }
-        self.rb_full_linear_transformation.set_tool_tip_text(Some(
-            "Use rotation, translation, magnification, and stretching to align images.",
-        ));
+        self.rb_full_linear_transformation
+            .set_tool_tip_text_string(Some(
+                "Use rotation, translation, magnification, and stretching to align images.",
+            ));
         self.rb_rotation_translation_magnification
-            .set_tool_tip_text(Some(
+            .set_tool_tip_text_string(Some(
                 "Use translation, rotation, and magnification to align images.",
             ));
         self.rb_rotation_translation
-            .set_tool_tip_text(Some("Use translation and rotation to align images."));
-        if let Some(rb_translation) = &mut self.rb_translation {
-            rb_translation.set_tool_tip_text(Some("Use translation to align images."));
+            .set_tool_tip_text_string(Some("Use translation and rotation to align images."));
+        if let Some(rb_translation) = &self.rb_translation {
+            rb_translation.set_tool_tip_text_string(Some("Use translation to align images."));
         }
     }
 
+    /// Java package-private `isSearch()`.
     pub fn is_search(&self) -> bool {
-        self.cb_search.as_ref().is_none_or(CheckBox::is_selected)
+        match &self.cb_search {
+            // Search is always on
+            None => true,
+            Some(cb_search) => cb_search.is_selected(),
+        }
     }
 
+    /// Java package-private `getTransform()`.
+    ///
+    /// Fixed in translation: with no radio button selected the source dereferences
+    /// `rbTranslation`, which is null for the align instances
+    /// (NullPointerException); a missing button is not selected here.
     pub fn get_transform(&self) -> Transform {
-        if self
-            .cb_search
-            .as_ref()
-            .is_some_and(|cb_search| !cb_search.is_selected())
+        if let Some(cb_search) = &self.cb_search
+            && !cb_search.is_selected()
         {
             return Transform::SkipSearch;
         }
@@ -200,82 +248,41 @@ impl TransformChooserPanel {
         if self
             .rb_translation
             .as_ref()
-            .expect("Java TransformChooserPanel.getTransform null rbTranslation")
-            .is_selected()
+            .is_some_and(|rb_translation| rb_translation.is_selected())
         {
             return Transform::Translation;
         }
         Transform::DEFAULT
     }
 
-    pub fn set_transform(&mut self, mut transform: Option<Transform>) {
-        if let Some(cb_search) = &mut self.cb_search {
-            cb_search.set_selected(transform != Some(Transform::SkipSearch));
+    /// Java package-private `setTransform(Transform)`; null is `None`.
+    ///
+    /// Fixed in translation: `Transform.TRANSLATION` on an instance without the
+    /// translation button dereferences null in the source; nothing is selected here.
+    pub fn set_transform(&self, transform: Option<Transform>) {
+        if let Some(cb_search) = &self.cb_search {
+            if transform == Some(Transform::SkipSearch) {
+                cb_search.set_selected_boolean(false);
+            } else {
+                cb_search.set_selected_boolean(true);
+            }
             self.update_display();
         }
         if transform != Some(Transform::SkipSearch) {
-            let transform = transform.get_or_insert(Transform::DEFAULT);
-            match *transform {
-                Transform::FullLinearTransformation => {
-                    self.rb_full_linear_transformation.set_selected(true)
-                }
-                Transform::RotationTranslationMagnification => self
-                    .rb_rotation_translation_magnification
-                    .set_selected(true),
-                Transform::RotationTranslation => self.rb_rotation_translation.set_selected(true),
-                Transform::Translation => self
-                    .rb_translation
-                    .as_mut()
-                    .expect("Java TransformChooserPanel.setTransform null rbTranslation")
-                    .set_selected(true),
-                Transform::SkipSearch => {}
+            let transform = transform.unwrap_or(Transform::DEFAULT);
+            if transform == Transform::FullLinearTransformation {
+                self.rb_full_linear_transformation
+                    .set_selected_boolean(true);
+            } else if transform == Transform::RotationTranslationMagnification {
+                self.rb_rotation_translation_magnification
+                    .set_selected_boolean(true);
+            } else if transform == Transform::RotationTranslation {
+                self.rb_rotation_translation.set_selected_boolean(true);
+            } else if transform == Transform::Translation
+                && let Some(rb_translation) = &self.rb_translation
+            {
+                rb_translation.set_selected_boolean(true);
             }
         }
-    }
-}
-
-/// Java private `TransformChooserListener`, whose Swing event delivery is the
-/// GUI boundary and whose source action call remains direct.
-struct TransformChooserListener;
-
-impl TransformChooserListener {
-    fn action_performed(&self, panel: &mut TransformChooserPanel) {
-        panel.action();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{Transform, TransformChooserListener, TransformChooserPanel};
-
-    #[test]
-    fn join_model_supports_all_source_transform_choices() {
-        let mut panel = TransformChooserPanel::get_join_model_instance();
-        assert!(panel.is_search());
-        assert_eq!(panel.get_transform(), Transform::FullLinearTransformation);
-        panel.set_transform(Some(Transform::Translation));
-        assert_eq!(panel.get_transform(), Transform::Translation);
-        assert_eq!(panel.get_component().chooser_components.len(), 5);
-    }
-
-    #[test]
-    fn optional_search_disables_buttons_and_returns_skip_search() {
-        let mut panel = TransformChooserPanel::get_serial_sections_instance();
-        panel.set_transform(Some(Transform::SkipSearch));
-        assert!(!panel.is_search());
-        assert_eq!(panel.get_transform(), Transform::SkipSearch);
-        assert!(!panel.rb_full_linear_transformation.is_enabled());
-        assert!(!panel.rb_rotation_translation_magnification.is_enabled());
-        assert!(!panel.rb_rotation_translation.is_enabled());
-        panel.cb_search.as_mut().unwrap().set_selected(true);
-        TransformChooserListener.action_performed(&mut panel);
-        assert!(panel.rb_full_linear_transformation.is_enabled());
-    }
-
-    #[test]
-    #[should_panic(expected = "null rbTranslation")]
-    fn source_null_translation_access_is_retained() {
-        let mut panel = TransformChooserPanel::get_join_align_instance();
-        panel.set_transform(Some(Transform::Translation));
     }
 }

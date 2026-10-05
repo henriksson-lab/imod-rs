@@ -12,14 +12,8 @@ use std::rc::Rc;
 use crate::imod::etomo::etomo_director::ARGUMENTS;
 use crate::imod::etomo::jdk::JComponent;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
+use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
 use crate::imod::etomo::util::utilities;
-
-/// Java `UITestFieldType.MENU_ITEM.toString()`.
-// TODO(unit): needs etomo/type/UITestFieldType.java - `UITestFieldType.MENU_ITEM`
-// ("mn", unlimitedSegments true) is written out here.
-const MENU_ITEM_FIELD_TYPE: &str = "mn";
-/// Java `UITestFieldType.MENU_ITEM.isUnlimitedSegments()`.
-const MENU_ITEM_UNLIMITED_SEGMENTS: bool = true;
 
 /// Java package-private `final class MenuItem extends JMenuItem`.
 pub struct MenuItem {
@@ -76,11 +70,12 @@ impl MenuItem {
 
     /// Java overridden `setName(String)`.
     pub fn set_name(&self, text: Option<&str>) {
-        let name = utilities::convert_label_to_name(text, MENU_ITEM_UNLIMITED_SEGMENTS);
+        let field_type = UITestFieldType::MENU_ITEM;
+        let name = utilities::convert_label_to_name(text, field_type.is_unlimited_segments());
         // Java string concatenation renders a null name as "null".
         self.component.set_name(Some(&format!(
             "{}{}{}",
-            MENU_ITEM_FIELD_TYPE,
+            field_type,
             SEPARATOR_CHAR,
             name.as_deref().unwrap_or("null")
         )));

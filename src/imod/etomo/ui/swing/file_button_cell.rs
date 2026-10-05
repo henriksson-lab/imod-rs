@@ -196,11 +196,13 @@ impl FileButtonCell {
         *self.file_filter.borrow_mut() = input;
     }
 
-    /// Java `setFileFilter(ExtensibleFileFilter)`.
-    // TODO(unit): needs etomo/storage/ExtensibleFileFilter.java - the parameter is that
-    // class (a FileFilter subclass); it is taken as a FileFilter here.
-    pub fn set_file_filter_extensible_file_filter(&self, input: Option<Rc<dyn FileFilter>>) {
-        *self.file_filter.borrow_mut() = input;
+    /// Java `setFileFilter(ExtensibleFileFilter)`.  `TomogramFileFilter` is the only
+    /// concrete `ExtensibleFileFilter`.
+    pub fn set_file_filter_extensible_file_filter(
+        &self,
+        input: Option<Rc<crate::imod::etomo::storage::tomogram_file_filter::TomogramFileFilter>>,
+    ) {
+        *self.file_filter.borrow_mut() = input.map(|input| input as Rc<dyn FileFilter>);
     }
 
     /// Java `getFileFilter()`.

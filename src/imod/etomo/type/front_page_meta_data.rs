@@ -101,12 +101,12 @@ impl Storable for FrontPageMetaData {
     }
 
     /// Java `load(Properties)`: `load(props, "")`.
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         self.load_with_prepend(properties, "");
     }
 
     /// Java `load(Properties, String)`.
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         // super.load(props, prepend): BaseMetaData.load creates the prepend,
         // loads, and then (canCorrectImageFilenameStyle is true here) calls
         // checkImageFilenameStyleLoaded with the *created* prepend.

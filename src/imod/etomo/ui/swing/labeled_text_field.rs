@@ -776,9 +776,10 @@ impl LabeledTextField {
     }
 
     /// Java `addMouseListener(MouseListener)`.
-    pub fn add_mouse_listener(&self) {
-        // Swing mouse: panel, label and textField.addMouseListener(listener) - mouse
-        // events are not modelled.
+    pub fn add_mouse_listener(&self, listener: Rc<dyn crate::imod::etomo::jdk::MouseListener>) {
+        self.panel.add_mouse_listener(listener.clone());
+        self.label.add_mouse_listener(listener.clone());
+        self.text_field.add_mouse_listener(listener);
     }
 }
 
@@ -858,8 +859,6 @@ impl Field for LabeledTextField {
         // only search for default value once
         if self.default_value.borrow().is_none() {
             let default_value = Rc::new(TextFieldSetting::new_field_type(self.field_type));
-            // TODO(unit): needs etomo/logic/AutodocAttributeRetriever.java -
-            // INSTANCE.getDefaultValue(DirectiveDef).
             let value = autodoc_attribute_retriever::INSTANCE
                 .get_default_value(Some(directive_def.clone()));
             if let Some(value) = value {

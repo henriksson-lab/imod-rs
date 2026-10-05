@@ -10,6 +10,7 @@ use std::rc::{Rc, Weak};
 use super::check_box::CheckBox;
 use super::check_text_field::CheckTextField;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::etched_border::EtchedBorder;
@@ -579,9 +580,9 @@ impl TiltxcorrPanel {
     }
 
     /// Java private `addListeners()` (TiltxcorrPanel.java:329-344).
-    fn add_listeners(&self) {
-        // `pnlRoot.addMouseListener(new GenericMouseAdapter(this))`: mouse events
-        // are not modelled.
+    fn add_listeners(self: &Rc<Self>) {
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.pnl_root.add_mouse_listener(GenericMouseAdapter::new(context_menu));
         let listener = &self.action_listener;
         self.cb_cumulative_correlation
             .add_action_listener(Some(listener.clone()));

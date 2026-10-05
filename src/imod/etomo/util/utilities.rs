@@ -15,11 +15,6 @@
 //! indexes by byte.  The two agree for the ASCII file names, labels and command lines
 //! these functions are given; they diverge only for non-ASCII input, where Java's
 //! `substring` can also split a surrogate pair.
-//!
-//! **Frontier.**  Members that reach Swing (`printComponents`,
-//! `findMessageAndOpenDialog`), a manager (`BaseManager`), the process layer
-//! (`SystemProgram`, `BaseProcessManager`, `MRCHeader`), the primative tokenizer, or a
-//! type with no module carry a `// TODO(unit):` comment naming the blocking source.
 #![allow(dead_code)]
 
 use chrono::{Local, TimeZone};
@@ -478,12 +473,37 @@ pub fn java_util_properties_store(
 /// month abbreviations, a zero-padded day of month, and the platform's short time zone
 /// name.
 pub fn java_util_date_to_string(millis: i64) -> String {
-    Local
+    let date = Local
         .timestamp_millis_opt(millis)
         .single()
-        .expect("Java Date milliseconds outside chrono's supported range")
-        .format("%a %b %d %H:%M:%S %Z %Y")
-        .to_string()
+        .expect("Java Date milliseconds outside chrono's supported range");
+    // `zzz` is the zone's short name ("CEST"); chrono's `Local` knows only the
+    // offset, so the name comes from the C library's zone database (the
+    // `tm_zone` of `localtime_r`), as the JVM's comes from the same tzdata.
+    let seconds = millis.div_euclid(1000) as libc::time_t;
+    // SAFETY: `tm` is plain data that `localtime_r` fills; `tm_zone` then points
+    // at a NUL-terminated string in the C library's static zone table.
+    let zone = unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&seconds, &mut tm).is_null() || tm.tm_zone.is_null() {
+            None
+        } else {
+            Some(
+                std::ffi::CStr::from_ptr(tm.tm_zone)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        }
+    };
+    match zone {
+        Some(zone) => format!(
+            "{} {} {}",
+            date.format("%a %b %d %H:%M:%S"),
+            zone,
+            date.format("%Y")
+        ),
+        None => date.format("%a %b %d %H:%M:%S %Z %Y").to_string(),
+    }
 }
 
 /// `new java.text.SimpleDateFormat("MMMdd-HHmmss", new Locale("en","US")).format(Date)`.
@@ -951,8 +971,7 @@ pub const LIMITED_SEGMENT_MAX: i32 = 7;
 
 /// Java `CLEAN_PRINT`:
 /// `CleanPrint.getInstance(true, EtomoDirector.FILE_INFO_CLEAN_PRINT_LABEL)`.  It is
-/// read only by `deleteFileOrDirectory` and the commented-out body of `copyFile`, both
-/// of which are untranslated below.
+/// read only by `deleteFileOrDirectory` (and the commented-out body of `copyFile`).
 static CLEAN_PRINT: LazyLock<crate::imod::etomo::util::clean_print::CleanPrint> =
     LazyLock::new(|| {
         crate::imod::etomo::util::clean_print::CleanPrint::get_instance_blockable(
@@ -960,10 +979,6 @@ static CLEAN_PRINT: LazyLock<crate::imod::etomo::util::clean_print::CleanPrint> 
             Some(etomo_director::FILE_INFO_CLEAN_PRINT_LABEL),
         )
     });
-
-// TODO(unit): needs etomo/process/BaseProcessManager.java - Java `isPython3()` returns
-// `BaseProcessManager.isPython3()`, which runs a python process; that unit has no
-// module, so the `python3` field stays unread here.
 
 /// Java `isJava7`.
 ///
@@ -984,15 +999,6 @@ pub fn is_java7() -> bool {
         *java7 = Some(false);
     }
     java7.unwrap()
-}
-
-/// Java `isPython3`: IMOD configuration may override this through the usual
-/// `PYTHON_VERSION` environment value; absent configuration uses Python 3.
-#[allow(non_snake_case)]
-pub fn isPython3() -> bool {
-    std::env::var("PYTHON_VERSION")
-        .map(|value| value.trim_start().starts_with('3'))
-        .unwrap_or(true)
 }
 
 /// Java `getClassString(Object)`, represented by Rust's concrete type name.
@@ -1930,11 +1936,21 @@ pub fn file_exists(
     false
 }
 
-// TODO(unit): needs etomo/BaseManager.java and etomo/ui/swing/UIHarness.java - all three
-// `getFile(BaseManager, ...)` overloads (Utilities.java:1061, 1074, 1086) read
-// `manager.getPropertyUserDir()` / `manager.getName()` and the two with `mustExist` pop
-// up `UIHarness.INSTANCE.openMessageDialog`.  The `FileType` overload additionally
-// needs the untranslated instance half of etomo/type/FileType.java.
+/// Java `getFile(BaseManager, AxisID, String extension)`.
+pub fn get_file_extension(
+    manager: &'static dyn BaseManager,
+    axis_id: AxisID,
+    extension: &str,
+) -> std::path::PathBuf {
+    std::path::PathBuf::from(java_io_file_new(
+        &manager
+            .get_property_user_dir()
+            .unwrap_or_else(|| "null".to_owned()),
+        &(manager.get_name().unwrap_or_else(|| "null".to_owned())
+            + &axis_id.get_extension()
+            + extension),
+    ))
+}
 
 /// Java `getFile(String, String)`.
 pub fn get_file(property_user_dir: &str, filename: Option<&str>) -> std::path::PathBuf {
@@ -2528,30 +2544,103 @@ pub fn debug_print_to_out(string: &str, to_out: bool) {
     }
 }
 
-/// Native filesystem form of Java `deleteFileOrDirectory`.
-///
-/// Missing paths are successful, as in `File.delete`/the Java implementation.  A native
-/// UI can turn the returned error into the corresponding message dialog.
-pub fn delete_file_or_directory(file: &std::path::Path) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(file) {
-        Ok(metadata) if metadata.file_type().is_dir() => std::fs::remove_dir_all(file),
-        Ok(_) => std::fs::remove_file(file),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
-    }
-}
-
-/// Native form of Java `deleteFileType(BaseManager, AxisID, FileType)`.
+/// Java `deleteFileType(BaseManager, AxisID, FileType)`.
 pub fn delete_file_type(
     manager: &'static dyn BaseManager,
     axis_id: Option<AxisID>,
     file_type: &FileType,
-) -> std::io::Result<()> {
-    let directory = manager.get_property_user_dir().unwrap_or_default();
-    let file_name = file_type
-        .get_file_name(Some(manager), axis_id)
-        .unwrap_or_default();
-    delete_file_or_directory(&get_file(&directory, Some(&file_name)))
+) -> bool {
+    delete_file_or_directory(
+        &std::path::PathBuf::from(java_io_file_new(
+            &manager
+                .get_property_user_dir()
+                .unwrap_or_else(|| "null".to_owned()),
+            &file_type
+                .get_file_name(Some(manager), axis_id)
+                .unwrap_or_else(|| "null".to_owned()),
+        )),
+        Some(manager),
+        axis_id,
+    )
+}
+
+/// Java `deleteFileOrDirectory(File, BaseManager, AxisID)`.
+pub fn delete_file_or_directory(
+    file: &std::path::Path,
+    manager: Option<&'static dyn BaseManager>,
+    axis_id: Option<AxisID>,
+) -> bool {
+    delete_file_or_directory_silent(file, manager, axis_id, false)
+}
+
+/// Java `deleteFileOrDirectory(File, BaseManager, AxisID, boolean silent)`.  The
+/// message dialogs are posted to the event dispatch thread, as in
+/// [`get_file_must_exist_extension`].
+///
+/// Upstream bug fixed in translation (Utilities.java:1659): a directory with a null
+/// manager throws `NullPointerException` on `manager.getPropertyUserDir()`; here
+/// `b3dremove` runs with no working directory set (the path it is given is absolute).
+/// `SystemProgram` never reads its axis, so a null axis is passed as `ONLY`.
+pub fn delete_file_or_directory_silent(
+    file: &std::path::Path,
+    manager: Option<&'static dyn BaseManager>,
+    axis_id: Option<AxisID>,
+    silent: bool,
+) -> bool {
+    let file_name = java_io_file_get_name(&file.to_string_lossy());
+    CLEAN_PRINT.print(Some(&format!("(2) Delete  to {}.", file_name)));
+    if file.is_file() {
+        if file.exists() {
+            CLEAN_PRINT.print(Some(&format!("(3) Delete {}.", file_name)));
+            if std::fs::remove_file(file).is_err() {
+                if !silent {
+                    let mut message = format!(
+                        "Unable to delete file: {}",
+                        java_io_file_get_absolute_path(&file.to_string_lossy())
+                    );
+                    if is_windows_os() {
+                        message.push_str("\nIf this file is open in 3dmod, close 3dmod.");
+                    }
+                    crate::imod::etomo::ui::swing::ui_harness::post_message_dialog(
+                        manager,
+                        message,
+                        "Can not delete file".to_owned(),
+                        axis_id,
+                    );
+                }
+                return false;
+            }
+        }
+    } else if file.is_dir() {
+        let remove = crate::imod::etomo::process::system_program::SystemProgram::new_array(
+            manager,
+            manager.and_then(|manager| manager.get_property_user_dir()),
+            Some(vec![
+                "python".to_owned(),
+                "-u".to_owned(),
+                etomo_director::INSTANCE
+                    .get_python_script_path()
+                    .unwrap_or_else(|| "null".to_owned())
+                    + "b3dremove",
+                "-r".to_owned(),
+                java_io_file_get_absolute_path(&file.to_string_lossy()),
+            ]),
+            axis_id.unwrap_or(AxisID::Only),
+        );
+        remove.run();
+        if file.exists() {
+            if !silent {
+                crate::imod::etomo::ui::swing::ui_harness::post_message_dialog(
+                    manager,
+                    "Cannot delete the directory".to_owned(),
+                    "Can not delete directory".to_owned(),
+                    axis_id,
+                );
+            }
+            return false;
+        }
+    }
+    true
 }
 
 /// Java `getStrippedFileName(File)`.  Returns the name of file, stripped of its
@@ -2667,10 +2756,7 @@ pub fn write_file(
             }
         }
         if !done {
-            // TODO(unit): needs etomo/ui/swing/UIHarness.java and
-            // etomo/process/SystemProgram.java - `Utilities.deleteFileOrDirectory(file,
-            // manager, axisID)`, which pops up a dialog on failure and removes a
-            // directory by running `b3dremove`.
+            delete_file_or_directory(file, manager, axis_id);
         }
     }
     let strings = match strings {
@@ -2723,11 +2809,13 @@ pub fn is_valid_file(
         invalid_reason.push_str(&(absolute_path.clone() + " must exist.\n"));
         is_valid = false;
     }
-    if can_read && std::fs::File::open(file).is_err() {
+    if can_read && !java_io_file_can_read(&file.to_string_lossy()) {
         invalid_reason.push_str(&(absolute_path.clone() + " must be readable.\n"));
         is_valid = false;
     }
-    if can_write && std::fs::OpenOptions::new().write(true).open(file).is_err() {
+    // `File.canWrite()` is access(W_OK): a writable directory passes (opening it
+    // for writing never does).
+    if can_write && !java_io_file_can_write(&file.to_string_lossy()) {
         invalid_reason.push_str(&(absolute_path.clone() + " must be writable.\n"));
         is_valid = false;
     }
@@ -2810,10 +2898,6 @@ pub fn timestamp_file(
         status,
     );
 }
-
-// TODO(unit): needs etomo/comscript/ComScript.java - Java `timestamp(String, String,
-// ComScript, String)` reads `container.getName()` off a `ComScript`, and that unit has
-// no module.
 
 /// Java `timestamp(String, String)`.
 pub fn timestamp_command_status(command: Option<&str>, status: Option<&str>) {
@@ -3065,23 +3149,23 @@ pub fn java_lang_system_get_property_os_name() -> &'static str {
     }
 }
 
-/// Native UI-boundary form of Java `findMessageAndOpenDialog`.
-///
-/// Every line beginning with `starts_with` is handed to `open_dialog`, preserving the
-/// source's behavior of opening a dialog for every match rather than stopping at one.
-pub fn find_message_and_open_dialog<F>(
+/// Java `findMessageAndOpenDialog(BaseManager, AxisID, String[], String, String)`.
+/// Opens an information dialog for every line that starts with `starts_with`.
+pub fn find_message_and_open_dialog(
+    manager: Option<&'static dyn BaseManager>,
+    axis_id: Option<AxisID>,
     search_lines: Option<&[String]>,
     starts_with: &str,
     title: &str,
-    mut open_dialog: F,
-) where
-    F: FnMut(&str, &str),
-{
-    if let Some(search_lines) = search_lines {
-        for line in search_lines {
-            if line.starts_with(starts_with) {
-                open_dialog(line, title);
-            }
+) {
+    let Some(search_lines) = search_lines else {
+        return;
+    };
+    for line in search_lines {
+        if line.starts_with(starts_with) {
+            crate::imod::etomo::ui::swing::ui_harness::open_info_message_dialog_from_process(
+                manager, line, title, axis_id,
+            );
         }
     }
 }
@@ -3644,7 +3728,9 @@ fn get_rootname_for_selected_files(files: &[String]) -> String {
 mod tests {
     use super::*;
 
-    fn parsed_header(x_spacing: f64) -> std::rc::Rc<std::cell::RefCell<MRCHeader>> {
+    fn parsed_header(
+        x_spacing: f64,
+    ) -> std::sync::Arc<crate::imod::etomo::util::mrc_header::SharedMRCHeader> {
         let path = format!(
             "/tmp/imod-rs-utilities-header-{}-{x_spacing}",
             java_lang_system_current_time_millis()
@@ -3688,47 +3774,17 @@ mod tests {
     }
 
     #[test]
-    fn delete_file_or_directory_handles_missing_files_and_trees() {
-        let root = std::env::temp_dir().join(format!(
-            "imod-rs-utilities-delete-{}",
-            java_lang_system_current_time_millis()
-        ));
-        let nested = root.join("nested");
-        std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(nested.join("value"), b"value").unwrap();
-        delete_file_or_directory(&root).unwrap();
-        assert!(!root.exists());
-        delete_file_or_directory(&root).unwrap();
-    }
-
-    #[test]
-    fn find_message_opens_every_matching_line() {
-        let lines = vec![
-            "keep this".to_string(),
-            "open one".to_string(),
-            "open two".to_string(),
-        ];
-        let mut opened = Vec::new();
-        find_message_and_open_dialog(Some(&lines), "open", "Messages", |message, title| {
-            opened.push((message.to_string(), title.to_string()));
-        });
-        assert_eq!(
-            opened,
-            vec![
-                ("open one".to_string(), "Messages".to_string()),
-                ("open two".to_string(), "Messages".to_string())
-            ]
-        );
-    }
-
-    #[test]
     fn java_date_to_string_formats_the_epoch_in_the_local_timezone() {
         let epoch = Local.timestamp_millis_opt(0).single().unwrap();
 
-        assert_eq!(
-            java_util_date_to_string(0),
-            epoch.format("%a %b %d %H:%M:%S %Z %Y").to_string()
-        );
+        // `zzz` is the zone's short name (CET, UTC, ...), as the JVM prints it,
+        // not chrono's numeric offset.
+        let text = java_util_date_to_string(0);
+        let prefix = epoch.format("%a %b %d %H:%M:%S ").to_string();
+        assert!(text.starts_with(&prefix), "{text}");
+        assert!(text.ends_with(" 1970"), "{text}");
+        let zone = &text[prefix.len()..text.len() - 5];
+        assert!(!zone.is_empty() && !zone.contains(':'), "{text}");
     }
 
     #[test]
@@ -3907,15 +3963,16 @@ pub fn is_valid_stack_file(
 
 /// Java `getStackBinning(BaseManager, AxisID, FileType, boolean)`.  Function
 /// calculates the binning from the stack's pixel spacing and the raw stack's
-/// pixel spacing.  Returns the binning (default 1).  `Err` carries the message
-/// of the `InvalidParameterException` or `IOException` rethrown when
-/// `throw_exception` is true.  Called by `CcdEraserBeadsPanel`.
+/// pixel spacing.  Returns the binning (default 1).  `Err` carries the
+/// `InvalidParameterException` or `IOException` rethrown when `throw_exception` is
+/// true, or the unchecked `NumberFormatException` of `MRCHeader.read`.  Called by
+/// `CcdEraserBeadsPanel`.
 pub fn get_stack_binning_for_file_type_boolean(
     manager: &'static dyn BaseManager,
     axis_id: AxisID,
     stack_file_type: &std::sync::Arc<FileType>,
     throw_exception: bool,
-) -> Result<i32, String> {
+) -> Result<i32, crate::imod::etomo::util::mrc_header::ReadError> {
     let stack_header =
         MRCHeader::get_instance_from_file_type(manager, Some(axis_id), stack_file_type);
     let rawstack_header = MRCHeader::get_instance_from_file_type(
@@ -3936,16 +3993,24 @@ pub fn get_stack_binning_for_file_type_boolean(
     match read {
         Ok(true) => {}
         Ok(false) => return Ok(1),
-        // catch (InvalidParameterException e) / catch (IOException e); the source
-        // prints the stack trace of the former only (missing file).  Both carry
-        // the same message here.
-        Err(e) => {
+        // catch (InvalidParameterException e)
+        Err(e @ crate::imod::etomo::util::mrc_header::ReadError::InvalidParameter(_)) => {
             if throw_exception {
                 return Err(e);
             }
+            // missing file
             eprintln!("{e}");
             return Ok(1);
         }
+        // catch (IOException e)
+        Err(e @ crate::imod::etomo::util::mrc_header::ReadError::Io(_)) => {
+            if throw_exception {
+                return Err(e);
+            }
+            return Ok(1);
+        }
+        // NumberFormatException is not caught.
+        Err(e) => return Err(e),
     }
     let mut binning: i32 = 1;
     let rawstack_x_pixel_spacing = rawstack_header.borrow().get_x_pixel_spacing();

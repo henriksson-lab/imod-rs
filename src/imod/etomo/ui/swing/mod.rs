@@ -10,24 +10,16 @@ pub mod align_frames_panel;
 pub mod alignment_estimation_dialog;
 pub mod alt_stack_display;
 pub mod alt_stack_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod anisotropic_diffusion_dialog;
 pub mod appearance_extension;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod auto_alignment_panel;
 pub mod axis_process_panel;
 pub mod axis_progress_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod batch_run_tomo_dataset_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod batch_run_tomo_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod batch_run_tomo_process_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod batch_run_tomo_row;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod batch_run_tomo_step_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod batch_run_tomo_table;
 pub mod bead_track_display;
 pub mod beads3d_find_panel;
@@ -38,11 +30,8 @@ pub mod blendmont_3d_find_panel;
 pub mod blendmont_3d_find_parent;
 pub mod blendmont_display;
 pub mod blendmont_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod boolean_combo_box_efield;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod boundary_row;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod boundary_table;
 pub mod brt_log_button_style_extension;
 pub mod busy_status_panel;
@@ -78,7 +67,6 @@ pub mod constants;
 pub mod context_menu;
 pub mod context_popup;
 pub mod control_component_module;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod control_extension;
 pub mod control_listener;
 pub mod control_mediator;
@@ -91,25 +79,15 @@ pub mod cpu_table;
 pub mod ctf3d_panel;
 pub mod ctf3d_setup_display;
 pub mod deferred_3dmod_button;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directive_editor_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directive_editor_process_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directive_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directive_section_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directives_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directives_directive_row;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directives_process_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directives_row;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directives_section_row;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod directives_table;
 pub mod ebutton;
 pub mod eer_super_res_z_sum_padding_panel;
@@ -137,9 +115,7 @@ pub mod file_open_button_style_extension;
 pub mod file_text_field;
 pub mod file_text_field2;
 pub mod file_text_field_interface;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod filter_full_volume_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod filter_full_volume_parent;
 pub mod filter_type;
 pub mod final_aligned_stack_dialog;
@@ -147,12 +123,10 @@ pub mod final_combine_fields;
 pub mod final_combine_panel;
 pub mod find_beads3d_display;
 pub mod find_beads3d_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod fix_paths_panel;
 pub mod fixed_dim;
 pub mod flatten_volume_panel;
 pub mod flatten_warp_display;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod frame_interface;
 pub mod front_page_dialog;
 pub mod front_page_process_panel;
@@ -173,13 +147,9 @@ pub mod initial_combine_fields;
 pub mod initial_combine_panel;
 pub mod input_cell;
 pub mod iteration_parent;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod iteration_row;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod iteration_table;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod join_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod join_process_panel;
 pub mod label;
 pub mod labeled_spinner;
@@ -187,26 +157,19 @@ pub mod labeled_text_field;
 pub mod load_display;
 pub mod log_interface;
 pub mod log_window;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod main_batch_run_tomo_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod main_directive_editor_panel;
 pub mod main_frame;
 pub mod main_frame_about_box;
 pub mod main_front_page_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod main_join_panel;
 pub mod main_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod main_parallel_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod main_peet_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod main_serial_sections_panel;
 pub mod main_tomogram_panel;
 pub mod main_tools_panel;
 pub mod manager_frame;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod masking_panel;
 pub mod masking_parent;
 pub mod menu;
@@ -215,7 +178,6 @@ pub mod menu_button_container;
 pub mod menu_item;
 pub mod minibutton;
 pub mod minibutton_cell;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod missing_wedge_compensation_panel;
 pub mod missing_wedge_compensation_parent;
 pub mod multi_line_button;
@@ -234,17 +196,13 @@ pub mod open_close_button_style_extension;
 pub mod paging_panel;
 pub mod panel;
 pub mod panel_header;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod parallel_chooser;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod parallel_dialog;
 pub mod parallel_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod parallel_process_panel;
 pub mod parallel_progress_display;
 pub mod patch_size_panel;
 pub mod peet_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod peet_process_panel;
 pub mod peet_startup_dialog;
 pub mod popup;
@@ -270,7 +228,6 @@ pub mod radio_text_field;
 pub mod raptor_panel;
 pub mod recon_ui_expert;
 pub mod reduce_filt_vol_display;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod reference_panel;
 pub mod reference_parent;
 pub mod reproject_model_panel;
@@ -281,22 +238,15 @@ pub mod rubberband_panel;
 pub mod run_3dmod_button;
 pub mod run_3dmod_button_container;
 pub mod run_3dmod_menu;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod run_3dmod_single_line_button;
 pub mod scaled_image;
 pub mod scroll_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod section_table_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod section_table_row;
 pub mod select_file_extension;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod serial_sections_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod serial_sections_process_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod serial_sections_startup_dialog;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod series_watcher_panel;
 pub mod series_watcher_parent;
 pub mod settings_dialog;
@@ -316,7 +266,6 @@ pub mod spaced_label;
 pub mod spaced_panel;
 pub mod spaced_text_field;
 pub mod spacer;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod spherical_sampling_for_theta_and_psi_panel;
 pub mod spherical_sampling_for_theta_and_psi_parent;
 pub mod spinner;
@@ -362,7 +311,6 @@ pub mod tools_dialog;
 pub mod tools_process_panel;
 pub mod tooltip_formatter;
 pub mod transferfid_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod transform_chooser_panel;
 pub mod trial_tilt_display;
 pub mod trial_tilt_panel;
@@ -381,8 +329,8 @@ pub mod warp_vol_display;
 pub mod window_switch;
 pub mod x_button_style_extension;
 pub mod xf_model_panel;
-#[cfg(any())] // approximation, awaiting faithful rewrite
 pub mod y_axis_type_panel;
+pub mod y_axis_type_parent;
 
 // `UIHarness.java` owns the application-frame boundary.  It depends on Slint
 // only for the explicitly optional GUI build, just as Java only constructs its

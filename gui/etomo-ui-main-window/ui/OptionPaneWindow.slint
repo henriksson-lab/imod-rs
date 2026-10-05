@@ -9,14 +9,40 @@
 // adjustment: 0 ERROR_MESSAGE, 1 INFORMATION_MESSAGE, 2 WARNING_MESSAGE,
 // 3 QUESTION_MESSAGE, -1 PLAIN_MESSAGE.  `options` are the buttons the pane
 // shows, in order; `initial` the initially selected one (-1 none).
+//
+// `message-html` is the message as `BasicOptionPaneUI` lays it out, one
+// `JLabel` per message line, each label's text already laid out by the Rust
+// side (`slint_bridge::swing_label_lines`): a plain label is one line of one
+// run; an "<html>" label is Swing's basic HTML rendering, lines of styled runs
+// (bold, italic, underline, colour), centred or indented (list items), with a
+// paragraph gap above.
 
 import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
 import { JOptionPane, JButton } from "../../etomo-ui-windows/ui/WindowWidgets.slint";
 
+// One styled stretch of text in a rendered HTML line.
+export struct HtmlRun {
+    text: string,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    colored: bool,
+    color: color,
+}
+
+// One line of a rendered label: its runs, alignment, left indent (list items)
+// and the gap above it (a paragraph's top margin), in pixels.
+export struct HtmlLine {
+    runs: [HtmlRun],
+    center: bool,
+    indent: float,
+    gap: float,
+}
+
 export component OptionPaneWindow inherits Window {
     in property <string> title-text;
     in property <int> message-type: -1;
-    in property <[string]> message-lines;
+    in property <[HtmlLine]> message-html;
     in property <[string]> options: ["OK"];
     in property <int> initial: -1;
     callback chosen(int);
@@ -29,10 +55,31 @@ export component OptionPaneWindow inherits Window {
             // The pane draws an error glyph for 0 and a question glyph
             // otherwise.
             message-type: root.message-type == 0 || root.message-type == 2 ? 0 : 3;
-            for line in root.message-lines: Text {
-                text: line;
-                color: EtomoStyle.text;
-                font-size: EtomoStyle.font-size-pt * 1px;
+            for line in root.message-html: HorizontalLayout {
+                alignment: line.center ? LayoutAlignment.center : LayoutAlignment.start;
+                padding-left: line.indent * 1px;
+                padding-top: line.gap * 1px;
+                spacing: 0px;
+                // An empty label still takes a line (`addMessageComponents`'
+                // break panel for a leading newline).
+                if line.runs.length == 0: Text {
+                    text: " ";
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                for run in line.runs: VerticalLayout {
+                    spacing: 0px;
+                    Text {
+                        text: run.text;
+                        color: run.colored ? run.color : EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                        font-weight: run.bold ? 700 : 400;
+                        font-italic: run.italic;
+                    }
+                    Rectangle {
+                        height: 1px;
+                        background: run.underline ? (run.colored ? run.color : EtomoStyle.text) : transparent;
+                    }
+                }
             }
         }
         HorizontalLayout {

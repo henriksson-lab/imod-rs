@@ -10,7 +10,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use super::abstract_frame::{AbstractFrame, AbstractFrameVirtual, WINDOW_CLOSING};
-use super::etomo_frame::{self, EtomoFrame, EtomoFrameVirtual, FrameType};
+use super::etomo_frame::{self, EtomoFrame, EtomoFrameVirtual};
 use super::main_frame::MainFrame;
 use super::main_panel::MainPanel;
 use crate::imod::etomo::base_manager::BaseManager;
@@ -20,6 +20,7 @@ use crate::imod::etomo::logic::busy_status_mediator::BusyStatusListener;
 use crate::imod::etomo::process::process_messages::ProcessMessages;
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::frame_type::FrameType;
 use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
 use crate::imod::etomo::util::event_queue::{self, EdtRef};
 use crate::imod::etomo::util::utilities;

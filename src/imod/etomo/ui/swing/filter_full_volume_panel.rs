@@ -1,538 +1,321 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/FilterFullVolumePanel.java`.
 //!
-//! Widget installation and the concrete `ParallelManager` remain GUI/application
-//! boundaries.  The fields, parameter transfer, validation order, listener
-//! registration, and three action branches are retained from the Java source.
-#![allow(dead_code)]
+//! The "Filter Full Volume" box of the anisotropic diffusion dialog: K value,
+//! iterations and memory per chunk for running nad_eed_3d on the whole volume in
+//! chunks (chunksetup, then processchunks), viewing the result, and cleaning up the
+//! subdirectory.  An event dispatch thread object, created by
+//! [`FilterFullVolumePanel::get_instance`].
 
-use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
-use crate::imod::etomo::r#type::axis_id::AxisID;
-use crate::imod::etomo::r#type::dialog_type::DialogType;
-use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
-use crate::imod::etomo::ui::field_type::FieldType;
+use std::rc::{Rc, Weak};
 
 use super::check_box::CheckBox;
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::etched_border::EtchedBorder;
 use super::filter_full_volume_parent::FilterFullVolumeParent;
 use super::labeled_text_field::LabeledTextField;
 use super::multi_line_button::MultiLineButton;
-use super::tilt_panel::Deferred3dmodButton;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::{self, SpacedPanel};
+use super::spinner::Spinner;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::anisotropic_diffusion_param::AnisotropicDiffusionParam;
+use crate::imod::etomo::comscript::chunksetup_param::{self, ChunksetupParam};
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
+use crate::imod::etomo::parallel_manager::ParallelManager;
+use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_number::Number;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::extension;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::parallel_meta_data::ParallelMetaData;
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_type::FieldType;
 
+/// Java package-private static final `FILTER_FULL_VOLUME_LABEL`.
 pub const FILTER_FULL_VOLUME_LABEL: &str = "Filter Full Volume";
+/// Java package-private static final `MEMORY_PER_CHUNK_LABEL`.
 pub const MEMORY_PER_CHUNK_LABEL: &str = "Memory per chunk";
-pub const MEMORY_TO_VOXEL: i32 = 36;
-pub const MEMORY_PER_CHUNK_DEFAULT: i32 = 14 * MEMORY_TO_VOXEL;
+/// Java package-private static final `MEMORY_PER_CHUNK_DEFAULT`.
+pub const MEMORY_PER_CHUNK_DEFAULT: i32 = 14 * chunksetup_param::MEMORY_TO_VOXEL;
+/// Java package-private static final `CLEANUP_LABEL`.
 pub const CLEANUP_LABEL: &str = "Clean Up Subdirectory";
 
-/// Java `Spinner` state and calls used solely by this source unit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Spinner {
-    pub label: String,
-    pub value: i32,
-    pub minimum: i32,
-    pub maximum: i32,
-    pub step: i32,
-    pub tooltip: Option<String>,
-}
-
-impl Spinner {
-    /// Java `Spinner.getLabeledInstance`.
-    pub fn get_labeled_instance(
-        label: &str,
-        value: i32,
-        minimum: i32,
-        maximum: i32,
-        step: i32,
-    ) -> Self {
-        Self {
-            label: label.into(),
-            value,
-            minimum,
-            maximum,
-            step,
-            tooltip: None,
-        }
-    }
-    /// Java `Spinner.getValue`.
-    pub fn get_value(&self) -> i32 {
-        self.value
-    }
-    /// Java `Spinner.setValue`.
-    pub fn set_value(&mut self, value: i32) {
-        self.value = value;
-    }
-    /// Java `Spinner.setToolTipText`.
-    pub fn set_tool_tip_text(&mut self, text: &str) {
-        self.tooltip = Some(text.into());
-    }
-}
-
-/// Java `ParallelMetaData` calls performed by this panel.
-pub trait ParallelMetaData {
-    fn set_k_value(&mut self, value: String);
-    fn set_iteration(&mut self, value: i32);
-    fn set_memory_per_chunk(&mut self, value: i32);
-    fn set_overlap_times_four(&mut self, value: bool);
-    fn k_value(&self) -> String;
-    fn iteration(&self) -> i32;
-    fn memory_per_chunk(&self) -> i32;
-    fn overlap_times_four(&self) -> bool;
-}
-
-/// Java `AnisotropicDiffusionParam` calls performed by this panel.
-pub trait AnisotropicDiffusionParam {
-    fn set_k_value(&mut self, value: String);
-    fn set_iteration(&mut self, value: i32);
-}
-
-/// Java `ChunksetupParam` calls performed by this panel.
-pub trait ChunksetupParam {
-    fn set_memory_per_chunk(&mut self, value: i32);
-    fn set_overlap(&mut self, value: i32);
-    fn set_overlap_times_four(&mut self, value: bool);
-}
-
-/// The direct `ParallelManager` and processing-mediator dispatch boundary.
-pub trait FilterFullVolumePanelManager {
-    fn chunksetup(
-        &mut self,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        dialog_type: DialogType,
-        processing_method: ProcessingMethod,
-    );
-    fn imod_anisotropic_diffusion_output(
-        &mut self,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        load_with_flipping: bool,
-    );
-    fn anisotropic_diffusion_suffix(&self) -> String;
-}
-
-/// Source-visible Swing hierarchy state created by `createPanel`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FilterFullVolumePanelLayout {
-    pub root_component_order: Vec<&'static str>,
-    pub fields_component_order: Vec<&'static str>,
-    pub buttons_component_order: Vec<&'static str>,
-    pub overlap_checkbox_centered: bool,
-    pub root_border: Option<String>,
-    pub listener_count: usize,
-    pub tooltip_initialized: bool,
-    pub deferred_button_set: bool,
-}
-
-/// Java final `FilterFullVolumePanel` field state.
-#[derive(Clone, Debug)]
+/// Java package-private `final class FilterFullVolumePanel implements
+/// Run3dmodButtonContainer`.
 pub struct FilterFullVolumePanel {
-    pub pnl_root: FilterFullVolumePanelLayout,
-    pub btn_run_filter_full_volume: MultiLineButton,
-    pub ltf_k_value: LabeledTextField,
-    pub sp_iteration: Spinner,
-    pub sp_memory_per_chunk: Spinner,
-    pub btn_view_filtered_volume: MultiLineButton,
-    pub btn_cleanup: MultiLineButton,
-    pub cb_overlap_times_four: CheckBox,
-    pub dialog_type: DialogType,
-    pub actions_attached: bool,
+    /// Java private final `pnlRoot = SpacedPanel.getInstance()`.
+    pnl_root: Rc<SpacedPanel>,
+    /// Java private final `btnRunFilterFullVolume`.
+    btn_run_filter_full_volume: Rc<Run3dmodButton>,
+    /// Java private final `ltfKValue`.
+    ltf_k_value: Rc<LabeledTextField>,
+    /// Java private final `spIteration`.
+    sp_iteration: Rc<Spinner>,
+    /// Java private final `spMemoryPerChunk`.
+    sp_memory_per_chunk: Rc<Spinner>,
+    /// Java private final `btnViewFilteredVolume`.
+    btn_view_filtered_volume: Rc<Run3dmodButton>,
+    /// Java private final `btnCleanup`.
+    btn_cleanup: Rc<MultiLineButton>,
+    /// Java private final `cbOverlapTimesFour`.
+    cb_overlap_times_four: Rc<CheckBox>,
+
+    /// Java private final `dialogType`.
+    dialog_type: DialogType,
+    /// Java private final `manager`.
+    manager: &'static ParallelManager,
+    /// Java private final `parent`.
+    parent: Weak<dyn FilterFullVolumeParent>,
 }
 
 impl FilterFullVolumePanel {
-    /// Java private `FilterFullVolumePanel(ParallelManager, DialogType, FilterFullVolumeParent)`.
-    pub fn new(dialog_type: DialogType) -> Self {
-        Self {
-            pnl_root: FilterFullVolumePanelLayout::default(),
-            btn_run_filter_full_volume: MultiLineButton::new_with_label(Some(
-                FILTER_FULL_VOLUME_LABEL,
-            )),
-            ltf_k_value: LabeledTextField::new(FieldType::FloatingPoint, "K value: "),
-            sp_iteration: Spinner::get_labeled_instance("Iterations: ", 10, 1, 200, 1),
-            sp_memory_per_chunk: Spinner::get_labeled_instance(
-                "Memory per chunk (MB): ",
-                MEMORY_PER_CHUNK_DEFAULT,
-                MEMORY_TO_VOXEL,
-                30 * MEMORY_TO_VOXEL,
-                MEMORY_TO_VOXEL,
-            ),
-            btn_view_filtered_volume: MultiLineButton::new_with_label(Some("View Filtered Volume")),
-            btn_cleanup: MultiLineButton::new_with_label(Some(CLEANUP_LABEL)),
-            cb_overlap_times_four: CheckBox::new_with_text(
-                "Overlap chunks by 4 times # of iterations",
-            ),
-            dialog_type,
-            actions_attached: false,
-        }
+    /// Java private `FilterFullVolumePanel(ParallelManager, DialogType,
+    /// FilterFullVolumeParent)`, with the field initializers.
+    fn new(
+        manager: &'static ParallelManager,
+        dialog_type: DialogType,
+        parent: Weak<dyn FilterFullVolumeParent>,
+    ) -> Rc<FilterFullVolumePanel> {
+        Rc::new_cyclic(|this: &Weak<FilterFullVolumePanel>| {
+            let container: Weak<dyn Run3dmodButtonContainer> = this.clone();
+            FilterFullVolumePanel {
+                pnl_root: SpacedPanel::get_instance_void(),
+                btn_run_filter_full_volume:
+                    Run3dmodButton::get_deferred_3dmod_instance_string_run_3dmod_button_container(
+                        Some(FILTER_FULL_VOLUME_LABEL),
+                        Some(container.clone()),
+                    ),
+                ltf_k_value: LabeledTextField::new_field_type_string(
+                    FieldType::FloatingPoint,
+                    Some("K value: "),
+                ),
+                sp_iteration: Spinner::get_labeled_instance_string_int_int_int(
+                    Some("Iterations: "),
+                    10,
+                    1,
+                    200,
+                ),
+                sp_memory_per_chunk: Spinner::get_labeled_instance_string_int_int_int_int(
+                    Some(&format!("{MEMORY_PER_CHUNK_LABEL} (MB): ")),
+                    MEMORY_PER_CHUNK_DEFAULT,
+                    chunksetup_param::MEMORY_TO_VOXEL,
+                    30 * chunksetup_param::MEMORY_TO_VOXEL,
+                    chunksetup_param::MEMORY_TO_VOXEL,
+                ),
+                btn_view_filtered_volume:
+                    Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                        Some("View Filtered Volume"),
+                        Some(container),
+                    ),
+                btn_cleanup: MultiLineButton::new_string(Some(CLEANUP_LABEL)),
+                cb_overlap_times_four: CheckBox::new_string(Some(
+                    "Overlap chunks by 4 times # of iterations",
+                )),
+                dialog_type,
+                manager,
+                parent,
+            }
+        })
     }
 
-    /// Java `getInstance`, including `createPanel`, `setTooltips`, and `addListeners`.
-    pub fn get_instance<M: FilterFullVolumePanelManager>(
-        manager: &M,
+    /// Java package-private static `getInstance(ParallelManager, DialogType,
+    /// FilterFullVolumeParent)`.
+    pub fn get_instance(
+        manager: &'static ParallelManager,
         dialog_type: DialogType,
-    ) -> Self {
-        let mut instance = Self::new(dialog_type);
+        parent: Weak<dyn FilterFullVolumeParent>,
+    ) -> Rc<FilterFullVolumePanel> {
+        let instance = FilterFullVolumePanel::new(manager, dialog_type, parent);
         instance.create_panel();
-        instance.set_tooltips(manager);
-        instance.add_listeners();
+        instance.set_tooltips();
+        instance.add_listeners(&instance);
         instance
     }
 
-    /// Java private `addListeners`.
-    pub fn add_listeners(&mut self) {
-        self.btn_run_filter_full_volume.add_action_listener();
-        self.btn_view_filtered_volume.add_action_listener();
-        self.btn_cleanup.add_action_listener();
-        self.pnl_root.listener_count = 3;
-        self.actions_attached = true;
+    /// Java private `addListeners()`.
+    fn add_listeners(&self, this: &Rc<FilterFullVolumePanel>) {
+        // new FilterFullVolumeActionListener(this)
+        let adaptee = Rc::downgrade(this);
+        let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            if let Some(adaptee) = adaptee.upgrade() {
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            }
+        });
+        self.btn_run_filter_full_volume
+            .add_action_listener(action_listener.clone());
+        self.btn_view_filtered_volume
+            .add_action_listener(action_listener.clone());
+        self.btn_cleanup.add_action_listener(action_listener);
     }
 
-    /// Java private `createPanel`.
-    pub fn create_panel(&mut self) {
-        self.ltf_k_value.set_text_preferred_width(4);
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // initialization
+        // Swing layout: ltfKValue.setTextPreferredWidth(
+        // UIParameters.getInstance().getFourDigitWidth()).
         self.ltf_k_value.set_required(true);
-        self.pnl_root.root_component_order = vec!["fields", "overlap-times-four", "buttons"];
-        self.pnl_root.fields_component_order =
-            vec!["k-value", "iterations", "memory-per-chunk", "glue"];
-        self.pnl_root.buttons_component_order =
-            vec!["run-filter-full-volume", "view-filtered-volume", "cleanup"];
-        self.pnl_root.overlap_checkbox_centered = true;
-        self.pnl_root.root_border = Some(FILTER_FULL_VOLUME_LABEL.into());
-        self.pnl_root.deferred_button_set = true;
+        // local panels
+        let pnl_fields = SpacedPanel::get_instance_void();
+        let pnl_buttons = SpacedPanel::get_instance_void();
+        let pnl_check_box = JComponent::new_panel();
+        // root panel
+        self.pnl_root.set_box_layout(spaced_panel::Y_AXIS);
+        self.pnl_root
+            .set_border(&EtchedBorder::new(Some(FILTER_FULL_VOLUME_LABEL)).get_border());
+        self.pnl_root.add_spaced_panel(&pnl_fields);
+        self.pnl_root.add_j_panel(&pnl_check_box);
+        self.pnl_root.add_spaced_panel(&pnl_buttons);
+        // fields panel
+        pnl_fields.set_box_layout(spaced_panel::X_AXIS);
+        pnl_fields.add_labeled_text_field(&self.ltf_k_value);
+        pnl_fields.add_spinner(&self.sp_iteration);
+        pnl_fields.add_spinner(&self.sp_memory_per_chunk);
+        pnl_fields.add_horizontal_glue();
+        // checkbox panel
+        // Swing layout: pnlCheckBox BoxLayout X_AXIS, CENTER_ALIGNMENT; glue after.
+        pnl_check_box.add(&self.cb_overlap_times_four.get_component());
+        // buttons panel
+        pnl_buttons.set_box_layout(spaced_panel::X_AXIS);
+        self.btn_run_filter_full_volume
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(
+                self.btn_view_filtered_volume.clone() as Rc<dyn Deferred3dmodButton>,
+            ));
+        pnl_buttons.add_multi_line_button(&self.btn_run_filter_full_volume);
+        pnl_buttons.add_multi_line_button(&self.btn_view_filtered_volume);
+        pnl_buttons.add_multi_line_button(&self.btn_cleanup);
     }
 
-    /// Java `getComponent`; the frontend installs this retained layout state.
-    pub fn get_component(&self) -> &FilterFullVolumePanelLayout {
-        &self.pnl_root
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_container()
     }
 
-    /// Java overloaded `getParameters(ParallelMetaData)`.
-    pub fn get_parameters_meta_data<M: ParallelMetaData>(&self, meta_data: &mut M) {
-        meta_data.set_k_value(self.ltf_k_value.text.clone());
-        meta_data.set_iteration(self.sp_iteration.get_value());
-        meta_data.set_memory_per_chunk(self.sp_memory_per_chunk.get_value());
+    /// Java package-private `getParameters(ParallelMetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &ParallelMetaData) {
+        meta_data.set_k_value(self.ltf_k_value.get_text_void().as_deref());
+        meta_data.set_iteration(Some(self.sp_iteration.get_value()));
+        meta_data.set_memory_per_chunk(Some(self.sp_memory_per_chunk.get_value()));
         meta_data.set_overlap_times_four(self.cb_overlap_times_four.is_selected());
     }
 
-    /// Java `getMemoryPerChunk`.
-    pub fn get_memory_per_chunk(&self) -> i32 {
+    /// Java package-private `getMemoryPerChunk()`.
+    pub fn get_memory_per_chunk(&self) -> Number {
         self.sp_memory_per_chunk.get_value()
     }
 
-    /// Java `setParameters(ParallelMetaData)`.
-    pub fn set_parameters_meta_data<M: ParallelMetaData>(&mut self, meta_data: &M) {
-        self.ltf_k_value.set_text(&meta_data.k_value());
-        self.sp_iteration.set_value(meta_data.iteration());
+    /// Java package-private `setParameters(ParallelMetaData)`.
+    pub fn set_parameters(&self, meta_data: &ParallelMetaData) {
+        self.ltf_k_value
+            .set_text_string(meta_data.get_k_value().as_deref());
+        self.sp_iteration
+            .set_value_const_etomo_number(&meta_data.get_iteration());
         self.sp_memory_per_chunk
-            .set_value(meta_data.memory_per_chunk());
+            .set_value_const_etomo_number(&meta_data.get_memory_per_chunk());
         self.cb_overlap_times_four
-            .set_selected(meta_data.overlap_times_four());
+            .set_selected_boolean(meta_data.is_overlap_times_four());
     }
 
-    /// Java overloaded `getParameters(AnisotropicDiffusionParam, boolean)`.
-    pub fn get_parameters_anisotropic_diffusion<P: AnisotropicDiffusionParam>(
+    /// Java package-private `getParameters(AnisotropicDiffusionParam, boolean)`.
+    pub fn get_parameters_anisotropic_diffusion_param(
         &self,
-        param: &mut P,
+        param: &mut AnisotropicDiffusionParam,
         do_validation: bool,
     ) -> bool {
-        match self.ltf_k_value.get_text_validated(do_validation) {
-            Ok(value) => {
-                param.set_k_value(value);
-                param.set_iteration(self.sp_iteration.get_value());
+        match self.ltf_k_value.get_text_boolean(do_validation) {
+            Ok(k_value) => {
+                param.set_k_value(k_value.as_deref());
+                param.set_iteration(Some(self.sp_iteration.get_value()));
                 true
             }
+            // catch (FieldValidationFailedException e)
             Err(_) => false,
         }
     }
 
-    /// Java overloaded `getParameters(ChunksetupParam)`.
-    pub fn get_parameters_chunksetup<P: ChunksetupParam>(&self, param: &mut P) {
+    /// Java package-private `getParameters(ChunksetupParam)`.
+    pub fn get_parameters_chunksetup_param(&self, param: &mut ChunksetupParam) {
         param.set_memory_per_chunk(self.sp_memory_per_chunk.get_value());
         param.set_overlap(self.sp_iteration.get_value());
         param.set_overlap_times_four(self.cb_overlap_times_four.is_selected());
     }
 
-    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
-    pub fn action<M: FilterFullVolumePanelManager, P: FilterFullVolumeParent>(
-        &self,
-        command: &str,
-        deferred_3dmod_button: Option<&Deferred3dmodButton>,
-        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
-        manager: &mut M,
-        parent: &mut P,
-    ) {
-        if command
-            == self
-                .btn_run_filter_full_volume
-                .button
-                .action_command
-                .as_deref()
-                .unwrap_or(FILTER_FULL_VOLUME_LABEL)
-        {
-            if !parent.init_subdir() {
-                return;
-            }
-            manager.chunksetup(
-                deferred_3dmod_button,
-                run_3dmod_menu_options,
-                self.dialog_type,
-                parent.get_processing_method(),
-            );
-        } else if command
-            == self
-                .btn_cleanup
-                .button
-                .action_command
-                .as_deref()
-                .unwrap_or(CLEANUP_LABEL)
-        {
-            parent.clean_up();
-        } else if command
-            == self
-                .btn_view_filtered_volume
-                .button
-                .action_command
-                .as_deref()
-                .unwrap_or("View Filtered Volume")
-        {
-            manager.imod_anisotropic_diffusion_output(
-                run_3dmod_menu_options,
-                parent.is_load_with_flipping(),
-            );
-        }
-    }
-
-    #[allow(non_snake_case)]
-    /// Native-name adapter for the Java listener's `actionPerformed`.
-    pub fn actionPerformed<M: FilterFullVolumePanelManager, P: FilterFullVolumeParent>(
-        &self,
-        command: &str,
-        manager: &mut M,
-        parent: &mut P,
-    ) {
-        self.action(command, None, None, manager, parent);
-    }
-
-    /// Java private `setTooltips`.
-    pub fn set_tooltips<M: FilterFullVolumePanelManager>(&mut self, manager: &M) {
+    /// Java private `setTooltips()`.
+    fn set_tooltips(&self) {
+        let image_filename_style = self
+            .manager
+            .get_base_meta_data()
+            .map(|meta_data| meta_data.base().get_image_filename_style());
         self.btn_run_filter_full_volume
             .set_tool_tip_text(Some(&format!(
                 "Run diffusion on the full volume in chunks, creates a {}file.",
-                manager.anisotropic_diffusion_suffix()
+                extension::CLASS.nad.get_suffix(image_filename_style)
             )));
         self.ltf_k_value
             .set_tool_tip_text(Some("K threshold value for running on full volume"));
         self.sp_iteration
-            .set_tool_tip_text("Number of iterations to run on full volume");
-        self.sp_memory_per_chunk.set_tool_tip_text("Maximum memory in megabytes to use while running diffusion on one chunk. Reduce if there is less memory per processor or if you want to break the job into more chunks.  The number of voxels in each chunk will be 1/36 of this memory limit or less.");
+            .set_tool_tip_text(Some("Number of iterations to run on full volume"));
+        self.sp_memory_per_chunk.set_tool_tip_text(Some(
+            "Maximum memory in megabytes to use while running diffusion on one chunk. Reduce if there is less memory per processor or if you want to break the job into more chunks.  The number of voxels in each chunk will be 1/36 of this memory limit or less.",
+        ));
         self.btn_view_filtered_volume
             .set_tool_tip_text(Some("View filtered volume (filename.nad) in 3dmod"));
         self.btn_cleanup.set_tool_tip_text(Some(
             "Remove subdirectory with all temporary and test files (naddir.filename).",
         ));
-        self.cb_overlap_times_four.set_tool_tip_text(Some("Increase overlap to 4 times # of iterations (default is equal to # of iterations) to eliminate minor effects of cutting volume into chunks."));
-        self.pnl_root.tooltip_initialized = true;
+        self.cb_overlap_times_four.set_tool_tip_text(Some(
+            "Increase overlap to 4 times # of iterations (default is equal to # of iterations) to eliminate minor effects of cutting volume into chunks.",
+        ));
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
-    use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
-    use crate::imod::etomo::ui::swing::process_interface::ProcessInterface;
-
-    #[derive(Default)]
-    struct Meta {
-        k: String,
-        iteration: i32,
-        memory: i32,
-        overlap: bool,
-    }
-    impl ParallelMetaData for Meta {
-        fn set_k_value(&mut self, value: String) {
-            self.k = value;
+impl Run3dmodButtonContainer for FilterFullVolumePanel {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn action(
+        &self,
+        command: &str,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        let Some(parent) = self.parent.upgrade() else {
+            return;
+        };
+        if Some(command)
+            == self
+                .btn_run_filter_full_volume
+                .get_action_command()
+                .as_deref()
+        {
+            if !parent.init_subdir() {
+                return;
+            }
+            let processing_method = self
+                .manager
+                .get_processing_method_mediator(Some(AxisID::Only))
+                .map(|mediator| {
+                    mediator.get_run_method_for_process_interface(parent.get_processing_method())
+                });
+            self.manager.chunksetup(
+                None,
+                deferred_3dmod_button,
+                run_3dmod_menu_options,
+                Some(self.dialog_type),
+                processing_method,
+            );
+        } else if Some(command) == self.btn_cleanup.get_action_command().as_deref() {
+            parent.clean_up();
+        } else if Some(command)
+            == self
+                .btn_view_filtered_volume
+                .get_action_command()
+                .as_deref()
+        {
+            self.manager.imod_file_type(
+                &file_type::CLASS.anisotropic_diffusion_output,
+                run_3dmod_menu_options,
+                parent.is_load_with_flipping(),
+            );
         }
-        fn set_iteration(&mut self, value: i32) {
-            self.iteration = value;
-        }
-        fn set_memory_per_chunk(&mut self, value: i32) {
-            self.memory = value;
-        }
-        fn set_overlap_times_four(&mut self, value: bool) {
-            self.overlap = value;
-        }
-        fn k_value(&self) -> String {
-            self.k.clone()
-        }
-        fn iteration(&self) -> i32 {
-            self.iteration
-        }
-        fn memory_per_chunk(&self) -> i32 {
-            self.memory
-        }
-        fn overlap_times_four(&self) -> bool {
-            self.overlap
-        }
-    }
-    #[derive(Default)]
-    struct Manager {
-        calls: Vec<&'static str>,
-    }
-    impl FilterFullVolumePanelManager for Manager {
-        fn chunksetup(
-            &mut self,
-            _: Option<&Deferred3dmodButton>,
-            _: Option<Run3dmodMenuOptions>,
-            _: DialogType,
-            _: ProcessingMethod,
-        ) {
-            self.calls.push("chunksetup");
-        }
-        fn imod_anisotropic_diffusion_output(&mut self, _: Option<Run3dmodMenuOptions>, _: bool) {
-            self.calls.push("imod");
-        }
-        fn anisotropic_diffusion_suffix(&self) -> String {
-            ".nad".into()
-        }
-    }
-    #[derive(Default)]
-    struct Parent {
-        initialized: bool,
-        cleaned: bool,
-        flipping: bool,
-    }
-    impl QueueTableListener for Parent {
-        fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
-    }
-    impl ProcessInterface for Parent {
-        type QueueCheckBox = CheckBox;
-        fn update_gpu(&mut self, _disable_gpu: bool) {}
-        fn get_processing_method(&self) -> ProcessingMethod {
-            ProcessingMethod::PpCpu
-        }
-        fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
-            None
-        }
-        fn lock_processing_method(&mut self, _lock: bool) {}
-        fn set_method(&mut self, _processing_method: ProcessingMethod) {}
-        fn is_use_gpu(&self) -> bool {
-            false
-        }
-        fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {}
-        fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-        fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-    }
-    impl FilterFullVolumeParent for Parent {
-        fn clean_up(&mut self) {
-            self.cleaned = true;
-        }
-        fn get_volume(&self) -> String {
-            String::new()
-        }
-        fn init_subdir(&mut self) -> bool {
-            self.initialized
-        }
-        fn is_load_with_flipping(&self) -> bool {
-            self.flipping
-        }
-    }
-    #[derive(Default)]
-    struct DiffusionParam {
-        k: String,
-        iteration: i32,
-    }
-    impl AnisotropicDiffusionParam for DiffusionParam {
-        fn set_k_value(&mut self, value: String) {
-            self.k = value;
-        }
-        fn set_iteration(&mut self, value: i32) {
-            self.iteration = value;
-        }
-    }
-    #[derive(Default)]
-    struct ChunkParam {
-        memory: i32,
-        overlap: i32,
-        overlap_times_four: bool,
-    }
-    impl ChunksetupParam for ChunkParam {
-        fn set_memory_per_chunk(&mut self, value: i32) {
-            self.memory = value;
-        }
-        fn set_overlap(&mut self, value: i32) {
-            self.overlap = value;
-        }
-        fn set_overlap_times_four(&mut self, value: bool) {
-            self.overlap_times_four = value;
-        }
-    }
-    #[test]
-    fn creates_source_defaults_and_transfers_metadata() {
-        let panel = FilterFullVolumePanel::get_instance(
-            &Manager::default(),
-            DialogType::AnisotropicDiffusion,
-        );
-        assert_eq!(panel.get_memory_per_chunk(), 504);
-        assert!(panel.ltf_k_value.required);
-        assert_eq!(panel.pnl_root.listener_count, 3);
-        let mut meta = Meta::default();
-        panel.get_parameters_meta_data(&mut meta);
-        assert_eq!(
-            (meta.iteration, meta.memory, meta.overlap),
-            (10, 504, false)
-        );
-    }
-    #[test]
-    fn action_retains_init_cleanup_and_view_branches() {
-        let panel = FilterFullVolumePanel::get_instance(
-            &Manager::default(),
-            DialogType::AnisotropicDiffusion,
-        );
-        let mut manager = Manager::default();
-        let mut parent = Parent::default();
-        panel.action(
-            FILTER_FULL_VOLUME_LABEL,
-            None,
-            None,
-            &mut manager,
-            &mut parent,
-        );
-        assert!(manager.calls.is_empty());
-        parent.initialized = true;
-        panel.action(
-            FILTER_FULL_VOLUME_LABEL,
-            None,
-            None,
-            &mut manager,
-            &mut parent,
-        );
-        panel.action(CLEANUP_LABEL, None, None, &mut manager, &mut parent);
-        panel.action(
-            "View Filtered Volume",
-            None,
-            None,
-            &mut manager,
-            &mut parent,
-        );
-        assert_eq!(manager.calls, ["chunksetup", "imod"]);
-        assert!(parent.cleaned);
-    }
-
-    #[test]
-    fn validation_and_chunk_parameter_overloads_retain_source_order() {
-        let mut panel = FilterFullVolumePanel::new(DialogType::AnisotropicDiffusion);
-        panel.create_panel();
-        assert!(!panel.get_parameters_anisotropic_diffusion(&mut DiffusionParam::default(), true));
-        panel.ltf_k_value.set_text("2.5");
-        panel.sp_iteration.set_value(17);
-        panel.sp_memory_per_chunk.set_value(720);
-        panel.cb_overlap_times_four.set_selected(true);
-        let mut diffusion = DiffusionParam::default();
-        let mut chunk = ChunkParam::default();
-        assert!(panel.get_parameters_anisotropic_diffusion(&mut diffusion, true));
-        panel.get_parameters_chunksetup(&mut chunk);
-        assert_eq!((diffusion.k, diffusion.iteration), ("2.5".into(), 17));
-        assert_eq!(
-            (chunk.memory, chunk.overlap, chunk.overlap_times_four),
-            (720, 17, true)
-        );
     }
 }

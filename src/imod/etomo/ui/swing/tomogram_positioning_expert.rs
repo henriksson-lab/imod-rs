@@ -93,7 +93,7 @@ impl TomogramPositioningExpert {
     /// ProcessTrack, AxisID, AxisType)` (TomogramPositioningExpert.java:65).
     pub fn new(
         manager: &'static ApplicationManager,
-        main_panel: Rc<MainTomogramPanel>,
+        main_panel: Option<Rc<MainTomogramPanel>>,
         process_track: Option<&'static ProcessTrack>,
         axis_id: AxisID,
         axis_type: AxisType,
@@ -1280,6 +1280,16 @@ impl UIExpert for TomogramPositioningExpert {
         }
         if process.equals_string(Some(&ProcessName::FIND_SECTION.to_string())) {
             self.find_section(process_result_display, process_series);
+            return true;
+        }
+        // Fixed in translation (BUGS.md): cryoPosition queues Task.POST_CRYO_POSITION
+        // and nothing in the Java handles it, so the series never ends and the axis
+        // stays busy.  Its post-processing is done in ProcessManager.postProcess, so the
+        // task only continues (and so ends) the series.
+        if POST_CRYO_POSITION.with(|task| process.equals_task(task.as_ref())) {
+            if let Some(process_series) = &process_series {
+                ProcessSeries::start_next_process(process_series, self.axis_id);
+            }
             return true;
         }
         false

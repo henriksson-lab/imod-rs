@@ -47,8 +47,8 @@ use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::axis_type_exception::AxisTypeException;
 use crate::imod::etomo::r#type::file_type::FileType;
 use crate::imod::etomo::ui::swing::ui_harness;
+use crate::imod::etomo::util::java_hash_map::JavaHashMap;
 use crate::imod::etomo::util::utilities;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -169,8 +169,9 @@ pub struct BaseImodManager {
     use_map: bool,
     debug: Mutex<bool>,
 
-    /// Java `HashMap imodMap`.
-    imod_map: Mutex<HashMap<String, ImodVector>>,
+    /// Java `HashMap imodMap`; `isOpen`, `quit`, `processRequest` and `disconnect`
+    /// walk its key set, so the 3dmods are asked in Java's `HashMap` order.
+    imod_map: Mutex<JavaHashMap<String, ImodVector>>,
 
     /// Java protected final `manager`.
     pub manager: &'static dyn BaseManager,
@@ -195,7 +196,7 @@ impl BaseImodManager {
             axis_type: Mutex::new(Some(AxisType::SingleAxis)),
             use_map: true,
             debug: Mutex::new(false),
-            imod_map: Mutex::new(HashMap::new()),
+            imod_map: Mutex::new(JavaHashMap::new()),
             manager,
             request_handler: OnceLock::new(),
             hooks,
@@ -2389,7 +2390,7 @@ impl BaseImodManager {
     /// passes the map in.
     fn get_vector_string<'a>(
         &self,
-        imod_map: &'a mut HashMap<String, ImodVector>,
+        imod_map: &'a mut JavaHashMap<String, ImodVector>,
         key: &str,
     ) -> Result<Option<&'a mut ImodVector>, ImodManagerException> {
         if !self.use_map {
@@ -2418,7 +2419,7 @@ impl BaseImodManager {
     /// Java private final `getVector(String, boolean)`.
     fn get_vector_string_boolean<'a>(
         &self,
-        imod_map: &'a mut HashMap<String, ImodVector>,
+        imod_map: &'a mut JavaHashMap<String, ImodVector>,
         key: &str,
         axis_id_in_key: bool,
     ) -> Result<Option<&'a mut ImodVector>, ImodManagerException> {
@@ -2431,7 +2432,7 @@ impl BaseImodManager {
     /// Java private final `getVector(String, AxisID)`.
     fn get_vector_string_axis_id<'a>(
         &self,
-        imod_map: &'a mut HashMap<String, ImodVector>,
+        imod_map: &'a mut JavaHashMap<String, ImodVector>,
         key: &str,
         axis_id: Option<AxisID>,
     ) -> Result<Option<&'a mut ImodVector>, ImodManagerException> {

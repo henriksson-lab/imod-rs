@@ -167,10 +167,14 @@ impl EmergencyMonitor {
         }
         // Use SwingUtilities.isEventDispatchThread() if it blocks the GUI.
         if !stack_trace.is_starting() && !stack_trace.is_exiting() {
-            // TODO(unit): needs etomo/ui/swing/UIHarness.java -
             // `UIHarness.INSTANCE.openMessageDialog(manager, errMsg.toString(), title,
             // axisID)`.
-            let _ = (&title, &err_msg, self.axis_id);
+            crate::imod::etomo::ui::swing::ui_harness::open_message_dialog_from_process(
+                self.manager,
+                &err_msg,
+                &title,
+                self.axis_id,
+            );
         } else {
             eprintln!("\n{}", title);
             eprintln!("{}\n", err_msg);

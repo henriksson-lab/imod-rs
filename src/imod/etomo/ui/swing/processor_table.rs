@@ -611,16 +611,12 @@ impl ProcessorTable {
                 let load_display: Rc<dyn LoadDisplay> = this.clone();
                 let load_display = Arc::new(EdtRef::new(load_display));
                 if display_queues {
-                    // TODO(unit): needs etomo/process/QueuechunkLoadMonitor.java -
-                    // `new QueuechunkLoadMonitor(this, axisID, manager)`.
                     Some(QueuechunkLoadMonitor::new(
                         load_display,
                         self.axis_id,
                         self.manager,
                     ))
                 } else {
-                    // TODO(unit): needs etomo/process/LoadAverageMonitor.java -
-                    // `new LoadAverageMonitor(this, axisID, manager)`.
                     Some(LoadAverageMonitor::new(
                         load_display,
                         self.axis_id,
@@ -633,7 +629,6 @@ impl ProcessorTable {
         let _ = self.load_monitor.set(load_monitor);
         let display: Rc<dyn ParallelProgressDisplay> = this.clone();
         let property_user_dir = self.manager.get_property_user_dir();
-        // TODO(unit): needs etomo/logic/ProcessorTableState.java.
         let table_state = ProcessorTableState::new(
             self.manager,
             self.axis_id,
@@ -1002,10 +997,10 @@ impl ProcessorTable {
         // try {
         {
             let storable = this.clone();
-            let parameter_store = etomo_director::INSTANCE.get_parameter_store();
+            let mut parameter_store = etomo_director::INSTANCE.get_parameter_store();
             // Upstream NPE fixed in translation (ProcessorTable.java:485): Java
             // dereferences a null parameter store; nothing is loaded then.
-            if let Some(parameter_store) = parameter_store.as_ref() {
+            if let Some(parameter_store) = parameter_store.as_mut() {
                 parameter_store.load(&storable);
             }
         }
@@ -1749,11 +1744,11 @@ impl Storable for Rc<dyn ProcessorTableVirtual> {
             .store_properties_string(properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         self.processor_table().load_properties(properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         self.processor_table()
             .load_properties_string(properties, prepend);
     }

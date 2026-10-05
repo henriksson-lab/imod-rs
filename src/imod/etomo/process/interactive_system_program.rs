@@ -35,7 +35,7 @@ pub struct InteractiveSystemProgram {
     command_line: Option<String>,
     command_array: Option<Vec<String>>,
     command: Option<Arc<dyn Command + Send + Sync>>,
-    input_buffer: Mutex<Option<ChildStdin>>,
+    input_buffer: Mutex<Option<std::io::BufWriter<ChildStdin>>>,
     output_buffer: Mutex<Option<Receiver<String>>>,
     error_buffer: Mutex<Option<Receiver<String>>>,
     working_directory: Mutex<Option<PathBuf>>,
@@ -212,7 +212,7 @@ impl InteractiveSystemProgram {
             Some(Ok(mut child)) => {
                 // Create a buffered writer to handle the stdin, stdout and stderr
                 // streams of the process
-                *self.input_buffer.lock().unwrap() = child.stdin.take();
+                *self.input_buffer.lock().unwrap() = child.stdin.take().map(std::io::BufWriter::new);
                 *self.output_buffer.lock().unwrap() = child.stdout.take().map(line_channel);
                 *self.error_buffer.lock().unwrap() = child.stderr.take().map(line_channel);
                 process = Some(child);

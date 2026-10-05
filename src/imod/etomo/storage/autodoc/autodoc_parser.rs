@@ -50,9 +50,6 @@
 //!
 //! emptyLine => ^ -WHITESPACE- ( EOL | EOF )
 //! ```
-//!
-//! `BaseManager` has no module; every caller that reaches the constructor passes a null
-//! one, so the parameter is typed `Option<Infallible>`.
 #![allow(dead_code)]
 
 use super::attribute::Attribute;

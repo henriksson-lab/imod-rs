@@ -70,3 +70,14 @@ mod tests {
         );
     }
 }
+
+/// Java `PeetFileFilter extends DataFileFilter`, a `javax.swing.filechooser.FileFilter`.
+impl crate::imod::etomo::jdk::FileFilter for PeetFileFilter {
+    fn accept(&self, file: &Path) -> bool {
+        PeetFileFilter::accept(self, file)
+    }
+
+    fn get_description(&self) -> Option<String> {
+        Some(PeetFileFilter::get_description(self))
+    }
+}

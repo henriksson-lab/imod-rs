@@ -166,7 +166,13 @@ impl ReprojectModelPanel {
     }
 }
 
-impl ProcessDisplay for ReprojectModelPanel {}
+impl ProcessDisplay for ReprojectModelPanel {
+    /// Java cast `(TiltDisplay) display`: this panel is one (the process
+    /// series hands it back to `tilt3dFindAction` / the reprojection).
+    fn as_tilt_display(&self) -> Option<&dyn super::tilt_display::TiltDisplay> {
+        Some(self)
+    }
+}
 
 impl TiltDisplay for ReprojectModelPanel {
     /// Java `getParameters(TiltParam, boolean)`.

@@ -1,4 +1,5 @@
 //! Non-GUI translations of `IMOD/Etomo/src/etomo/comscript` source units.
+pub mod anisotropic_diffusion_param;
 pub mod bad_com_script_exception;
 pub mod com_script_command;
 pub mod com_script_file;
@@ -17,6 +18,7 @@ pub mod parallel_param;
 pub mod process_details;
 pub mod python_info_param;
 pub mod runraptor_param;
+pub mod serial_sections_com_script_manager;
 pub mod tools_com_script_manager;
 pub mod align_frames_param;
 pub mod alt_tomo_setup_param;
@@ -140,3 +142,12 @@ pub mod xfproduct_param;
 pub mod xftoxg_param;
 pub mod xy_param;
 pub mod tiltalign_log;
+pub mod finishjoin_param;
+pub mod join_comscript_manager;
+pub mod joinwarp2model_param;
+pub mod makejoincom_param;
+pub mod start_join_param;
+pub mod xfjointomo_param;
+pub mod peet_parser_param;
+pub mod average_all_param;
+pub mod batch_run_tomo_com_script_manager;

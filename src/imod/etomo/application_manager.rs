@@ -1133,6 +1133,17 @@ impl BaseManager for ApplicationManager {
         *self.base().loaded_param_file.lock().unwrap()
     }
 
+    /// Java `updateDirectiveMap(DirectiveMap, StringBuffer)` (ApplicationManager.java:3854),
+    /// reached through `BaseManager::update_directive_map_directive_map` (see the
+    /// upstream-bug note there).
+    fn update_directive_map_directive_map(
+        &'static self,
+        directive_map: &DirectiveMap,
+        errmsg: &mut String,
+    ) {
+        ApplicationManager::update_directive_map(self, directive_map, errmsg);
+    }
+
     /// Java `getName()` (ApplicationManager.java:11213), `@Override`.
     // REPLACES existing (which returned the constructor argument; the Java reads metaData)
     fn get_name(&self) -> Option<String> {
@@ -1571,16 +1582,12 @@ impl ApplicationManager {
     /// Java `isNewManager()` (ApplicationManager.java:428).  Finds out whether the
     /// manager is new, which means that it has no .edf file.  If setupDialog is not
     /// null, then the manager is new.
-    ///
-    /// Replaces the existing approximation that read a `new_manager` flag.
     pub fn is_new_manager(&self) -> bool {
         self.setup_dialog_expert.is_some()
     }
 
     /// Java `isSetupChanged()` (ApplicationManager.java:438).  Check if setup dialog has
     /// been modified by the user.  Return true if there is text in the dataset field.
-    ///
-    /// Replaces the existing approximation that read `setup_raw_image_stack`.
     pub fn is_setup_changed(&self) -> bool {
         let Some(setup_dialog_expert) = self.setup_dialog_expert.get() else {
             return false;
@@ -2070,9 +2077,6 @@ impl ApplicationManager {
 
     /// Java `setRawImageStackExtension(String)` (ApplicationManager.java:720).  Needs to
     /// be usable during setup - before the param file is marked as loaded.
-    ///
-    /// Replaces the existing `set_raw_image_stack_extension(Option<&str>) -> bool`
-    /// approximation, which stored the extension in a Rust-only field.
     pub fn set_raw_image_stack_extension_string(&self, raw_image_stack_file_name: Option<&str>) {
         let Some(raw_image_stack_file_name) = raw_image_stack_file_name else {
             return;
@@ -2296,7 +2300,7 @@ impl ApplicationManager {
             return false;
         };
         // Send a specific INFO: message to the project log
-        if !messages.is_empty(MessageType::Info) {
+        if !messages.is_empty(Some(MessageType::Info)) {
             let info_messages = messages.match_messages(
                 MessageType::Info,
                 &[
@@ -4492,11 +4496,7 @@ impl ApplicationManager {
                 Some(&ProcessName::AUTOFIDSEED),
             );
         }
-        // Java `Utilities.deleteFileType` returns false on failure; the translation
-        // returns that as an error.
-        if utilities::delete_file_type(self, Some(axis_id), &file_type::CLASS.autofidseed_dir)
-            .is_err()
-        {
+        if !utilities::delete_file_type(self, Some(axis_id), &file_type::CLASS.autofidseed_dir) {
             if let Some(main_panel) = self.main_panel.get() {
                 main_panel.stop_progress_bar_axis_id_process_end_state(
                     axis_id,
@@ -9425,7 +9425,7 @@ impl ApplicationManager {
                     self.tomogram_positioning_expert_b
                         .set(Some(TomogramPositioningExpert::new(
                             self,
-                            self.main_panel.get().unwrap(),
+                            self.main_panel.get(),
                             Some(self.get_recon_process_track()),
                             axis_id,
                             self.get_meta_data().get_axis_type(),
@@ -9440,7 +9440,7 @@ impl ApplicationManager {
                 self.tomogram_positioning_expert_a
                     .set(Some(TomogramPositioningExpert::new(
                         self,
-                        self.main_panel.get().unwrap(),
+                        self.main_panel.get(),
                         Some(self.get_recon_process_track()),
                         axis_id,
                         self.get_meta_data().get_axis_type(),
@@ -9456,7 +9456,7 @@ impl ApplicationManager {
                     self.final_aligned_stack_expert_b
                         .set(Some(FinalAlignedStackExpert::new(
                             self,
-                            self.main_panel.get().unwrap(),
+                            self.main_panel.get(),
                             Some(self.get_recon_process_track()),
                             axis_id,
                         )));
@@ -9470,7 +9470,7 @@ impl ApplicationManager {
                 self.final_aligned_stack_expert_a
                     .set(Some(FinalAlignedStackExpert::new(
                         self,
-                        self.main_panel.get().unwrap(),
+                        self.main_panel.get(),
                         Some(self.get_recon_process_track()),
                         axis_id,
                     )));
@@ -9485,7 +9485,7 @@ impl ApplicationManager {
                     self.tomogram_generation_expert_b
                         .set(Some(TomogramGenerationExpert::new(
                             self,
-                            self.main_panel.get().unwrap(),
+                            self.main_panel.get(),
                             Some(self.get_recon_process_track()),
                             axis_id,
                         )));
@@ -9499,7 +9499,7 @@ impl ApplicationManager {
                 self.tomogram_generation_expert_a
                     .set(Some(TomogramGenerationExpert::new(
                         self,
-                        self.main_panel.get().unwrap(),
+                        self.main_panel.get(),
                         Some(self.get_recon_process_track()),
                         axis_id,
                     )));
@@ -13700,14 +13700,26 @@ impl ApplicationManager {
                     .get_meta_data()
                     .get_combine_params()
                     .set_default_patch_boundaries(&rec_file_name);
-                // `catch (final InvalidParameterException except)` and
-                // `catch (final IOException except)`: the translated
-                // `CombineParams::set_default_patch_boundaries` reports both as one
-                // `Err(message)` (MRCHeader.read merges them), so the
-                // InvalidParameterException arm is taken for both.
-                // TODO(unit): distinguish the IOException arm, which opens
-                // `except.getMessage()` titled "IO Error: " + recFileName instead.
+                // `catch (final IOException except)`.  A `NumberFormatException` is
+                // unchecked in Java and escapes the method; here it takes the
+                // `InvalidParameterException` arm below (BUGS.md, fixed in translation).
+                if let Err(crate::imod::etomo::util::mrc_header::ReadError::Io(except)) = &result {
+                    ui_harness::open_message_dialog_from_process(
+                        Some(self),
+                        except,
+                        &format!("IO Error: {}", rec_file_name),
+                        Some(AxisID::Only),
+                    );
+                    // Delete the dialog
+                    self.tomogram_combination_dialog.set(None);
+                    if let Some(main_panel) = self.main_panel.get() {
+                        main_panel.show_blank_process(AxisID::Only);
+                    }
+                    return;
+                }
+                // `catch (final InvalidParameterException except)`.
                 if let Err(except) = result {
+                    let except = except.to_string();
                     // Upstream bug fixed (ApplicationManager.java:7264): the source
                     // concatenates the `String[]` itself (`detailedMessage + "\n"`),
                     // which prints the array's identity hash (`[Ljava.lang.String;@...`)

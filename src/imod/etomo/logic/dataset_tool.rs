@@ -18,9 +18,6 @@
 //! references are `Weak`: the list owns every instance, as the Java list does, and the
 //! pair does not keep itself alive.  They are Swing-side objects (file chooser), never
 //! handed to a process.
-//!
-//! **`UIComponent`** is `ui_harness::UiComponentBoundary`, the boundary the translated
-//! `UIHarness` uses for it.
 #![allow(dead_code)]
 
 use std::cell::RefCell;
@@ -42,7 +39,8 @@ use crate::imod::etomo::r#type::extension::{EXTENSION_DIVIDER, Extension};
 use crate::imod::etomo::r#type::file_type;
 use crate::imod::etomo::r#type::string_property::StringProperty;
 use crate::imod::etomo::r#type::view_type::ViewType;
-use crate::imod::etomo::ui::swing::ui_harness::{self, UiComponentBoundary};
+use crate::imod::etomo::ui::swing::ui_harness;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::montagesize::Montagesize;
 use crate::imod::etomo::util::mrc_header::MRCHeader;
 use crate::imod::etomo::util::stack_trace::StackTrace;
@@ -329,7 +327,7 @@ pub fn get_extension(file: Option<&str>) -> &'static str {
 /// Java `removeMatchingBStacks(UIComponent, File[])`.  Prevent B stacks in the stackList
 /// from being passed by.  Do the same to files with name collision.  See `StackInfo`.
 pub fn remove_matching_b_stacks(
-    component: Option<&dyn UiComponentBoundary>,
+    component: Option<&dyn UIComponent>,
     stack_list: Option<&[Option<PathBuf>]>,
 ) -> Option<Vec<Rc<RefCell<StackInfo>>>> {
     let stack_list = stack_list?;
@@ -729,7 +727,7 @@ fn rename_to_standard_extension(
 /// of its absolute path, which is where `exists()` found it.
 pub fn validate_dataset_name_input_file_component(
     manager: &'static dyn BaseManager,
-    ui_component: Option<&dyn UiComponentBoundary>,
+    ui_component: Option<&dyn UIComponent>,
     axis_id: impl Into<Option<AxisID>>,
     input_file: Option<&Path>,
     data_file_type: impl Into<Option<DataFileType>>,
@@ -900,7 +898,7 @@ pub fn validate_dataset_name_directory(
 /// reconstructions).
 pub fn validate_dataset_name(
     manager: &'static dyn BaseManager,
-    ui_component: Option<&dyn UiComponentBoundary>,
+    ui_component: Option<&dyn UIComponent>,
     axis_id: impl Into<Option<AxisID>>,
     directory: &Path,
     input_file_root: Option<&str>,
@@ -1317,7 +1315,7 @@ pub fn validate_view_type(
     absolute_path: Option<&str>,
     stack_file_name: Option<&str>,
     manager: &'static dyn BaseManager,
-    ui_component: Option<&dyn UiComponentBoundary>,
+    ui_component: Option<&dyn UIComponent>,
     axis_id: AxisID,
 ) -> bool {
     if stack_file_name.is_none() {
@@ -1425,7 +1423,7 @@ fn validate_montage(
     absolute_path: Option<&str>,
     stack_file_name: Option<&str>,
     manager: &'static dyn BaseManager,
-    ui_component: Option<&dyn UiComponentBoundary>,
+    ui_component: Option<&dyn UIComponent>,
     axis_id: AxisID,
 ) -> bool {
     if view_type != ViewType::Montage {
@@ -1448,10 +1446,22 @@ fn validate_montage(
                 return false;
             }
             Ok(true) => {}
-            Err(message) => {
+            // catch (etomo.util.InvalidParameterException except)
+            Err(crate::imod::etomo::util::mrc_header::ReadError::InvalidParameter(message)) => {
                 ui_harness::open_message_dialog_from_process(
                     Some(manager),
                     &message,
+                    "Invalid Parameter Exception",
+                    Some(axis_id),
+                );
+                return false;
+            }
+            // catch (IOException except); the unchecked NumberFormatException of a
+            // header whose size is not a number is reported the same way here.
+            Err(message) => {
+                ui_harness::open_message_dialog_from_process(
+                    Some(manager),
+                    &message.to_string(),
                     "IO Exception",
                     Some(axis_id),
                 );

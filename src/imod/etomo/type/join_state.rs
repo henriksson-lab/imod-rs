@@ -16,32 +16,30 @@
 //! below by locking for each call, so a `Walker` over one reads the live list one
 //! synchronised call at a time, as Java's does.
 //!
-//! **`Properties`.**  `Storable.load` takes a read-only map, while
-//! `loadJoinTrialVersion1_0` removes the version-1.0 keys it has converted from the
-//! caller's `Properties`.  The load reads from a copy of the map and the removals apply
-//! to that copy, so the converted keys stay in the caller's map (and so in a later
-//! save of the same map).
-//!
 //! **`prepend == ""`.**  `createPrepend` tests `prepend == ""`, a reference comparison
 //! true for the interned literal that `store(Properties)`/`load(Properties)` pass; it
 //! is translated as `prepend.is_empty()`.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
-use std::convert::Infallible;
 use std::sync::{LazyLock, Mutex};
 
 use super::base_state::BaseState;
 use super::const_etomo_number::ConstEtomoNumber;
 use super::const_etomo_version::ConstEtomoVersion;
 use super::const_int_key_list::ConstIntKeyList;
+use super::const_join_meta_data::ConstJoinMetaData;
 use super::const_join_state::ConstJoinState;
+use super::const_section_table_row_data::{self, ConstSectionTableRowData};
 use super::etomo_boolean2::EtomoBoolean2;
 use super::etomo_number::EtomoNumber;
 use super::etomo_version::EtomoVersion;
 use super::int_key_list::{IntKeyList, Walker};
+use super::join_meta_data::JoinMetaData;
+use super::null_required_number_exception::NullRequiredNumberException;
 use super::process_name::ProcessName;
 use super::script_parameter::ScriptParameter;
+use super::slicer_angles::SlicerAngles;
 use crate::imod::etomo::base_manager::BaseManager;
 
 /// Java `rcsid`.
@@ -105,10 +103,7 @@ static XFMODEL_OUTPUT_FILE: LazyLock<String> =
     LazyLock::new(|| format!("{}OutputFile", ProcessName::XFMODEL));
 
 /// Java `Hashtable` of `SlicerAngles` keyed by row index.
-// TODO(unit): needs etomo/type/SlicerAngles.java - the value type.  With no module the
-// value is `Infallible`, so a table can only be empty; the row bookkeeping below is
-// translated in full.
-pub type RotationAnglesList = HashMap<i32, Infallible>;
+pub type RotationAnglesList = HashMap<i32, SlicerAngles>;
 
 /// Java `JoinState`.
 pub struct JoinState {
@@ -344,12 +339,15 @@ impl JoinState {
                 while i < total_rows {
                     let rotation_angles = rotation_angles_list.get(&i);
                     if let Some(rotation_angles) = rotation_angles {
-                        // TODO(unit): needs etomo/type/SlicerAngles.java - the body is
-                        // `rotationAngles.store(props,
-                        // SectionTableRowData.createPrepend(prepend,
-                        // new EtomoNumber().set(i + 1)))`
-                        // (`const_section_table_row_data::create_prepend_static`).
-                        match *rotation_angles {}
+                        let mut row_number = EtomoNumber::new();
+                        row_number.set_int(i + 1);
+                        rotation_angles.store(
+                            props,
+                            &const_section_table_row_data::create_prepend_static(
+                                Some(&prepend),
+                                &row_number,
+                            ),
+                        );
                     }
                     i += 1;
                 }
@@ -469,17 +467,15 @@ impl JoinState {
     }
 
     /// Java `load(Properties)`.
-    pub fn load(&self, props: &BTreeMap<String, String>) {
+    pub fn load(&self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
     /// Java `load(Properties, String)`.
-    pub fn load_with_prepend(&self, props: &BTreeMap<String, String>, prepend: &str) {
+    pub fn load_with_prepend(&self, props: &mut BTreeMap<String, String>, prepend: &str) {
         // `super.load(props, prepend)`: `BaseState.load` only runs
         // `createPrepend(prepend)` and discards the result.
-        // `loadJoinTrialVersion1_0` removes keys from the Java `Properties`; the load
-        // reads from a copy of the read-only map (see the module header).
-        let mut props_copy = props.clone();
+        let props_copy = props;
         // reset
         self.done_mode.lock().unwrap().reset();
         *self.sample_produced.lock().unwrap() = DEFAULT_SAMPLE_PRODUCED;
@@ -517,12 +513,12 @@ impl JoinState {
         let group = format!("{}.", prepend);
         crate::imod::etomo::storage::storable::StorableValue::load_with_prepend(
             &mut *self.join_version.lock().unwrap(),
-            &props_copy,
+            &mut *props_copy,
             &prepend,
         );
         crate::imod::etomo::storage::storable::StorableValue::load_with_prepend(
             &mut *self.join_trial_version.lock().unwrap(),
-            &props_copy,
+            &mut *props_copy,
             &prepend,
         );
         let join_version_is_null = self.join_version.lock().unwrap().is_null();
@@ -596,7 +592,7 @@ impl JoinState {
                 .unwrap()
                 .load_with_prepend(&props_copy, Some(&prepend));
         } else {
-            self.load_join_trial_version1_0(&mut props_copy, &prepend);
+            self.load_join_trial_version1_0(props_copy, &prepend);
         }
         self.join_local_fits
             .lock()
@@ -629,13 +625,26 @@ impl JoinState {
         if !total_rows_is_null {
             let mut i = 0;
             while i < total_rows {
-                // TODO(unit): needs etomo/type/SlicerAngles.java - the body is
-                // `SlicerAngles rotationAngles = new SlicerAngles();
-                // rotationAngles.load(props, SectionTableRowData.createPrepend(prepend,
-                // new EtomoNumber().set(i + 1)));` and, when `!rotationAngles.isEmpty()`,
-                // creating `rotationAnglesList` if it is null and putting the angles
-                // under `i`.  Without the unit no angles are loaded and the list stays
-                // null.
+                let mut rotation_angles = SlicerAngles::new();
+                let mut row_number = EtomoNumber::new();
+                row_number.set_int(i + 1);
+                rotation_angles.load(
+                    &*props_copy,
+                    &const_section_table_row_data::create_prepend_static(
+                        Some(&prepend),
+                        &row_number,
+                    ),
+                );
+                if !rotation_angles.is_empty() {
+                    let mut rotation_angles_list = self.rotation_angles_list.lock().unwrap();
+                    if rotation_angles_list.is_none() {
+                        *rotation_angles_list = Some(HashMap::new());
+                    }
+                    rotation_angles_list
+                        .as_mut()
+                        .unwrap()
+                        .insert(i, rotation_angles);
+                }
                 i += 1;
             }
         }
@@ -666,7 +675,7 @@ impl JoinState {
             .cloned();
         crate::imod::etomo::storage::storable::StorableValue::load_with_prepend(
             &mut *self.version.lock().unwrap(),
-            &props_copy,
+            &mut *props_copy,
             &prepend,
         );
         // Bug# 1165 - fixing previous .ejf files when possible.
@@ -751,25 +760,66 @@ impl JoinState {
     /// loadJoinTrialVersion1_0().  Sets the refine version or the refine trial version
     /// of to the current version.
     ///
-    /// Fixed in translation: JoinState.java:430 dereferences a null `metaData`
-    /// (`metaData.getSectionTableData()`), a NullPointerException before anything is
-    /// changed; a missing meta data returns without changing anything here.
-    // TODO(unit): needs etomo/type/JoinMetaData.java - the parameter type.  The body
-    // reads `metaData.getSectionTableData()` and its size, calls
-    // `setCurrentJoinVersion(trial)` and
-    // `setJoinAlignmentRefSection(trial, metaData.getAlignmentRefSection())`; for a trial
-    // it resets `joinTrialStartList`/`joinTrialEndList`, puts each row's
-    // `getJoinFinalStart()`/`getJoinFinalEnd()` under its index, and sets
-    // `joinTrialUseEveryNSlices` from `metaData.getUseEveryNSlices()`; otherwise it does
-    // the same for `joinStartList`/`joinEndList` and sets `joinShiftInX`,
-    // `joinShiftInY`, `joinSizeInX` and `joinSizeInY` from the meta data.
-    pub fn set_join_version1_0(&self, trial: bool, meta_data: Option<Infallible>) {
-        let _ = trial;
-        let meta_data = match meta_data {
-            None => return,
-            Some(meta_data) => meta_data,
-        };
-        match meta_data {}
+    /// Fixed in translation: JoinState.java:431-432 dereference a null section table
+    /// (`dataList.size()`), a NullPointerException; a missing table has size 0 here.
+    pub fn set_join_version1_0(&self, trial: bool, meta_data: &JoinMetaData) {
+        let data_list = meta_data.get_section_table_data();
+        let size = data_list.as_ref().map_or(0, |data_list| data_list.len());
+        self.set_current_join_version(trial);
+        self.set_join_alignment_ref_section(trial, Some(&meta_data.get_alignment_ref_section()));
+        if trial {
+            let mut join_trial_start_list = self.join_trial_start_list.lock().unwrap();
+            let mut join_trial_end_list = self.join_trial_end_list.lock().unwrap();
+            join_trial_start_list.reset();
+            join_trial_end_list.reset();
+            for i in 0..size {
+                let data = &data_list.as_ref().unwrap()[i];
+                join_trial_start_list.put_etomo_number(
+                    i as i32,
+                    &EtomoNumber::new_from_instance(Some(data.get_join_final_start())),
+                );
+                join_trial_end_list.put_etomo_number(
+                    i as i32,
+                    &EtomoNumber::new_from_instance(Some(data.get_join_final_end())),
+                );
+            }
+            self.join_trial_use_every_n_slices
+                .lock()
+                .unwrap()
+                .set_const_etomo_number(Some(&meta_data.get_use_every_n_slices()));
+        } else {
+            let mut join_start_list = self.join_start_list.lock().unwrap();
+            let mut join_end_list = self.join_end_list.lock().unwrap();
+            join_start_list.reset();
+            join_end_list.reset();
+            for i in 0..size {
+                let data = &data_list.as_ref().unwrap()[i];
+                join_start_list.put_etomo_number(
+                    i as i32,
+                    &EtomoNumber::new_from_instance(Some(data.get_join_final_start())),
+                );
+                join_end_list.put_etomo_number(
+                    i as i32,
+                    &EtomoNumber::new_from_instance(Some(data.get_join_final_end())),
+                );
+            }
+            self.join_shift_in_x
+                .lock()
+                .unwrap()
+                .set_const_etomo_number(Some(&meta_data.get_shift_in_x()));
+            self.join_shift_in_y
+                .lock()
+                .unwrap()
+                .set_const_etomo_number(Some(&meta_data.get_shift_in_y()));
+            self.join_size_in_x
+                .lock()
+                .unwrap()
+                .set_const_etomo_number(Some(&meta_data.get_size_in_x()));
+            self.join_size_in_y
+                .lock()
+                .unwrap()
+                .set_const_etomo_number(Some(&meta_data.get_size_in_y()));
+        }
     }
 
     /// Java `setRefineTrial(boolean)`.
@@ -783,16 +833,24 @@ impl JoinState {
     /// `NullRequiredNumberException` messages from `joinTrialShiftInY.getName()` and
     /// `joinTrialSizeInY.getName()` while testing the X parameters (a copy of
     /// `getNewShiftInY`); the messages here name the X parameters that were tested.
-    // TODO(unit): needs etomo/type/NullRequiredNumberException.java - the exception is
-    // its message here.
-    pub fn get_new_shift_in_x(&self, min: i32, max: i32) -> Result<i32, String> {
+    pub fn get_new_shift_in_x(
+        &self,
+        min: i32,
+        max: i32,
+    ) -> Result<i32, NullRequiredNumberException> {
         let join_trial_shift_in_x = self.join_trial_shift_in_x.lock().unwrap();
         if join_trial_shift_in_x.is_null() {
-            return Err(format!("{} is null.", join_trial_shift_in_x.get_name()));
+            return Err(NullRequiredNumberException::new(&format!(
+                "{} is null.",
+                join_trial_shift_in_x.get_name()
+            )));
         }
         let join_trial_size_in_x = self.join_trial_size_in_x.lock().unwrap();
         if join_trial_size_in_x.is_null() {
-            return Err(format!("{} is null.", join_trial_size_in_x.get_name()));
+            return Err(NullRequiredNumberException::new(&format!(
+                "{} is null.",
+                join_trial_size_in_x.get_name()
+            )));
         }
         Ok(join_trial_shift_in_x
             .get_int()
@@ -801,10 +859,10 @@ impl JoinState {
     }
 
     /// Java `getRotationAngles(Integer)`.
-    pub fn get_rotation_angles(&self, index: i32) -> Option<Infallible> {
+    pub fn get_rotation_angles(&self, index: i32) -> Option<SlicerAngles> {
         let rotation_angles_list = self.rotation_angles_list.lock().unwrap();
         let rotation_angles_list = rotation_angles_list.as_ref()?;
-        rotation_angles_list.get(&index).copied()
+        rotation_angles_list.get(&index).cloned()
     }
 
     /// Java `setDebug(boolean)`.
@@ -995,16 +1053,24 @@ impl JoinState {
     }
 
     /// Java `getNewShiftInY(int, int)`.  calculate shift in y
-    // TODO(unit): needs etomo/type/NullRequiredNumberException.java - the exception is
-    // its message here.
-    pub fn get_new_shift_in_y(&self, min: i32, max: i32) -> Result<i32, String> {
+    pub fn get_new_shift_in_y(
+        &self,
+        min: i32,
+        max: i32,
+    ) -> Result<i32, NullRequiredNumberException> {
         let join_trial_shift_in_y = self.join_trial_shift_in_y.lock().unwrap();
         if join_trial_shift_in_y.is_null() {
-            return Err(format!("{} is null.", join_trial_shift_in_y.get_name()));
+            return Err(NullRequiredNumberException::new(&format!(
+                "{} is null.",
+                join_trial_shift_in_y.get_name()
+            )));
         }
         let join_trial_size_in_y = self.join_trial_size_in_y.lock().unwrap();
         if join_trial_size_in_y.is_null() {
-            return Err(format!("{} is null.", join_trial_size_in_y.get_name()));
+            return Err(NullRequiredNumberException::new(&format!(
+                "{} is null.",
+                join_trial_size_in_y.get_name()
+            )));
         }
         Ok(join_trial_shift_in_y
             .get_int()
@@ -1213,11 +1279,11 @@ impl crate::imod::etomo::storage::storable::Storable for JoinState {
         JoinState::store_with_prepend(self, properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         JoinState::load(self, properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         JoinState::load_with_prepend(self, properties, prepend);
     }
 }

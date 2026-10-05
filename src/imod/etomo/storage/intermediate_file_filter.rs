@@ -282,9 +282,9 @@ impl IntermediateFileFilter {
             if self.accept_string_file_type(&name, &file_type::CLASS.erased_beads_stack_old) {
                 return true;
             }
-            // TODO(unit): needs etomo/logic/DatasetTool.java - Java
-            // `if (accept(name, FileType.FIXED_XRAYS_STACK_OLD)) return true;`: that
-            // deprecated FileType singleton is not declared yet (see file_type.rs).
+            if self.accept_string_file_type(&name, &file_type::CLASS.fixed_xrays_stack_old) {
+                return true;
+            }
             if self.accept_string_file_type(&name, &file_type::CLASS.ctf_corrected_stack_old) {
                 return true;
             }

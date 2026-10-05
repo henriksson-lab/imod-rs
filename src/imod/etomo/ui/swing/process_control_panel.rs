@@ -190,9 +190,8 @@ impl ProcessControlPanel {
 
     /// Java `addMouseListener(MouseListener)`.
     pub fn add_mouse_listener(&self, listener: &Rc<GenericMouseAdapter>) {
-        let _ = listener;
-        // Swing mouse events (not modelled): panelRoot.addMouseListener(listener);
-        // buttonRun.addMouseListener(listener).
+        self.panel_root.add_mouse_listener(listener.clone());
+        self.button_run.get_component().add_mouse_listener(listener.clone());
     }
 
     /// Java `setToolTipText(String)`.

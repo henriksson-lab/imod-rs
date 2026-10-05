@@ -17,8 +17,6 @@
 //! integer and abandons the rest of `load` (and so every setting after it, and
 //! `loaded`).  Fixed in translation: an unparsable value leaves that field at the value
 //! it had, and loading continues.
-// TODO(unit): needs etomo/type/FrameType.java - the class has no module under type/;
-// the translated `FrameType` (variants Main and Sub) is in ui/swing/etomo_frame.rs.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, HashMap};
@@ -33,8 +31,8 @@ use crate::imod::etomo::r#type::const_string_property::ConstStringProperty;
 use crate::imod::etomo::r#type::etomo_boolean2::EtomoBoolean2;
 use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
 use crate::imod::etomo::r#type::etomo_version::EtomoVersion;
+use crate::imod::etomo::r#type::frame_type::FrameType;
 use crate::imod::etomo::r#type::string_property::StringProperty;
-use crate::imod::etomo::ui::swing::etomo_frame::FrameType;
 use crate::imod::etomo::util::circular_buffer::CircularBuffer;
 use crate::imod::etomo::util::utilities::java_io_file_get_absolute_path;
 
@@ -1089,7 +1087,7 @@ impl StorableValue for UserConfiguration {
     }
 
     /// Java `load(Properties)`.
-    fn load(&mut self, props: &BTreeMap<String, String>) {
+    fn load(&mut self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
@@ -1098,7 +1096,7 @@ impl StorableValue for UserConfiguration {
     /// The MRU entries are read as `"EtomoDataFile" + i`, without the group that
     /// `store` writes in front of them; with a non-empty prepend they are not found
     /// again.  Odd, but kept as the source writes it.
-    fn load_with_prepend(&mut self, props: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, props: &mut BTreeMap<String, String>, prepend: &str) {
         let orig_prepend = prepend;
         let prepend = UserConfiguration::get_prepend(Some(prepend));
         let group = UserConfiguration::get_group(&prepend);

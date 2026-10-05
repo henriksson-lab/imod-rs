@@ -46,7 +46,7 @@ export component TiltxcorrPanel inherits VerticalLayout {
     // is likewise 5% of the prealigned stack's X and Y size.
     in property <string> borders-in-x-and-y: "";
 
-    spacing: EtomoStyle.gap;
+    spacing: EtomoStyle.row-gap;
 
     // ---- PanelId.CROSS_CORRELATION (`:249`) ----
     if root.panel-id == 0: Rectangle {
@@ -56,66 +56,68 @@ export component TiltxcorrPanel inherits VerticalLayout {
         border-color: EtomoStyle.border;
         VerticalLayout {
             padding: EtomoStyle.inset;
-            spacing: EtomoStyle.gap;
-            PanelHeader { title: "Tiltxcorr"; }
-            // `pnlBody`
-            VerticalLayout {
-                spacing: EtomoStyle.gap;
-                Rectangle { height: 5px; }
-                // `pnlAdvanced`
-                if root.advanced: VerticalLayout {
-                    spacing: EtomoStyle.gap;
-                    LabeledTextField { label: "Tilt angle offset: "; text: ""; label-width: 260px; }
-                    LabeledTextField { label: "Low frequency rolloff sigma: "; text: ""; label-width: 260px; }
-                    LabeledTextField { label: "High frequency cutoff radius: "; text: ""; label-width: 260px; }
-                    LabeledTextField { label: "High frequency rolloff sigma: "; text: ""; label-width: 260px; }
-                    LabeledTextField { label: "Pixels to trim (x,y): "; text: ""; label-width: 260px; }
-                    // `pnlXMinAndMax`
+            spacing: EtomoStyle.row-gap;
+            ph-body-11 := PanelHeader { title: "Tiltxcorr"; }
+            // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+            if ph-body-11.shown-open: VerticalLayout {
+                spacing: EtomoStyle.row-gap;
+                // `pnlBody`
+                VerticalLayout {
+                    spacing: EtomoStyle.row-gap;
+                    Rectangle { height: 5px; }
+                    // `pnlAdvanced`
+                    if root.advanced: VerticalLayout {
+                        spacing: EtomoStyle.row-gap;
+                        LabeledTextField { label: "Tilt angle offset: "; text: ""; }
+                        LabeledTextField { label: "Low frequency rolloff sigma: "; text: ""; }
+                        LabeledTextField { label: "High frequency cutoff radius: "; text: ""; }
+                        LabeledTextField { label: "High frequency rolloff sigma: "; text: ""; }
+                        LabeledTextField { label: "Pixels to trim (x,y): "; text: ""; }
+                        // `pnlXMinAndMax`
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "X axis min "; text: ""; }
+                            LabeledTextField { label: "Max "; text: ""; }
+                        }
+                        // `pnlYMinAndMax`
+                        HorizontalLayout {
+                            spacing: EtomoStyle.gap;
+                            LabeledTextField { label: "Y axis min "; text: ""; }
+                            LabeledTextField { label: "Max "; text: ""; }
+                        }
+                        LabeledTextField { label: "Pixels to pad (x,y): "; text: ""; }
+                        LabeledTextField { label: "Pixels to taper (x,y): "; text: ""; }
+                    }
+                    // `ctfMagChanges` exists only for a CROSS_CORRELATION instance.
+                    if root.advanced || root.mag-changes-mode: CheckTextField {
+                        label: "Find mag change at view(s):";
+                        text: "";
+                        // `updatePanel()` (`:684-688`) makes this and
+                        // `cbCumulativeCorrelation` mutually exclusive.
+                        enabled: !root.cumulative-correlation;
+                    }
+                    // `pnlAdvanced2`
+                    if root.advanced: VerticalLayout {
+                        spacing: EtomoStyle.row-gap;
+                        CheckBox { text: "Cumulative correlation"; checked: root.cumulative-correlation; }
+                        CheckBox {
+                            text: "Absolute Cosine Stretch";
+                            // `updatePanel()` (`:675-681`)
+                            enabled: root.cumulative-correlation && !root.no-cosine-stretch;
+                        }
+                        CheckBox { text: "No Cosine Stretch"; checked: root.no-cosine-stretch; }
+                        CheckBox { text: "Exclude central peak due to fixed pattern noise"; }
+                        LabeledTextField { label: "Test output: "; text: ""; }
+                        LabeledTextField { label: "View range (start,end): "; text: ""; }
+                        LabeledTextField { label: "Views to skip: "; text: ""; }
+                    }
+                    Rectangle { height: 5px; }
                     HorizontalLayout {
-                        spacing: EtomoStyle.gap;
-                        alignment: start;
-                        LabeledTextField { label: "X axis min "; text: ""; label-width: 90px; }
-                        LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
+                        alignment: center;
+                        MultiLineButton { text: root.tiltxcorr-button-text; width: 240px; }
                     }
-                    // `pnlYMinAndMax`
-                    HorizontalLayout {
-                        spacing: EtomoStyle.gap;
-                        alignment: start;
-                        LabeledTextField { label: "Y axis min "; text: ""; label-width: 90px; }
-                        LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
-                    }
-                    LabeledTextField { label: "Pixels to pad (x,y): "; text: ""; label-width: 260px; }
-                    LabeledTextField { label: "Pixels to taper (x,y): "; text: ""; label-width: 260px; }
+                    Rectangle { height: 5px; }
                 }
-                // `ctfMagChanges` exists only for a CROSS_CORRELATION instance.
-                if root.advanced || root.mag-changes-mode: CheckTextField {
-                    label: "Find mag change at view(s):";
-                    text: "";
-                    // `updatePanel()` (`:684-688`) makes this and
-                    // `cbCumulativeCorrelation` mutually exclusive.
-                    enabled: !root.cumulative-correlation;
-                }
-                // `pnlAdvanced2`
-                if root.advanced: VerticalLayout {
-                    spacing: EtomoStyle.gap;
-                    CheckBox { text: "Cumulative correlation"; checked: root.cumulative-correlation; }
-                    CheckBox {
-                        text: "Absolute Cosine Stretch";
-                        // `updatePanel()` (`:675-681`)
-                        enabled: root.cumulative-correlation && !root.no-cosine-stretch;
-                    }
-                    CheckBox { text: "No Cosine Stretch"; checked: root.no-cosine-stretch; }
-                    CheckBox { text: "Exclude central peak due to fixed pattern noise"; }
-                    LabeledTextField { label: "Test output: "; text: ""; label-width: 260px; }
-                    LabeledTextField { label: "View range (start,end): "; text: ""; label-width: 260px; }
-                    LabeledTextField { label: "Views to skip: "; text: ""; label-width: 260px; }
-                }
-                Rectangle { height: 5px; }
-                HorizontalLayout {
-                    alignment: center;
-                    MultiLineButton { text: root.tiltxcorr-button-text; width: 240px; }
-                }
-                Rectangle { height: 5px; }
             }
         }
     }
@@ -126,7 +128,7 @@ export component TiltxcorrPanel inherits VerticalLayout {
     if root.panel-id == 1: EtchedBorder {
         title: "Patch Tracking";
 
-        LabeledTextField { label: "Size of patches (X,Y): "; text: ""; label-width: 280px; }
+        LabeledTextField { label: "Size of patches (X,Y): "; text: ""; }
 
         // `pnlPatchLayout`.  `rtfOverlapOfPatchesXandY` is selected and
         // preloaded with `TiltxcorrParam.OVERLAP_OF_PATCHES_X_AND_Y_DEFAULT`
@@ -150,11 +152,10 @@ export component TiltxcorrPanel inherits VerticalLayout {
         // `TiltxcorrParam.ITERATE_CORRELATIONS_DEFAULT` 1, `_MIN` 1, `_MAX` 4
         // (`TiltxcorrParam.java:154-156`).
         HorizontalLayout {
-            alignment: start;
-            LabeledSpinner { label: "Iterations to increase subpixel accuracy: "; text: "1"; label-width: 280px; }
+            LabeledSpinner { label: "Iterations to increase subpixel accuracy: "; text: "1"; }
         }
 
-        if root.advanced: LabeledTextField { label: "Limits on shifts from correlation (X,Y): "; text: ""; label-width: 280px; }
+        if root.advanced: LabeledTextField { label: "Limits on shifts from correlation (X,Y): "; text: ""; }
 
         // `ctfLengthOfPiecesMinimumOverlap`, `setTextPreferredWidth(30)` (`:252`).
         CheckTextField {
@@ -177,42 +178,40 @@ export component TiltxcorrPanel inherits VerticalLayout {
             RadioTextField { label: "Use length"; text: ""; enabled: root.length-of-pieces-minimum-overlap; }
         }
 
-        if root.advanced: LabeledTextField { label: "Tilt angle offset: "; text: ""; label-width: 280px; }
+        if root.advanced: LabeledTextField { label: "Tilt angle offset: "; text: ""; }
 
         // `pnlAdvanced2`, preloaded at `:253-255` with
         // `FILTER_SIGMA_1_DEFAULT`, `FILTER_RADIUS_2_DEFAULT` and
         // `FILTER_SIGMA_2_DEFAULT` (`TiltxcorrParam.java:160-162`).
         if root.advanced: VerticalLayout {
-            spacing: EtomoStyle.gap;
-            LabeledTextField { label: "Low frequency rolloff sigma: "; text: "0.03"; label-width: 280px; }
-            LabeledTextField { label: "High frequency cutoff radius: "; text: "0.25"; label-width: 280px; }
-            LabeledTextField { label: "High frequency rolloff sigma: "; text: "0.05"; label-width: 280px; }
+            spacing: EtomoStyle.row-gap;
+            LabeledTextField { label: "Low frequency rolloff sigma: "; text: "0.03"; }
+            LabeledTextField { label: "High frequency cutoff radius: "; text: "0.25"; }
+            LabeledTextField { label: "High frequency rolloff sigma: "; text: "0.05"; }
         }
 
-        LabeledTextField { label: "Pixels to trim (x,y): "; text: root.borders-in-x-and-y; label-width: 280px; }
+        LabeledTextField { label: "Pixels to trim (x,y): "; text: root.borders-in-x-and-y; }
         // `pnlXMinAndMax` / `pnlYMinAndMax` are added to the root here, not to
         // `pnlAdvanced`, so they are not advanced fields in this layout.
         HorizontalLayout {
             spacing: EtomoStyle.gap;
-            alignment: start;
-            LabeledTextField { label: "X axis min "; text: ""; label-width: 90px; }
-            LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
+            LabeledTextField { label: "X axis min "; text: ""; }
+            LabeledTextField { label: "Max "; text: ""; }
         }
         HorizontalLayout {
             spacing: EtomoStyle.gap;
-            alignment: start;
-            LabeledTextField { label: "Y axis min "; text: ""; label-width: 90px; }
-            LabeledTextField { label: "Max "; text: ""; label-width: 40px; }
+            LabeledTextField { label: "Y axis min "; text: ""; }
+            LabeledTextField { label: "Max "; text: ""; }
         }
 
         // `pnlAdvanced`
         if root.advanced: VerticalLayout {
-            spacing: EtomoStyle.gap;
-            LabeledTextField { label: "Pixels to pad (x,y): "; text: ""; label-width: 280px; }
-            LabeledTextField { label: "Pixels to taper (x,y): "; text: ""; label-width: 280px; }
-            LabeledTextField { label: "Test output: "; text: ""; label-width: 280px; }
-            LabeledTextField { label: "View range (start,end): "; text: ""; label-width: 280px; }
-            LabeledTextField { label: "Views to skip: "; text: ""; label-width: 280px; }
+            spacing: EtomoStyle.row-gap;
+            LabeledTextField { label: "Pixels to pad (x,y): "; text: ""; }
+            LabeledTextField { label: "Pixels to taper (x,y): "; text: ""; }
+            LabeledTextField { label: "Test output: "; text: ""; }
+            LabeledTextField { label: "View range (start,end): "; text: ""; }
+            LabeledTextField { label: "Views to skip: "; text: ""; }
         }
 
         // `pnlButtons`

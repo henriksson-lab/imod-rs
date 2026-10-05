@@ -10,6 +10,7 @@ use super::field_interface::{self, FieldInterface};
 use super::process_details::ProcessDetails;
 use crate::imod::etomo::base_manager::{self, BaseManager};
 use crate::imod::etomo::join_manager::JoinManager;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{ConstEtomoNumber, Type};
 use crate::imod::etomo::r#type::const_join_state::ConstJoinState;
@@ -17,7 +18,6 @@ use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
 use crate::imod::etomo::r#type::file_key::FileKey;
 use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::ui::swing::ui_harness;
 use crate::imod::etomo::util::dataset_files;
 use crate::imod::etomo::util::utilities;
@@ -378,7 +378,10 @@ impl ProcessDetails for XfmodelParam {
         None
     }
 
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -386,7 +389,10 @@ impl ProcessDetails for XfmodelParam {
         None
     }
 
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 
@@ -405,7 +411,10 @@ impl ProcessDetails for XfmodelParam {
         None
     }
 
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 

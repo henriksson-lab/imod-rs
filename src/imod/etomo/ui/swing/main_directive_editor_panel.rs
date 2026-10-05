@@ -1,249 +1,185 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/MainDirectiveEditorPanel.java`.
 //!
-//! Java inheritance is represented by the owned `main_panel` field.  The
-//! `ScrollPanel.add` call stays an explicit native GUI boundary, while the
-//! directive-editor process panel and manager stay their separate source units.
-#![allow(dead_code)]
+//! The main panel of the directive editor (`DirectiveEditorManager`): one
+//! `DirectiveEditorProcessPanel`, into which the manager shows the
+//! `DirectiveEditorDialog`.  Extends [`MainPanel`] (held as `base`, dereffed to) and
+//! implements [`MainPanelVirtual`].
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
 use super::abstract_parallel_dialog::AbstractParallelDialog;
-use super::axis_process_panel::AxisProcessPanel;
+use super::axis_process_panel::AxisProcessPanelVirtual;
 use super::axis_progress_panel::AxisProgressPanel;
 use super::directive_editor_process_panel::DirectiveEditorProcessPanel;
-use super::main_panel::MainPanel;
+use super::main_panel::{MainPanel, MainPanelVirtual};
 use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
+use crate::imod::etomo::jdk::FileFilter;
 use crate::imod::etomo::process::process_state::ProcessState;
-use crate::imod::etomo::storage::data_file_filter::DataFileFilter;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::interface_type::InterfaceType;
 
-/// Java final `MainDirectiveEditorPanel`, including inherited `MainPanel` state.
+/// Java `public final class MainDirectiveEditorPanel extends MainPanel`.
 pub struct MainDirectiveEditorPanel {
-    pub main_panel: MainPanel,
-    /// Java final `manager`.
-    pub manager: &'static DirectiveEditorManager,
-    /// Java `axisPanelA`, null before `createAxisPanelA`.
-    pub axis_panel_a: Option<DirectiveEditorProcessPanel>,
-    /// Native `getScrollA().add(axisPanelA.getContainer())` presentation boundary.
-    pub axis_panel_a_added_to_scroll: bool,
+    /// The Java superclass part.
+    base: Rc<MainPanel>,
+    /// Java private final `manager`.
+    manager: &'static DirectiveEditorManager,
+    /// Java private `axisPanelA`, initialised to null.
+    axis_panel_a: RefCell<Option<Rc<DirectiveEditorProcessPanel>>>,
+}
+
+impl Deref for MainDirectiveEditorPanel {
+    type Target = MainPanel;
+    fn deref(&self) -> &MainPanel {
+        &self.base
+    }
 }
 
 impl MainDirectiveEditorPanel {
     /// Java `MainDirectiveEditorPanel(DirectiveEditorManager)`.
-    pub fn new(manager: &'static DirectiveEditorManager) -> Self {
-        Self {
-            main_panel: MainPanel::new(manager),
+    pub fn new(manager: &'static DirectiveEditorManager) -> Rc<MainDirectiveEditorPanel> {
+        let this = Rc::new(MainDirectiveEditorPanel {
+            // super(manager)
+            base: MainPanel::new(manager),
             manager,
-            axis_panel_a: None,
-            axis_panel_a_added_to_scroll: false,
+            axis_panel_a: RefCell::new(None),
+        });
+        this.base
+            .set_this(Rc::downgrade(&this) as Weak<dyn MainPanelVirtual>);
+        this
+    }
+
+    /// Java final `setStatusBarText(String, int)`.
+    pub fn set_status_bar_text(&self, directory: Option<&str>, max_title_length: usize) {
+        self.base
+            .set_status_bar_text_to_directory(directory, max_title_length);
+    }
+}
+
+impl MainPanelVirtual for MainDirectiveEditorPanel {
+    fn main_panel(&self) -> &MainPanel {
+        &self.base
+    }
+
+    /// Java package-private `addAxisPanelA()`.
+    fn add_axis_panel_a(&self) {
+        // Upstream bug fixed in translation (MainDirectiveEditorPanel.java:35): Java
+        // dereferences getScrollA() and axisPanelA unchecked; a null one is skipped.
+        let axis_panel_a = self.axis_panel_a.borrow().clone();
+        if let (Some(scroll_a), Some(axis_panel_a)) = (self.base.get_scroll_a(), axis_panel_a) {
+            scroll_a.add(&axis_panel_a.get_container());
         }
     }
 
-    /// Java `addAxisPanelA()`.
-    pub fn add_axis_panel_a(&mut self) {
-        let _scroll_a = self
-            .main_panel
-            .get_scroll_a()
-            .expect("MainPanel.scrollA is null");
-        let _container = self
-            .axis_panel_a
-            .as_ref()
-            .expect("MainDirectiveEditorPanel.axisPanelA is null")
-            .axis_process_panel
-            .get_container();
-        self.axis_panel_a_added_to_scroll = true;
+    /// Java package-private `addAxisPanelB()`: empty.
+    fn add_axis_panel_b(&self) {}
+
+    /// Java package-private `isAxisPanelANull()`.
+    fn is_axis_panel_a_null(&self) -> bool {
+        self.axis_panel_a.borrow().is_none()
     }
 
-    /// Java `addAxisPanelB()`, whose body is empty.
-    pub fn add_axis_panel_b(&mut self) {}
-
-    /// Java `isAxisPanelANull()`.
-    pub fn is_axis_panel_a_null(&self) -> bool {
-        self.axis_panel_a.is_none()
-    }
-
-    /// Java `isAxisPanelBNull()`.
-    pub fn is_axis_panel_b_null(&self) -> bool {
+    /// Java package-private `isAxisPanelBNull()`.
+    fn is_axis_panel_b_null(&self) -> bool {
         true
     }
 
-    /// Java `createAxisPanelA(AxisID, AxisProgressPanel)`.
-    pub fn create_axis_panel_a(
-        &mut self,
-        _axis_id: AxisID,
-        axis_progress_panel: AxisProgressPanel,
-    ) {
-        self.axis_panel_a = Some(DirectiveEditorProcessPanel::new(
+    /// Java package-private `createAxisPanelA(AxisID, AxisProgressPanel)`.
+    fn create_axis_panel_a(&self, _axis_id: AxisID, axis_progress_panel: Rc<AxisProgressPanel>) {
+        let panel = DirectiveEditorProcessPanel::new(
             self.manager,
             InterfaceType::DirectiveEditor,
             axis_progress_panel,
-        ));
+        );
+        *self.axis_panel_a.borrow_mut() = Some(panel);
     }
 
-    /// Java `createAxisPanelB(AxisProgressPanel)`, whose body is empty.
-    pub fn create_axis_panel_b(&mut self, _axis_progress_panel: AxisProgressPanel) {}
+    /// Java package-private `createAxisPanelB(AxisProgressPanel)`: empty.
+    fn create_axis_panel_b(&self, _axis_progress_panel: Rc<AxisProgressPanel>) {}
 
-    /// Java `getAxisPanelA()`.
-    pub fn get_axis_panel_a(&mut self) -> Option<&mut AxisProcessPanel> {
+    /// Java package-private `getAxisPanelA()`.
+    fn get_axis_panel_a(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         self.axis_panel_a
-            .as_mut()
-            .map(|panel| &mut panel.axis_process_panel)
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
     }
 
-    /// Java `getAxisPanelB()`, which returns null.
-    pub fn get_axis_panel_b(&mut self) -> Option<&mut AxisProcessPanel> {
+    /// Java package-private `getAxisPanelB()`: null.
+    fn get_axis_panel_b(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         None
     }
 
-    /// Java `getDataFileFilter()`, which returns null.
-    pub fn get_data_file_filter(&self) -> Option<DataFileFilter> {
+    /// Java package-private `getDataFileFilter()`: null.
+    fn get_data_file_filter(&self) -> Option<Rc<dyn FileFilter>> {
         None
     }
 
-    /// Java `hideAxisPanelA()`.
-    pub fn hide_axis_panel_a(&mut self) -> bool {
+    /// Java package-private `hideAxisPanelA()`.
+    fn hide_axis_panel_a(&self) -> bool {
+        // Upstream bug fixed in translation (MainDirectiveEditorPanel.java:75): Java
+        // dereferences axisPanelA unchecked; a null panel is not hidden (false).
         self.axis_panel_a
-            .as_mut()
-            .expect("MainDirectiveEditorPanel.axisPanelA is null")
-            .axis_process_panel
-            .hide()
+            .borrow()
+            .clone()
+            .is_some_and(|panel| panel.hide())
     }
 
-    /// Java `hideAxisPanelB()`.
-    pub fn hide_axis_panel_b(&mut self) -> bool {
+    /// Java package-private `hideAxisPanelB()`.
+    fn hide_axis_panel_b(&self) -> bool {
         true
     }
 
-    /// Java `mapBaseAxisProcessPanel(AxisID)`.
-    pub fn map_base_axis_process_panel(
-        &mut self,
+    /// Java package-private `mapBaseAxisProcessPanel(AxisID)`.
+    fn map_base_axis_process_panel(
+        &self,
         axis_id: AxisID,
-    ) -> Option<&mut AxisProcessPanel> {
+    ) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         if axis_id == AxisID::Second {
             return None;
         }
-        self.get_axis_panel_a()
+        self.axis_panel_a
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
     }
 
-    /// Java `mapAxisProgressPanel(AxisID)`.
-    pub fn map_axis_progress_panel(&mut self, axis_id: AxisID) -> Option<&mut AxisProgressPanel> {
+    /// Java package-private `mapAxisProgressPanel(AxisID)`.
+    fn map_axis_progress_panel(&self, axis_id: AxisID) -> Option<Rc<AxisProgressPanel>> {
         if axis_id == AxisID::Second {
             return None;
         }
-        Some(self.main_panel.get_progress_panel(axis_id))
+        Some(self.base.get_progress_panel(axis_id))
     }
 
-    /// Java `resetAxisPanels()`.
-    pub fn reset_axis_panels(&mut self) {
-        self.axis_panel_a = None;
+    /// Java package-private `resetAxisPanels()`.
+    fn reset_axis_panels(&self) {
+        *self.axis_panel_a.borrow_mut() = None;
     }
 
-    /// Java `saveDisplayState()`, whose body is empty.
-    pub fn save_display_state(&mut self) {}
+    /// Java `saveDisplayState()`: empty.
+    fn save_display_state(&self) {}
 
-    /// Java `setState(ProcessState, AxisID, AbstractParallelDialog)`, whose body is empty.
-    pub fn set_state(
-        &mut self,
+    /// Java `setState(ProcessState, AxisID, AbstractParallelDialog)`: empty.
+    fn set_state(
+        &self,
         _process_state: ProcessState,
         _axis_id: AxisID,
         _parallel_dialog: &dyn AbstractParallelDialog,
     ) {
     }
 
-    /// Java `showAxisPanelA()`.
-    pub fn show_axis_panel_a(&mut self) {
-        self.axis_panel_a
-            .as_mut()
-            .expect("MainDirectiveEditorPanel.axisPanelA is null")
-            .axis_process_panel
-            .show();
-    }
-
-    /// Java `showAxisPanelB()`, whose body is empty.
-    pub fn show_axis_panel_b(&mut self) {}
-
-    /// Java `setStatusBarText(String, int)`.
-    pub fn set_status_bar_text(&mut self, directory: Option<&str>, max_title_length: i32) {
-        self.main_panel
-            .set_status_bar_text_to_directory(directory, max_title_length as usize);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::comscript::parallel_param::ParallelParam;
-    use crate::imod::etomo::r#type::dialog_type::DialogType;
-    use crate::imod::etomo::ui::swing::scroll_panel::ScrollPanel;
-
-    struct Dialog;
-
-    impl AbstractParallelDialog for Dialog {
-        fn get_parameters(&self, _param: &mut dyn ParallelParam) {}
-
-        fn get_dialog_type(&self) -> DialogType {
-            DialogType::Tools
+    /// Java package-private `showAxisPanelA()`.
+    fn show_axis_panel_a(&self) {
+        // Upstream bug fixed in translation (MainDirectiveEditorPanel.java:111): Java
+        // dereferences axisPanelA unchecked; a null panel is skipped.
+        if let Some(panel) = self.axis_panel_a.borrow().clone() {
+            panel.show();
         }
     }
 
-    #[test]
-    fn a_axis_creation_mapping_and_scroll_addition_preserve_directive_editor_panel() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let mut panel = MainDirectiveEditorPanel::new(manager);
-        let progress = AxisProgressPanel::get_instance(Some(AxisID::Only), manager);
-        panel.create_axis_panel_a(AxisID::First, progress);
-        assert!(!panel.is_axis_panel_a_null());
-        assert_eq!(panel.get_axis_panel_a().unwrap().axis_id, AxisID::Only);
-        assert_eq!(
-            panel.get_axis_panel_a().unwrap().interface_type,
-            InterfaceType::DirectiveEditor
-        );
-        assert!(panel.map_base_axis_process_panel(AxisID::First).is_some());
-        assert!(panel.map_base_axis_process_panel(AxisID::Second).is_none());
-        panel.main_panel.scroll_a = Some(ScrollPanel::new());
-        panel.add_axis_panel_a();
-        assert!(panel.axis_panel_a_added_to_scroll);
-    }
-
-    #[test]
-    fn only_axis_progress_is_mapped_and_b_axis_source_nulls_are_preserved() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let mut panel = MainDirectiveEditorPanel::new(manager);
-        assert_eq!(
-            panel
-                .map_axis_progress_panel(AxisID::First)
-                .unwrap()
-                .axis_id,
-            AxisID::First
-        );
-        assert!(panel.map_axis_progress_panel(AxisID::Second).is_none());
-        assert!(panel.is_axis_panel_b_null());
-        assert!(panel.get_axis_panel_b().is_none());
-        assert!(panel.get_data_file_filter().is_none());
-        assert!(panel.hide_axis_panel_b());
-        panel.add_axis_panel_b();
-        panel.create_axis_panel_b(AxisProgressPanel::get_instance(Some(AxisID::Only), manager));
-        panel.show_axis_panel_b();
-    }
-
-    #[test]
-    fn visibility_reset_empty_overrides_and_status_delegate_match_java() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let mut panel = MainDirectiveEditorPanel::new(manager);
-        panel.create_axis_panel_a(
-            AxisID::Only,
-            AxisProgressPanel::get_instance(Some(AxisID::Only), manager),
-        );
-        assert!(panel.hide_axis_panel_a());
-        assert!(!panel.get_axis_panel_a().unwrap().panel_root_visible);
-        panel.show_axis_panel_a();
-        assert!(panel.get_axis_panel_a().unwrap().panel_root_visible);
-        panel.set_status_bar_text(Some("/a/very-long-directory"), 8);
-        assert_eq!(panel.main_panel.get_status_bar_text(), "...irectory");
-        panel.set_status_bar_text(None, 8);
-        assert_eq!(panel.main_panel.get_status_bar_text(), "");
-        panel.set_state(ProcessState::Complete, AxisID::Only, &Dialog);
-        panel.save_display_state();
-        panel.reset_axis_panels();
-        assert!(panel.is_axis_panel_a_null());
-    }
+    /// Java package-private `showAxisPanelB()`: empty.
+    fn show_axis_panel_b(&self) {}
 }

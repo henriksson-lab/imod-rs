@@ -23,7 +23,10 @@
 //!
 //! Script language and outputs (`driver.log`, `popups.log`, `exec.log`,
 //! `dump-<label>.txt`, `$DRIVER_SNAPSHOT`) are those of `EtomoDriver.java`;
-//! see its head comment.
+//! see its head comment.  One addition (also in the Java driver copy under
+//! `/big/henriksson/gui2/parallel/driver/`): `chooser=<path>` makes the next
+//! `FileChooser` that is shown select `<path>` and approve (one-shot); a chooser
+//! shown with nothing pending is cancelled.
 
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -52,6 +55,9 @@ struct DriverState {
     popup_rules: Vec<(String, String)>,
     handled_popups: Vec<String>,
     popup_count: usize,
+    /// `chooser=<path>`: the file the next shown `FileChooser` selects and
+    /// approves (one-shot); with none pending a chooser is cancelled.
+    chooser_file: Option<String>,
 }
 
 static STATE: Mutex<DriverState> = Mutex::new(DriverState {
@@ -61,6 +67,7 @@ static STATE: Mutex<DriverState> = Mutex::new(DriverState {
     popup_rules: Vec::new(),
     handled_popups: Vec::new(),
     popup_count: 0,
+    chooser_file: None,
 });
 
 /// `HH:mm:ss.SSS` in local time (Java `SimpleDateFormat`).
@@ -122,7 +129,25 @@ pub fn etomodriver(args: &[String]) -> i32 {
     ));
     // The popup hook lives on the event dispatch thread's UIHarness.
     event_queue::invoke_and_wait(|| {
-        ui_harness::with(|harness| harness.set_popup_hook(Some(Box::new(handle_popup))))
+        ui_harness::with(|harness| harness.set_popup_hook(Some(Box::new(handle_popup))));
+        // `chooser=<path>`: answer the next file chooser with that file.
+        crate::imod::etomo::ui::swing::file_chooser::set_dialog_responder(Some(std::rc::Rc::new(
+            |chooser: &crate::imod::etomo::ui::swing::file_chooser::FileChooser, _parent| {
+                let file = STATE.lock().unwrap().chooser_file.take();
+                match file {
+                    Some(file) => {
+                        popup_log(&format!("{} CHOOSER -> {}", timestamp(), file));
+                        log(&format!("chooser: {file}"));
+                        chooser.set_selected_file(Some(std::path::Path::new(&file)));
+                        chooser.approve_selection();
+                    }
+                    None => {
+                        log("chooser: none pending, cancelled");
+                        chooser.cancel_selection();
+                    }
+                }
+            },
+        )));
     });
     std::thread::Builder::new()
         .name("popup-watcher".to_owned())
@@ -204,6 +229,10 @@ fn execute(key: &str, value: Option<&str>) -> Result<(), String> {
         return Ok(());
     }
     match key {
+        "chooser" => {
+            STATE.lock().unwrap().chooser_file = Some(value_str.to_owned());
+            return Ok(());
+        }
         "sleep" => {
             std::thread::sleep(Duration::from_millis(parse_long(value_str)?));
             return Ok(());
@@ -241,6 +270,145 @@ fn execute(key: &str, value: Option<&str>) -> Result<(), String> {
         }
         "exec" => {
             run_shell(value_str);
+            return Ok(());
+        }
+        "menu" => {
+            // `menu=<text>[#N]`: click the N-th (1-based, default 1) menu item with
+            // that text in the windows' menu bars, in window order.
+            let (text, nth) = match value_str.rsplit_once('#') {
+                Some((text, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+                    (text.to_owned(), n.parse::<usize>().unwrap_or(1).max(1))
+                }
+                _ => (value_str.to_owned(), 1),
+            };
+            /// The menu items with `text`, in window order.
+            fn menu_items(text: &str) -> Vec<Rc<JComponent>> {
+                fn walk(node: &Rc<JComponent>, text: &str, out: &mut Vec<Rc<JComponent>>) {
+                    if matches!(
+                        node.kind(),
+                        ComponentKind::MenuItem | ComponentKind::CheckBoxMenuItem
+                    ) && node.get_text() == text
+                    {
+                        out.push(node.clone());
+                    }
+                    for child in node.get_components() {
+                        walk(&child, text, out);
+                    }
+                }
+                let mut items = Vec::new();
+                for window in windows() {
+                    for root in &window.roots {
+                        walk(root, text, &mut items);
+                    }
+                }
+                items
+            }
+            let text_edt = text.clone();
+            let found = event_queue::invoke_and_wait(move || menu_items(&text_edt).len() >= nth);
+            if found {
+                // Clicked from a later event, as the Java driver's `invokeLater`
+                // (a popup the click opens must not block the driver).
+                event_queue::invoke_later(move || {
+                    if let Some(item) = menu_items(&text).into_iter().nth(nth - 1) {
+                        item.do_click();
+                    }
+                });
+            }
+            if !found {
+                return Err(format!(
+                    "java.lang.RuntimeException: no menu item {value_str}"
+                ));
+            }
+            settle();
+            return Ok(());
+        }
+        "rclick" => {
+            // `rclick=<name>[.N]`: a right mouse press on the N-th showing component
+            // with that name, delivered as Swing does (`jdk::dispatch_mouse_pressed`).
+            let (name, index) = match value_str.rsplit_once('.') {
+                Some((name, n)) if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => {
+                    (name.to_owned(), n.parse::<usize>().unwrap_or(0))
+                }
+                _ => (value_str.to_owned(), 0),
+            };
+            find_with_retry(&name, index, 30)?;
+            event_queue::invoke_later(move || match find_all(&name).get(index) {
+                Some(component) => crate::imod::etomo::jdk::dispatch_mouse_pressed(
+                    component,
+                    &crate::imod::etomo::jdk::MouseEvent {
+                        button: 3,
+                        popup_trigger: true,
+                        x: 0,
+                        y: 0,
+                    },
+                ),
+                None => log(&format!("ACTION FAILED on {}: component vanished", name)),
+            });
+            settle();
+            return Ok(());
+        }
+        "popupdump" => {
+            // `popupdump=<label>`: log the showing popup menu's items.
+            let text = event_queue::invoke_and_wait(|| {
+                let Some((menu, _, _)) = crate::imod::etomo::jdk::showing_popup_menu() else {
+                    return "POPUP none".to_owned();
+                };
+                let mut text = format!("POPUP '{}'", menu.get_text());
+                for item in menu.get_components() {
+                    match item.kind() {
+                        ComponentKind::Separator => text.push_str("\n  ---"),
+                        ComponentKind::MenuItem => text.push_str(&format!(
+                            "\n  {} enabled={} name={}",
+                            item.get_text(),
+                            item.is_enabled(),
+                            item.get_name().unwrap_or_else(|| "null".to_owned())
+                        )),
+                        _ => {}
+                    }
+                }
+                text
+            });
+            log(&format!("{value_str} {text}"));
+            return Ok(());
+        }
+        "popupclose" => {
+            // `popupclose`: Escape closes a showing popup menu.
+            event_queue::invoke_and_wait(|| {
+                if let Some((menu, _, _)) = crate::imod::etomo::jdk::showing_popup_menu() {
+                    menu.set_visible(false);
+                }
+            });
+            settle();
+            return Ok(());
+        }
+        "pmn" => {
+            // `pmn=<text>`: choose the item with that text in the showing popup menu
+            // (`BasicMenuItemUI`: the menu path is cleared, then the item clicked).
+            let wanted = value_str.to_owned();
+            let found = event_queue::invoke_and_wait(move || {
+                crate::imod::etomo::jdk::showing_popup_menu().is_some_and(|(menu, _, _)| {
+                    menu.get_components().into_iter().any(|item| {
+                        item.kind() == ComponentKind::MenuItem && item.get_text() == wanted
+                    })
+                })
+            });
+            if !found {
+                return Err(format!(
+                    "java.lang.RuntimeException: no popup menu item {value_str}"
+                ));
+            };
+            let wanted = value_str.to_owned();
+            event_queue::invoke_later(move || {
+                if let Some((menu, _, _)) = crate::imod::etomo::jdk::showing_popup_menu()
+                    && let Some(item) = menu.get_components().into_iter().find(|item| {
+                        item.kind() == ComponentKind::MenuItem && item.get_text() == wanted
+                    })
+                {
+                    menu.set_visible(false);
+                    item.do_click();
+                }
+            });
+            settle();
             return Ok(());
         }
         "wait.name" => {
@@ -367,6 +535,12 @@ fn act(kind: &str, component: &Rc<JComponent>, value: Option<&str>, index: usize
                     return;
                 }
             }
+            if component.is_editable() {
+                // rows2 addition: an editable combo box takes the text
+                // (`JComboBox.setSelectedItem`, as its editor commits it).
+                component.set_selected_item(value);
+                return;
+            }
             log(&format!(
                 "WARNING: combo item {} not found in {}",
                 value.unwrap_or("null"),
@@ -447,6 +621,16 @@ fn windows() -> Vec<Window> {
             roots,
         });
     }
+    // The showing `JDialog`s (a modal startup dialog), as `Window.getWindows()`
+    // lists them.
+    for dialog in crate::imod::etomo::jdk::showing_dialogs() {
+        out.push(Window {
+            class: "javax.swing.JDialog",
+            title: dialog.get_title(),
+            showing: dialog.is_visible(),
+            roots: vec![dialog.get_content_pane()],
+        });
+    }
     if let Some(manager) = etomo_director::INSTANCE.get_current_manager_for_driver()
         && let Some(log_window) = manager.get_log_window()
     {
@@ -457,6 +641,35 @@ fn windows() -> Vec<Window> {
             roots: std::iter::once(log_window.get_frame_content_pane())
                 .chain(log_window.get_frame_j_menu_bar())
                 .collect(),
+        });
+    }
+    // The log-file frames `ContextPopup` opens, in the order they were created.
+    for window in crate::imod::etomo::ui::swing::tabbed_text_window::get_windows() {
+        out.push(Window {
+            class: "etomo.ui.swing.TabbedTextWindow",
+            title: window.get_title().unwrap_or_default(),
+            showing: window.is_visible(),
+            roots: vec![window.get_content_pane()],
+        });
+    }
+    for window in crate::imod::etomo::ui::swing::text_page_window::get_windows() {
+        out.push(Window {
+            class: "etomo.ui.swing.TextPageWindow",
+            title: window.get_title(),
+            showing: window.is_visible(),
+            roots: vec![window.get_content_pane()],
+        });
+    }
+    // The `ManagerFrame`s (the directive editor), in the order they were created, as
+    // `Window.getWindows()` lists them.
+    for (_, manager_frame) in ui_harness::with(|harness| harness.get_manager_frames()) {
+        let mut roots = vec![manager_frame.get_content_pane()];
+        roots.extend(manager_frame.get_j_menu_bar());
+        out.push(Window {
+            class: "etomo.ui.swing.ManagerFrame",
+            title: manager_frame.get_title(),
+            showing: manager_frame.is_visible(),
+            roots,
         });
     }
     out
@@ -598,6 +811,12 @@ fn busy() -> bool {
 /// Java `PopupWatcher.handle(Dialog, JOptionPane)`, as the `UIHarness` popup
 /// hook.  Runs on the EDT where the pane is shown.
 fn handle_popup(request: &PopupRequest) -> PopupAnswer {
+    // The Java driver's watcher finds a popup on its next 300 ms scan, so a
+    // popup stays up for a while there; answering at once let a process
+    // thread blocked on the dialog go on before eTomo's 100 ms monitor poll
+    // (`startComScriptMonitor`) had mapped its monitor, a race the Java
+    // timing never meets.
+    std::thread::sleep(Duration::from_millis(300));
     let mut text = String::new();
     for line in &request.message {
         text.push_str(line);
@@ -763,6 +982,7 @@ fn simple_name(kind: ComponentKind) -> &'static str {
         ComponentKind::Menu => "Menu",
         ComponentKind::PopupMenu => "JPopupMenu",
         ComponentKind::ProgressBar => "JProgressBar",
+        ComponentKind::Separator => "JPopupMenu$Separator",
         ComponentKind::Other => "Component",
     }
 }

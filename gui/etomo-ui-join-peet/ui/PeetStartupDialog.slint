@@ -1,6 +1,7 @@
 // Mirrors `IMOD/Etomo/src/etomo/ui/swing/PeetStartupDialog.java`.
 //
-// Appearance only.  The Java is a modal `JDialog` titled "Starting PEET"
+// Wired through `EtomoBridge` by the Java labels (drawn by the main frame over
+// its view while the dialog shows).  The Java is a modal `JDialog` titled "Starting PEET"
 // (NAME, PeetStartupDialog.java:41) whose root panel is a Y-axis `BoxLayout`
 // holding, in order: a 20px rigid area, the two-line label panel, a 20px rigid
 // area, the three-row data panel, a 40px rigid area, the button panel and the
@@ -32,7 +33,6 @@ export component PeetStartupDialog inherits Rectangle {
                 spacing: 15px;
                 // pnlDirectory: ftfDirectory, DIRECTORIES_ONLY, adjusted field width 175.
                 HorizontalLayout {
-                    alignment: start;
                     FileTextField {
                         label: "Directory: ";
                         field-width: 175px;
@@ -43,17 +43,15 @@ export component PeetStartupDialog inherits Rectangle {
                 // (adjusted field width 225).  ftfCopyFrom is disabled until
                 // the check box is selected (updateDisplay, line 268).
                 HorizontalLayout {
-                    alignment: start;
                     spacing: EtomoStyle.gap;
                     CheckBox { text: "Copy project from "; checked: false; }
-                    FileTextField { label: ""; field-width: 225px; text: ""; enabled: false; }
+                    FileTextField { label: ""; bridge-label: "Copy project from "; field-width: 225px; text: ""; enabled: false; }
                 }
                 // ltfBaseName, preferred width 125.
                 HorizontalLayout {
-                    alignment: start;
                     LabeledTextField {
                         label: "Base name: ";
-                        label-width: 80px;
+                        
                         text: "";
                         width: 205px;
                     }

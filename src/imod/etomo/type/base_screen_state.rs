@@ -202,13 +202,13 @@ impl BaseScreenState {
     }
 
     /// Java `load(Properties)`.
-    pub fn load(&self, props: &BTreeMap<String, String>) {
+    pub fn load(&self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
     /// Java `load(Properties, String)`.  Point localProperties to props (a copy here;
     /// see the module header) and set localPrepend to prepend.
-    pub fn load_with_prepend(&self, props: &BTreeMap<String, String>, prepend: &str) {
+    pub fn load_with_prepend(&self, props: &mut BTreeMap<String, String>, prepend: &str) {
         let prepend = self.get_prepend(prepend);
         self.parallel_header_state
             .load_with_prepend(props, &prepend);
@@ -237,11 +237,11 @@ impl Storable for BaseScreenState {
         BaseScreenState::store_with_prepend(self, properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         BaseScreenState::load(self, properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         BaseScreenState::load_with_prepend(self, properties, prepend);
     }
 }
@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(props.len(), 2);
 
         let loaded = BaseScreenState::new(AxisID::First, AxisType::DualAxis);
-        loaded.load(&props);
+        loaded.load(&mut props);
         assert!(loaded.get_button_state(Some("Button1")));
         assert!(!loaded.get_button_state(Some("Button2")));
         let single = BaseScreenState::new(AxisID::First, AxisType::SingleAxis);

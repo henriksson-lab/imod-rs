@@ -31,9 +31,9 @@ pub trait Storable {
     /// Java `store(Properties, String)`.
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str);
     /// Java `load(Properties)`.
-    fn load(&self, properties: &BTreeMap<String, String>);
+    fn load(&self, properties: &mut BTreeMap<String, String>);
     /// Java `load(Properties, String)`.
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str);
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str);
 }
 
 /// Java `Storable`, for a value object this translation owns by value and mutates
@@ -45,9 +45,9 @@ pub trait StorableValue {
     /// Java `store(Properties, String)`.
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str);
     /// Java `load(Properties)`.
-    fn load(&mut self, properties: &BTreeMap<String, String>);
+    fn load(&mut self, properties: &mut BTreeMap<String, String>);
     /// Java `load(Properties, String)`.
-    fn load_with_prepend(&mut self, properties: &BTreeMap<String, String>, prepend: &str);
+    fn load_with_prepend(&mut self, properties: &mut BTreeMap<String, String>, prepend: &str);
 }
 
 /// A shared value object (`Mutex` for one that crosses threads): each call is one Java
@@ -59,10 +59,10 @@ impl<T: StorableValue + ?Sized> Storable for Mutex<T> {
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         StorableValue::store_with_prepend(&*self.lock().unwrap(), properties, prepend);
     }
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         StorableValue::load(&mut *self.lock().unwrap(), properties);
     }
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         StorableValue::load_with_prepend(&mut *self.lock().unwrap(), properties, prepend);
     }
 }
@@ -75,10 +75,10 @@ impl<T: StorableValue + ?Sized> Storable for RefCell<T> {
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         StorableValue::store_with_prepend(&*self.borrow(), properties, prepend);
     }
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         StorableValue::load(&mut *self.borrow_mut(), properties);
     }
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         StorableValue::load_with_prepend(&mut *self.borrow_mut(), properties, prepend);
     }
 }
@@ -92,10 +92,10 @@ impl<T: Storable + ?Sized> Storable for Arc<T> {
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         (**self).store_with_prepend(properties, prepend);
     }
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         (**self).load(properties);
     }
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         (**self).load_with_prepend(properties, prepend);
     }
 }
@@ -109,10 +109,10 @@ impl<T: Storable + ?Sized> Storable for &T {
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         (**self).store_with_prepend(properties, prepend);
     }
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         (**self).load(properties);
     }
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         (**self).load_with_prepend(properties, prepend);
     }
 }

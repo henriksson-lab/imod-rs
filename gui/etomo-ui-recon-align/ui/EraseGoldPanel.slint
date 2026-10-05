@@ -15,7 +15,7 @@
 //   * `CcdEraserBeadsPanel.java`     (`createPanel()`, `:124-189`)
 
 import { EtomoStyle, PanelHeader, LabeledTextField, LabeledSpinner, RadioButton,
-         MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+         MultiLineButton, BridgedLabel } from "../../etomo-ui-common/ui/widgets.slint";
 import { EtchedBorder, RadioTextField, CheckBoxSpinner } from "widgets_local.slint";
 import { CpuGpuPanel } from "CpuGpuPanel.slint";
 
@@ -44,7 +44,7 @@ export component EraseGoldPanel inherits VerticalLayout {
     // identical layouts, so this only records which one is in play.
     in property <bool> montage: false;
 
-    spacing: EtomoStyle.gap;
+    spacing: EtomoStyle.row-gap;
 
     // `pnlRoot.setBorder(new EtchedBorder("Bead Eraser").getBorder())` (`:136`).
     EtchedBorder {
@@ -73,7 +73,7 @@ export component EraseGoldPanel inherits VerticalLayout {
 
         // ---- `Beads3dFindPanel.java` ----
         if !root.model-use-fid: VerticalLayout {
-            spacing: EtomoStyle.gap;
+            spacing: EtomoStyle.row-gap;
 
             // `pnlGenerateTomogram`: Y box with an etched border.
             Rectangle {
@@ -82,60 +82,62 @@ export component EraseGoldPanel inherits VerticalLayout {
                 border-color: EtomoStyle.border;
                 VerticalLayout {
                     padding: EtomoStyle.inset;
-                    spacing: EtomoStyle.gap;
-                    PanelHeader { title: "Align Stack and Create Tomogram"; open: root.generate-tomogram-open; }
-                    // `pnlGenerateTomogramBody`
-                    if root.generate-tomogram-open: VerticalLayout {
-                        spacing: EtomoStyle.gap;
+                    spacing: EtomoStyle.row-gap;
+                    ph-body-9 := PanelHeader { title: "Align Stack and Create Tomogram"; open: root.generate-tomogram-open; }
+                    // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+                    if ph-body-9.shown-open: VerticalLayout {
+                        spacing: EtomoStyle.row-gap;
+                        // `pnlGenerateTomogramBody`
+                        if root.generate-tomogram-open: VerticalLayout {
+                            spacing: EtomoStyle.row-gap;
 
-                        // ---- `NewstackOrBlendmont3dFindPanel.java` ----
-                        // `createPanel()` (`:83-86`) adds nothing but the
-                        // binning spinner, labelled
-                        // `NewstackAndBlendmontParamPanel.BINNING_LABEL + ": "`
-                        // (`NewstackAndBlendmontParamPanel.java:48`), default 1,
-                        // range 1..12 (`:58-59`).
-                        HorizontalLayout {
-                            alignment: start;
-                            LabeledSpinner { label: "Aligned image stack binning: "; text: "1"; label-width: 260px; }
-                        }
+                            // ---- `NewstackOrBlendmont3dFindPanel.java` ----
+                            // `createPanel()` (`:83-86`) adds nothing but the
+                            // binning spinner, labelled
+                            // `NewstackAndBlendmontParamPanel.BINNING_LABEL + ": "`
+                            // (`NewstackAndBlendmontParamPanel.java:48`), default 1,
+                            // range 1..12 (`:58-59`).
+                            HorizontalLayout {
+                                LabeledSpinner { label: "Aligned image stack binning: "; text: "1"; }
+                            }
 
-                        // ---- `Tilt3dFindPanel.java` (`createPanel()`, `:148-181`) ----
-                        // Its root is `AbstractTiltPanel.pnlRoot`, a plain
-                        // `SpacedPanel` with no border in this subclass.
-                        VerticalLayout {
-                            spacing: EtomoStyle.gap;
-                            // `getCpuGpuPanel()`; the instance is built with
-                            // `CpuGpuPanel.getInstance(manager, axisID, panelId, 3,
-                            // true, -1)` (`AbstractTiltPanel.java:158`) — max GPU 3,
-                            // recommended max CPUs shown, Y layout.
-                            CpuGpuPanel {
-                                max-gpus-label: ": Maximum number of GPUs recommended is 3";
-                            }
-                            // Informational fields, `setEditable(false)` (`:152-153`).
-                            LabeledTextField { label: "Center to center thickness: "; text: ""; label-width: 260px; enabled: false; }
-                            LabeledTextField { label: "Additional unbinned diameters to add : "; text: ""; label-width: 260px; enabled: false; }
-                            // `pnlA`.  `ltfTomoThickness` and `ltfZShift` are
-                            // relabelled by the constructor (`:129-130`).
-                            HorizontalLayout {
-                                spacing: EtomoStyle.gap;
-                                alignment: start;
-                                LabeledTextField { label: "Thickness: "; text: ""; label-width: 90px; }
-                                LabeledTextField { label: "Added Z Shift: "; text: ""; label-width: 110px; }
-                            }
-                            // `pnlButtons`: the tilt button
-                            // (`ProcessResultDisplayFactory.stackTilt`,
-                            // `ProcessResultDisplayFactory.java:112-114`,
-                            // labelled `TILT_3D_FIND_LABEL`,
-                            // `Tilt3dFindPanel.java:111`), then `extraButton`
-                            // — `NewstackOrBlendmont3dFindPanel.btn3dmodFull`
-                            // (`:59-60`) — then `btn3dmodTomogram`
-                            // (`AbstractTiltPanel.java:59-60`).
-                            HorizontalLayout {
-                                spacing: EtomoStyle.gap;
-                                alignment: start;
-                                MultiLineButton { text: "Align and Build Tomogram"; width: 220px; }
-                                MultiLineButton { text: "View Full Aligned Stack"; width: 220px; }
-                                MultiLineButton { text: "View Tomogram In 3dmod"; width: 220px; }
+                            // ---- `Tilt3dFindPanel.java` (`createPanel()`, `:148-181`) ----
+                            // Its root is `AbstractTiltPanel.pnlRoot`, a plain
+                            // `SpacedPanel` with no border in this subclass.
+                            VerticalLayout {
+                                spacing: EtomoStyle.row-gap;
+                                // `getCpuGpuPanel()`; the instance is built with
+                                // `CpuGpuPanel.getInstance(manager, axisID, panelId, 3,
+                                // true, -1)` (`AbstractTiltPanel.java:158`) — max GPU 3,
+                                // recommended max CPUs shown, Y layout.
+                                CpuGpuPanel {
+                                    max-gpus-label: ": Maximum number of GPUs recommended is 3";
+                                }
+                                // Informational fields, `setEditable(false)` (`:152-153`).
+                                LabeledTextField { label: "Center to center thickness: "; text: ""; enabled: false; }
+                                LabeledTextField { label: "Additional unbinned diameters to add : "; text: ""; enabled: false; }
+                                // `pnlA`.  `ltfTomoThickness` and `ltfZShift` are
+                                // relabelled by the constructor (`:129-130`).
+                                HorizontalLayout {
+                                    spacing: EtomoStyle.gap;
+                                    LabeledTextField { label: "Thickness: "; text: ""; }
+                                    LabeledTextField { label: "Added Z Shift: "; text: ""; }
+                                }
+                                // `pnlButtons`: the tilt button
+                                // (`ProcessResultDisplayFactory.stackTilt`,
+                                // `ProcessResultDisplayFactory.java:112-114`,
+                                // labelled `TILT_3D_FIND_LABEL`,
+                                // `Tilt3dFindPanel.java:111`), then `extraButton`
+                                // — `NewstackOrBlendmont3dFindPanel.btn3dmodFull`
+                                // (`:59-60`) — then `btn3dmodTomogram`
+                                // (`AbstractTiltPanel.java:59-60`).
+                                HorizontalLayout {
+                                    spacing: EtomoStyle.gap;
+                                    alignment: start;
+                                    MultiLineButton { text: "Align and Build Tomogram"; width: 220px; }
+                                    MultiLineButton { text: "View Full Aligned Stack"; width: 220px; }
+                                    MultiLineButton { text: "View Tomogram In 3dmod"; width: 220px; }
+                                }
                             }
                         }
                     }
@@ -149,58 +151,60 @@ export component EraseGoldPanel inherits VerticalLayout {
                 border-color: EtomoStyle.border;
                 VerticalLayout {
                     padding: EtomoStyle.inset;
-                    spacing: EtomoStyle.gap;
-                    PanelHeader { title: "Find Beads 3d"; open: root.find-beads-3d-open; }
-                    // `pnlBody`
-                    if root.find-beads-3d-open: VerticalLayout {
-                        spacing: EtomoStyle.gap;
-                        // `BEAD_SIZE_LABEL + " (pixels): "` (`:44`, `:49-50`).
-                        LabeledTextField { label: "Bead diameter (pixels): "; text: ""; label-width: 240px; }
-                        // `pnlA`.  `setParameters(..., initialize=true)`
-                        // (`:194-200`) preloads .9 and .05.
-                        if root.advanced: HorizontalLayout {
-                            spacing: EtomoStyle.gap;
-                            alignment: start;
-                            LabeledTextField { label: "Minimum spacing: "; text: "0.9"; label-width: 140px; }
-                            LabeledTextField { label: "Estimated number of beads: "; text: ""; label-width: 200px; }
-                        }
-                        // `pnlB`
-                        if root.advanced: HorizontalLayout {
-                            spacing: EtomoStyle.gap;
-                            alignment: start;
-                            LabeledTextField { label: "Minimum peak strength: "; text: "0.05"; label-width: 180px; }
-                            LabeledTextField { label: "Threshold for averaging: "; text: ""; label-width: 180px; }
-                        }
-                        // `pnlStorageThreshold`, a `GridLayout(3, 2, 3, 3)`
-                        // (`:144`) holding three components, so they land in
-                        // row-major order: two on the first row and one on the
-                        // second.  Slint has no GridLayout with fixed cell
-                        // counts, so this is a `GridLayout` with explicit
-                        // row/col placement.  None of the three is selected by
-                        // the constructor.
-                        EtchedBorder {
-                            title: "Storage Threshold";
-                            GridLayout {
-                                spacing: 3px;
-                                Row {
-                                    RadioButton { text: "Store some points below threshold"; }
-                                    RadioButton { text: "Store only points above threshold"; }
-                                }
-                                Row {
-                                    RadioTextField { label: "Set threshold for storing: "; text: ""; }
-                                    Rectangle { }
+                    spacing: EtomoStyle.row-gap;
+                    ph-body-10 := PanelHeader { title: "Find Beads 3d"; open: root.find-beads-3d-open; }
+                    // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+                    if ph-body-10.shown-open: VerticalLayout {
+                        spacing: EtomoStyle.row-gap;
+                        // `pnlBody`
+                        if root.find-beads-3d-open: VerticalLayout {
+                            spacing: EtomoStyle.row-gap;
+                            // `BEAD_SIZE_LABEL + " (pixels): "` (`:44`, `:49-50`).
+                            LabeledTextField { label: "Bead diameter (pixels): "; text: ""; }
+                            // `pnlA`.  `setParameters(..., initialize=true)`
+                            // (`:194-200`) preloads .9 and .05.
+                            if root.advanced: HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                LabeledTextField { label: "Minimum spacing: "; text: "0.9"; }
+                                LabeledTextField { label: "Estimated number of beads: "; text: ""; }
+                            }
+                            // `pnlB`
+                            if root.advanced: HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                LabeledTextField { label: "Minimum peak strength: "; text: "0.05"; }
+                                LabeledTextField { label: "Threshold for averaging: "; text: ""; }
+                            }
+                            // `pnlStorageThreshold`, a `GridLayout(3, 2, 3, 3)`
+                            // (`:144`) holding three components, so they land in
+                            // row-major order: two on the first row and one on the
+                            // second.  Slint has no GridLayout with fixed cell
+                            // counts, so this is a `GridLayout` with explicit
+                            // row/col placement.  None of the three is selected by
+                            // the constructor.
+                            EtchedBorder {
+                                title: "Storage Threshold";
+                                GridLayout {
+                                    spacing: 3px;
+                                    Row {
+                                        RadioButton { text: "Store some points below threshold"; }
+                                        RadioButton { text: "Store only points above threshold"; }
+                                    }
+                                    Row {
+                                        RadioTextField { label: "Set threshold for storing: "; text: ""; }
+                                        Rectangle { }
+                                    }
                                 }
                             }
-                        }
-                        if root.advanced: LabeledTextField { label: "Max points to analyze: "; text: ""; label-width: 240px; }
-                        // `pnlButtons`.  `btnFindBeads3d` is
-                        // `ProcessResultDisplayFactory.findBeads3d`
-                        // (`ProcessResultDisplayFactory.java:115-116`).
-                        HorizontalLayout {
-                            spacing: EtomoStyle.gap;
-                            alignment: start;
-                            MultiLineButton { text: "Run Findbeads3d"; width: 200px; }
-                            MultiLineButton { text: "View 3D Model on Tomogram"; width: 240px; }
+                            if root.advanced: LabeledTextField { label: "Max points to analyze: "; text: ""; }
+                            // `pnlButtons`.  `btnFindBeads3d` is
+                            // `ProcessResultDisplayFactory.findBeads3d`
+                            // (`ProcessResultDisplayFactory.java:115-116`).
+                            HorizontalLayout {
+                                spacing: EtomoStyle.gap;
+                                alignment: start;
+                                MultiLineButton { text: "Run Findbeads3d"; width: 200px; }
+                                MultiLineButton { text: "View 3D Model on Tomogram"; width: 240px; }
+                            }
                         }
                     }
                 }
@@ -230,9 +234,9 @@ export component EraseGoldPanel inherits VerticalLayout {
 
                 // `fiducialDiameterPanel`
                 VerticalLayout {
-                    spacing: EtomoStyle.gap;
+                    spacing: EtomoStyle.row-gap;
                     // `FIDUCIAL_DIAMETER_LABEL + " (binned pixels): "` (`:54`, `:59-60`).
-                    LabeledTextField { label: "Diameter to erase (binned pixels): "; text: ""; label-width: 240px; }
+                    LabeledTextField { label: "Diameter to erase (binned pixels): "; text: ""; }
                     // `lFiducialDiameter1` / `lFiducialDiameter2`, each built
                     // as `new Label(FIDUCIAL_DIAMETER_LABEL)` (`:61-62`) and
                     // coloured `ProcessControlPanel.colorComplete`
@@ -242,8 +246,10 @@ export component EraseGoldPanel inherits VerticalLayout {
                     // stack's binning is unknown, or with "(corresponds to
                     // unbinned diameter of <d>" / "with current binning of
                     // <b>)" when it is.
-                    Text { text: "Diameter to erase"; color: #009900; font-size: EtomoStyle.font-size-pt * 1px; }
-                    Text { text: "Diameter to erase"; color: #009900; font-size: EtomoStyle.font-size-pt * 1px; }
+                    // Wired, the Swing labels' texts (`Label(String)` keeps its
+                    // name "l.diameter-to-erase"; the second is "#2").
+                    BridgedLabel { kind: "l"; prefix: "Diameter to erase"; text: "Diameter to erase"; color: #009900; }
+                    BridgedLabel { kind: "l"; prefix: "Diameter to erase#2"; text: "Diameter to erase"; color: #009900; }
                     Rectangle { }
                     // `cbspExpandCircleIterations`: default 2, range 1..5 (`:63-64`).
                     CheckBoxSpinner { label: "Iterations to grow circular areas:"; text: "2"; }

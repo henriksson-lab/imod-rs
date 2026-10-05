@@ -1,132 +1,106 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/BusyStatusPanel.java`.
 //!
-//! The native `JPanel`/`JLabel` is presentation-owned.  This source unit owns
-//! the busy icon identity, one-axis filtering, and the queued status update.
-#![allow(dead_code)]
+//! The busy icon of a startup dialog: a `JLabel` named `lb.busy`, enabled while a
+//! process runs on its axis.  An event dispatch thread object (`Rc`); the manager's
+//! busy status mediator holds it as a listener through an `EdtRef`.
+
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::JComponent;
+use crate::imod::etomo::logic::busy_status_mediator::BusyStatusListener;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::util::event_queue::{self, EdtRef};
 
 /// Java `LABEL`.
 pub const LABEL: &str = "lb.busy";
-/// Java `ICON = CompleteIcon.createIcon("busy.png")`.
+/// Java package-private `ICON = CompleteIcon.createIcon("busy.png")`; the icon is
+/// the Slint side's.
 pub const ICON: &str = "busy.png";
 
-/// Java's private inner `SetBusyStatus` runnable.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct SetBusyStatus {
-    pub enabled: bool,
-}
-impl SetBusyStatus {
-    /// `SetBusyStatus(boolean)`.
-    pub fn new(enabled: bool) -> Self {
-        Self { enabled }
-    }
-    /// `run()`; the Slint event loop is its corresponding dispatch boundary.
-    pub fn run(self, panel: &mut BusyStatusPanel) {
-        panel.busy_status_enabled = self.enabled;
-    }
+/// Java `public final class BusyStatusPanel implements BusyStatusListener`.
+pub struct BusyStatusPanel {
+    /// Java private final `pnlRoot`.
+    pnl_root: Rc<JComponent>,
+    /// Java private final `lBusyStatus = new JLabel(ICON)`.
+    l_busy_status: Rc<JComponent>,
+    /// Java private final `axisID`.
+    axis_id: AxisID,
+    /// `this`, for the listener registration and the posted `SetBusyStatus`.
+    this: Weak<BusyStatusPanel>,
+    /// The `EdtRef` registered with the manager, so `removeListeners` removes the
+    /// same listener (Java removes by identity).
+    listener: RefCell<Option<Arc<EdtRef<dyn BusyStatusListener>>>>,
 }
 
-/// Fields and operations of Java's final `BusyStatusPanel`.
-pub struct BusyStatusPanel {
-    pub pnl_root_present: bool,
-    pub busy_status_name: Option<String>,
-    pub busy_status_enabled: bool,
-    pub axis_id: AxisID,
-    pub registered: bool,
-    /// Swing `invokeLater` queue, retained so callers/event loop own execution
-    /// timing instead of applying the update synchronously.
-    pub queued_status: Vec<SetBusyStatus>,
-}
 impl BusyStatusPanel {
-    /// `BusyStatusPanel(AxisID)`.
-    fn new(axis_id: AxisID) -> Self {
-        Self {
-            pnl_root_present: true,
-            busy_status_name: None,
-            busy_status_enabled: true,
+    /// Java private `BusyStatusPanel(AxisID)`.
+    fn new(axis_id: AxisID) -> Rc<BusyStatusPanel> {
+        Rc::new_cyclic(|this| BusyStatusPanel {
+            pnl_root: JComponent::new_panel(),
+            l_busy_status: JComponent::new_label(""),
             axis_id,
-            registered: false,
-            queued_status: vec![],
-        }
+            this: this.clone(),
+            listener: RefCell::new(None),
+        })
     }
-    /// `getInstance(BaseManager, AxisID)`.
-    pub fn get_instance(manager: &'static dyn BaseManager, axis_id: AxisID) -> Self {
-        let mut instance = Self::new(axis_id);
+
+    /// Java static package-private `getInstance(BaseManager, AxisID)`.
+    pub fn get_instance(manager: &'static dyn BaseManager, axis_id: AxisID) -> Rc<BusyStatusPanel> {
+        let instance = BusyStatusPanel::new(axis_id);
         instance.create_panel();
         instance.add_listeners(manager);
         instance
     }
-    /// `createPanel()`.
-    fn create_panel(&mut self) {
-        self.busy_status_name = Some(LABEL.into());
-        self.busy_status_enabled = false;
+
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // Swing layout: BorderLayout with hgap 2.
+        self.l_busy_status.set_name(Some(LABEL));
+        self.l_busy_status.set_enabled(false);
+        // Root
+        // Swing layout: pnlRoot.add(lBusyStatus, BorderLayout.EAST).
+        self.pnl_root.add(&self.l_busy_status);
     }
-    /// `addListeners(BaseManager)`. BaseManager's current BusyStatusMediator
-    /// declaration is still an explicit boundary, but registration ownership is
-    /// faithfully retained here.
-    pub fn add_listeners(&mut self, manager: &'static dyn BaseManager) {
-        manager.add_busy_status_listener(None);
-        self.registered = true;
+
+    /// Java package-private `addListeners(BaseManager)`.
+    pub fn add_listeners(&self, manager: &'static dyn BaseManager) {
+        let Some(this) = self.this.upgrade() else {
+            return;
+        };
+        let listener: Arc<EdtRef<dyn BusyStatusListener>> =
+            Arc::new(EdtRef::new(this as Rc<dyn BusyStatusListener>));
+        *self.listener.borrow_mut() = Some(Arc::clone(&listener));
+        manager.add_busy_status_listener(Some(listener));
     }
-    /// `removeListeners(BaseManager)`.
-    pub fn remove_listeners(&mut self, manager: &'static dyn BaseManager) {
-        manager.remove_busy_status_listener(None);
-        self.registered = false;
+
+    /// Java package-private `removeListeners(BaseManager)`.
+    pub fn remove_listeners(&self, manager: &'static dyn BaseManager) {
+        let listener = self.listener.borrow().clone();
+        manager.remove_busy_status_listener(listener.as_ref());
     }
-    /// `getComponent()`.
-    pub fn get_component(&self) -> bool {
-        self.pnl_root_present
-    }
-    /// `msgBusyStatusChanged(AxisID, boolean)`.
-    pub fn msg_busy_status_changed(&mut self, axis_id: Option<AxisID>, process_status: bool) {
-        if self.axis_id.is_same_axis(axis_id) {
-            self.queued_status.push(SetBusyStatus::new(process_status));
-        }
-    }
-    /// Runs exactly one queued Java `SwingUtilities.invokeLater` Runnable.
-    pub fn run_next_set_busy_status(&mut self) {
-        if let Some(update) = self.queued_status.first().copied() {
-            self.queued_status.remove(0);
-            update.run(self);
-        }
+
+    /// Java package-private `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.clone()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
-    fn panel() -> BusyStatusPanel {
-        BusyStatusPanel::get_instance(
-            DirectiveEditorManager::new(None, None, None, None),
-            AxisID::Second,
-        )
-    }
-    #[test]
-    fn source_initialization_names_and_disables_icon() {
-        let p = panel();
-        assert_eq!(p.busy_status_name.as_deref(), Some(LABEL));
-        assert!(!p.busy_status_enabled);
-    }
-    #[test]
-    fn only_matching_axis_enqueues_update() {
-        let mut p = panel();
-        p.msg_busy_status_changed(Some(AxisID::First), true);
-        assert!(p.queued_status.is_empty());
-        p.msg_busy_status_changed(Some(AxisID::Second), true);
-        assert_eq!(p.queued_status.len(), 1);
-        p.run_next_set_busy_status();
-        assert!(p.busy_status_enabled);
-    }
-    #[test]
-    fn listener_lifetime_is_source_owned() {
-        let mut p = panel();
-        let m = DirectiveEditorManager::new(None, None, None, None);
-        p.remove_listeners(m);
-        assert!(!p.registered);
-        p.add_listeners(m);
-        assert!(p.registered);
+impl BusyStatusListener for BusyStatusPanel {
+    /// Java `msgBusyStatusChanged(AxisID, boolean)`.
+    fn msg_busy_status_changed(&self, axis_id: AxisID, process_status: bool) {
+        if self.axis_id.is_same_axis(Some(axis_id)) {
+            // SwingUtilities.invokeLater(new SetBusyStatus(processStatus))
+            let Some(this) = self.this.upgrade() else {
+                return;
+            };
+            let this = EdtRef::new(this);
+            event_queue::invoke_later(move || {
+                // Java private final class `SetBusyStatus.run()`.
+                this.get().l_busy_status.set_enabled(process_status);
+            });
+        }
     }
 }

@@ -17,6 +17,7 @@ use std::rc::{Rc, Weak};
 use super::beveled_border::BeveledBorder;
 use super::check_box::CheckBox;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::etched_border::EtchedBorder;
@@ -451,10 +452,12 @@ impl TrimvolPanel {
             .btn_get_coordinates
             .add_action_listener(instance.button_acton_listener.clone());
 
-        // Swing mouse: pnlTrimvol.addMouseListener(new GenericMouseAdapter(this)).
-        // Mouse events are not modelled; the adapter's only effect is to call
-        // popUpContextMenu on a right-button press, which a driver calls
-        // directly.
+        // pnlTrimvol.addMouseListener(new GenericMouseAdapter(this)).
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(&instance) as Weak<dyn ContextMenu>;
+        instance
+            .pnl_trimvol
+            .get_component()
+            .add_mouse_listener(GenericMouseAdapter::new(context_menu));
         instance
     }
 

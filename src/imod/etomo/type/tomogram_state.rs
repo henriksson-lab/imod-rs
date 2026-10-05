@@ -3241,13 +3241,10 @@ impl TomogramState {
 
     /// Java `setCombineScriptsCreated`.
     pub fn set_combine_scripts_created(&self, combine_scripts_created: bool) {
-        {
-            let value = self.combine_scripts_created.lock().unwrap().clone();
-            self.combine_scripts_created
-                .lock()
-                .unwrap()
-                .set_const_etomo_number(Some(&value.base.base));
-        };
+        self.combine_scripts_created
+            .lock()
+            .unwrap()
+            .set_boolean(combine_scripts_created);
     }
 
     /// Java `resetCombineScriptsCreated`.
@@ -4511,11 +4508,11 @@ impl storable::Storable for TomogramState {
         TomogramState::store_with_prepend(self, properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         TomogramState::load(self, properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         TomogramState::load_with_prepend(self, properties, prepend);
     }
 }

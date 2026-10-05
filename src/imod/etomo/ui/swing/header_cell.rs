@@ -457,3 +457,10 @@ impl UIComponent for HeaderCell {
         self.cell.clone()
     }
 }
+
+/// The `etomo.ui.TableComponent` interface the Java class implements.
+impl crate::imod::etomo::ui::table_component::TableComponent for HeaderCell {
+    fn get_preferred_width(&self) -> i32 {
+        HeaderCell::get_preferred_width(self)
+    }
+}

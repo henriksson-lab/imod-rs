@@ -58,73 +58,77 @@ export component EERSuperResZSumPaddingPanel inherits VerticalLayout {
 
     // `pnlRoot`: Y_AXIS, BorderFactory.createEtchedBorder(), untitled.
     EtchedBorder {
-        PanelHeader {
+        ph-body-29 := PanelHeader {
             title: "Reading EER Files";
             open: root.body-open;
         }
+        // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+        if ph-body-29.shown-open: VerticalLayout {
+            spacing: EtomoStyle.row-gap;
 
-        if root.body-open: VerticalLayout {
-            // `pnlBody`: Y_AXIS.
-            alignment: start;
-
-            // `pnlSuperRes`: X_AXIS -- horizontal strut 2, lSuperRes, then the
-            // three `bgSuperRes` radios.
-            HorizontalLayout {
+            if root.body-open: VerticalLayout {
+                // `pnlBody`: Y_AXIS.
                 alignment: start;
-                Rectangle { width: 2px; }
-                Label { text: "Frame size to read in:"; }
-                RadioButton { text: "4K"; selected: false; }
-                RadioButton { text: "8K"; selected: true; }
-                RadioButton { text: "16K"; selected: false; }
+
+                // `pnlSuperRes`: X_AXIS -- horizontal strut 2, lSuperRes, then the
+                // three `bgSuperRes` radios.
+                HorizontalLayout {
+                    alignment: start;
+                    Rectangle { width: 2px; }
+                    Label { text: "Frame size to read in:"; }
+                    RadioButton { text: "4K"; selected: false; }
+                    RadioButton { text: "8K"; selected: true; }
+                    RadioButton { text: "16K"; selected: false; }
+                }
+
+                // `pnlZSumFrames`: X_AXIS -- radio, spinner, strut 3, label,
+                // strut 2.
+                HorizontalLayout {
+                    alignment: start;
+                    RadioButton {
+                        text: "Sum frames to make";
+                        selected: root.z-sum-frames-selected;
+                    }
+                    Spinner {
+                        label: "Sum frames to make";
+                        text: "12";
+                        enabled: root.z-sum-frames-selected;
+                    }
+                    Rectangle { width: 3px; }
+                    Label {
+                        text: "images to align";
+                        enabled: root.z-sum-frames-selected;
+                    }
+                    Rectangle { width: 2px; }
+                }
+
+                // `Box.createVerticalStrut(2)`.
+                Rectangle { height: 2px; }
+
+                // `pnlZSumSets`: X_AXIS -- radio, spinner, strut 3, label,
+                // strut 2.
+                HorizontalLayout {
+                    alignment: start;
+                    RadioButton {
+                        text: "Sum successive sets of";
+                        selected: !root.z-sum-frames-selected;
+                    }
+                    Spinner {
+                        label: "Sum successive sets of";
+                        text: "10";
+                        enabled: !root.z-sum-frames-selected;
+                    }
+                    Rectangle { width: 3px; }
+                    Label {
+                        text: "frames";
+                        enabled: !root.z-sum-frames-selected;
+                    }
+                    Rectangle { width: 2px; }
+                }
+
+                // `Box.createVerticalStrut(2)`.
+                Rectangle { height: 2px; }
             }
-
-            // `pnlZSumFrames`: X_AXIS -- radio, spinner, strut 3, label,
-            // strut 2.
-            HorizontalLayout {
-                alignment: start;
-                RadioButton {
-                    text: "Sum frames to make";
-                    selected: root.z-sum-frames-selected;
-                }
-                Spinner {
-                    label: "Sum frames to make";
-                    text: "12";
-                    enabled: root.z-sum-frames-selected;
-                }
-                Rectangle { width: 3px; }
-                Label {
-                    text: "images to align";
-                    enabled: root.z-sum-frames-selected;
-                }
-                Rectangle { width: 2px; }
-            }
-
-            // `Box.createVerticalStrut(2)`.
-            Rectangle { height: 2px; }
-
-            // `pnlZSumSets`: X_AXIS -- radio, spinner, strut 3, label,
-            // strut 2.
-            HorizontalLayout {
-                alignment: start;
-                RadioButton {
-                    text: "Sum successive sets of";
-                    selected: !root.z-sum-frames-selected;
-                }
-                Spinner {
-                    label: "Sum successive sets of";
-                    text: "10";
-                    enabled: !root.z-sum-frames-selected;
-                }
-                Rectangle { width: 3px; }
-                Label {
-                    text: "frames";
-                    enabled: !root.z-sum-frames-selected;
-                }
-                Rectangle { width: 2px; }
-            }
-
-            // `Box.createVerticalStrut(2)`.
-            Rectangle { height: 2px; }
         }
     }
 }

@@ -12,15 +12,14 @@
 //!
 //! **Trial tomogram list.**  Java keeps a reference to the `IntKeyList` inside
 //! `MetaData` (`metaData.getTomoGenTrialTomogramNameList(axisID)`), so
-//! `addTrialTomogramName` changes the metadata's list directly.  The Rust
-//! `MetaData` hands out a copy, so the panel keeps the copy and
-//! `getParameters(MetaData)` stores it back with
-//! `setTomoGenTrialTomogramNameList`, which the Java also calls: the list the
-//! metadata holds after a save is the same.
+//! `addTrialTomogramName` changes the metadata's list directly (a save at the
+//! end of the trial run stores the new name).  The Rust `MetaData` hands out
+//! the same shared handle (`Arc<Mutex<IntKeyList>>`).
 
 use crate::imod::etomo::base_manager::BaseManager;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex};
 
 use super::combo_box::ComboBox;
 use super::deferred_3dmod_button::Deferred3dmodButton;
@@ -86,7 +85,7 @@ pub struct TrialTiltPanel {
     /// Java private `trialTomogramList = null`.  A way to know what items are
     /// currently in the trial tomogram combo box.  It is set from MetaData,
     /// which is assumed to be not null.
-    trial_tomogram_list: RefCell<Option<IntKeyList>>,
+    trial_tomogram_list: RefCell<Option<Arc<Mutex<IntKeyList>>>>,
 }
 
 impl TrialTiltPanel {
@@ -267,10 +266,11 @@ impl TrialTiltPanel {
     /// Java `setParameters(ConstMetaData)`.
     pub fn set_parameters_const_meta_data(&self, meta_data: &dyn ConstMetaData) {
         let trial_tomogram_list = meta_data.get_tomo_gen_trial_tomogram_name_list(self.axis_id);
-        // `setTrialTomogramNameList(trialTomogramList)`: read from the copy
-        // before storing it, so no borrow of the field is held across the call.
-        self.set_trial_tomogram_name_list(&trial_tomogram_list);
-        *self.trial_tomogram_list.borrow_mut() = Some(trial_tomogram_list);
+        *self.trial_tomogram_list.borrow_mut() = Some(Arc::clone(&trial_tomogram_list));
+        // `setTrialTomogramNameList(trialTomogramList)`: the list is read from a
+        // copy, so no lock is held while the combo box's listeners run.
+        let list = trial_tomogram_list.lock().unwrap().clone();
+        self.set_trial_tomogram_name_list(&list);
     }
 
     /// Java final `setParameters(ReconScreenState)`.
@@ -368,7 +368,7 @@ impl TrialTiltDisplay for TrialTiltPanel {
         self.trial_tomogram_list
             .borrow()
             .as_ref()
-            .is_some_and(|list| list.contains_value(trial_tomogram_name))
+            .is_some_and(|list| list.lock().unwrap().contains_value(trial_tomogram_name))
     }
 
     /// Java override `addTrialTomogramName(String)`.
@@ -379,8 +379,8 @@ impl TrialTiltDisplay for TrialTiltPanel {
     /// the combo box is updated).  Here the list is skipped when missing and
     /// the combo box still gets the name.
     fn add_trial_tomogram_name(&self, trial_tomogram_name: Option<&str>) {
-        if let Some(list) = self.trial_tomogram_list.borrow_mut().as_mut() {
-            list.add_string(trial_tomogram_name);
+        if let Some(list) = self.trial_tomogram_list.borrow().as_ref() {
+            list.lock().unwrap().add_string(trial_tomogram_name);
         }
         self.add_to_trial_tomogram_name(trial_tomogram_name);
     }

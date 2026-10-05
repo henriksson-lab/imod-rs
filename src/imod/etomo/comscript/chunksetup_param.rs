@@ -13,6 +13,7 @@ use super::command_mode::CommandMode;
 use super::field_interface::{self, FieldInterface};
 use super::process_details::ProcessDetails;
 use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{ConstEtomoNumber, Number};
 use crate::imod::etomo::r#type::dialog_type::DialogType;
@@ -21,7 +22,6 @@ use crate::imod::etomo::r#type::file_key::FileKey;
 use crate::imod::etomo::r#type::file_type::FileType;
 use crate::imod::etomo::r#type::image_output_format::ImageOutputFormat;
 use crate::imod::etomo::r#type::process_name::ProcessName;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::util::utilities;
 
 /// Java `MEMORY_TO_VOXEL`.
@@ -450,11 +450,17 @@ impl ProcessDetails for ChunksetupParam {
         None
     }
 
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -462,7 +468,10 @@ impl ProcessDetails for ChunksetupParam {
         None
     }
 
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 

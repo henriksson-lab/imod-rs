@@ -23,7 +23,6 @@
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use super::etomo_frame::FrameType;
 use super::swing_component::SwingComponent;
 use super::ui_harness::{self, PopupAnswer, PopupRequest};
 use crate::imod::etomo::base_manager::BaseManager;
@@ -33,12 +32,13 @@ use crate::imod::etomo::logic::popup_tool;
 use crate::imod::etomo::process::process_messages::{self, ProcessMessages};
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::frame_type::FrameType;
 use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
 use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
-// `javax.swing.JOptionPane` constants used by this class and its callers.
-// TODO(unit): jdk.rs has no JOptionPane; these are the JDK's values.
+// `javax.swing.JOptionPane` constants used by this class and its callers: the JDK's
+// values (the option pane itself is the presentation hook described above).
 /// `JOptionPane.DEFAULT_OPTION`.
 pub const DEFAULT_OPTION: i32 = -1;
 /// `JOptionPane.YES_NO_OPTION`.
@@ -1494,7 +1494,7 @@ impl AbstractFrame {
         let mut list_type_iterator = process_messages.list_type_iterator();
         while list_type_iterator.has_next() {
             let list_type = list_type_iterator.next();
-            if let Some(iterator) = list_type.and_then(|lt| process_messages.iterator(lt)) {
+            if let Some(iterator) = process_messages.iterator(list_type) {
                 for message in iterator {
                     message_array = Some(popup_tool::wrap_message(
                         Some(message.as_str()),

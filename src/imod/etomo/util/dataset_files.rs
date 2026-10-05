@@ -2,12 +2,6 @@
 //!
 //! Partially deprecated utility for building file names.  Still in use, but new file
 //! names should be added to `FileType`.
-//!
-//! **Frontier.**  Almost every member takes a `BaseManager` and resolves the name
-//! through `manager.getPropertyUserDir()` and `manager.getBaseMetaData().getName()`, or
-//! through the untranslated instance half of `etomo/type/FileType.java`.  Those are
-//! grouped under one `TODO(unit)` marker each below; the constants and the members that
-//! stand on their own are translated.
 #![allow(dead_code)]
 
 use crate::imod::etomo::base_manager::BaseManager;
@@ -92,7 +86,7 @@ static CALIBRATION_DIR: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync
 static DISTORTION_DIR: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
 // Java `calibrationDir` and `distortionDir` are the caches of `getCalibrationDir` and
-// `getDistortionDir`, both of which are untranslated below.
+// `getDistortionDir`.
 
 /// Java `getOriginalStack`.
 pub fn get_original_stack(
@@ -170,8 +164,17 @@ pub fn get_modeled_join_file(manager: &'static JoinManager) -> Option<std::path:
         .get_file(Some(manager), Some(AxisID::Only))
 }
 
-// TODO(unit): needs etomo/logic/DatasetTool.java - Java `getStackName(String, AxisType,
-// AxisID)` appends `DatasetTool.STANDARD_DATASET_EXT`.
+/// Java `getStackName(String, AxisType, AxisID)` (deprecated).
+pub fn get_stack_name_dataset(
+    dataset: Option<&str>,
+    axis_type: Option<AxisType>,
+    axis_id: AxisID,
+) -> String {
+    let axis_id = correct_axis_id(axis_type, Some(axis_id)).unwrap();
+    dataset.unwrap_or("null").to_owned()
+        + &axis_id.get_extension()
+        + crate::imod::etomo::logic::dataset_tool::STANDARD_DATASET_EXT
+}
 
 /// Java `getAutodoc(File, String)`.
 pub fn get_autodoc(dir: &std::path::Path, name: Option<&str>) -> std::path::PathBuf {

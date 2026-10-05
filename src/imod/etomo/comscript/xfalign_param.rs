@@ -63,7 +63,7 @@ pub struct XfalignParam {
     edge_to_ignore: EtomoNumber,
     warp_patch_size: FortranInputString,
     shift_limits_for_warp: FortranInputString,
-    auto_alignment_meta_data: &'static AutoAlignmentMetaData,
+    auto_alignment_meta_data: &'static Mutex<AutoAlignmentMetaData>,
     root_name: Option<String>,
     output_file_name: String,
     output_file: PathBuf,
@@ -85,7 +85,7 @@ impl XfalignParam {
     /// Java `XfalignParam(BaseManager, AutoAlignmentMetaData, Mode, boolean)`.
     pub fn new(
         manager: &'static dyn BaseManager,
-        auto_alignment_meta_data: &'static AutoAlignmentMetaData,
+        auto_alignment_meta_data: &'static Mutex<AutoAlignmentMetaData>,
         mode: Mode,
         tomogram_averages: bool,
     ) -> XfalignParam {
@@ -157,7 +157,11 @@ impl XfalignParam {
         self.gen_filter_options(&mut options);
         // Java `if (transform == null) transform = Transform.DEFAULT`: the Rust
         // `AutoAlignmentMetaData` holds no null transform, so the test is always false.
-        let transform = self.auto_alignment_meta_data.get_align_transform();
+        let transform = self
+            .auto_alignment_meta_data
+            .lock()
+            .unwrap()
+            .get_align_transform();
         if self.sobel_filter {
             options.push("-sobel".to_string());
         }
@@ -211,27 +215,16 @@ impl XfalignParam {
 
     /// Java private `genFilterOptions(ArrayList)`.
     fn gen_filter_options(&self, options: &mut Vec<String>) {
-        let sigma_low_frequency = self
-            .auto_alignment_meta_data
-            .get_sigma_low_frequency_parameter();
-        let cutoff_high_frequency = self
-            .auto_alignment_meta_data
-            .get_cutoff_high_frequency_parameter();
-        let sigma_high_frequency = self
-            .auto_alignment_meta_data
-            .get_sigma_high_frequency_parameter();
+        let auto_alignment_meta_data = self.auto_alignment_meta_data.lock().unwrap();
+        let sigma_low_frequency = auto_alignment_meta_data.get_sigma_low_frequency_parameter();
+        let cutoff_high_frequency = auto_alignment_meta_data.get_cutoff_high_frequency_parameter();
+        let sigma_high_frequency = auto_alignment_meta_data.get_sigma_high_frequency_parameter();
         // optional
-        if (self
-            .auto_alignment_meta_data
-            .is_sigma_low_frequency_enabled()
+        if (auto_alignment_meta_data.is_sigma_low_frequency_enabled()
             && sigma_low_frequency.is_not_null_and_not_default())
-            || (self
-                .auto_alignment_meta_data
-                .is_cutoff_high_frequency_enabled()
+            || (auto_alignment_meta_data.is_cutoff_high_frequency_enabled()
                 && cutoff_high_frequency.is_not_null_and_not_default())
-            || (self
-                .auto_alignment_meta_data
-                .is_sigma_high_frequency_enabled()
+            || (auto_alignment_meta_data.is_sigma_high_frequency_enabled()
                 && sigma_high_frequency.is_not_null_and_not_default())
         {
             options.push("-fil".to_string());

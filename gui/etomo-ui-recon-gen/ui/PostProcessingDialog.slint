@@ -11,7 +11,7 @@
 // `MultiLineButton` here.
 
 import { EtomoStyle, BeveledBorder, LabeledTextField, LabeledSpinner, CheckBox,
-         RadioButton, MultiLineButton, SpacedPanel, TabbedPane }
+         RadioButton, MultiLineButton, SpacedPanel, TabbedPane, BridgedTabbedPane, BridgedLabel }
     from "../../etomo-ui-common/ui/widgets.slint";
 import { EtchedBorder, ExitButtons, CenteredLabel, TextField, Spinner, FileTextField }
     from "LocalWidgets.slint";
@@ -22,16 +22,16 @@ export component VolumeRangePanel inherits EtchedBorder {
     GridLayout {
         spacing: 5px;
         Row {
-            LabeledTextField { label: "X min: "; label-width: 60px; text: "1"; }
-            LabeledTextField { label: "X max: "; label-width: 60px; text: "1024"; }
+            LabeledTextField { label: "X min: "; text: "1"; }
+            LabeledTextField { label: "X max: "; text: "1024"; }
         }
         Row {
-            LabeledTextField { label: "Y min: "; label-width: 60px; text: "1"; }
-            LabeledTextField { label: "Y max: "; label-width: 60px; text: "1024"; }
+            LabeledTextField { label: "Y min: "; text: "1"; }
+            LabeledTextField { label: "Y max: "; text: "1024"; }
         }
         Row {
-            LabeledTextField { label: "Z min: "; label-width: 60px; text: "1"; }
-            LabeledTextField { label: "Z max: "; label-width: 60px; text: "200"; }
+            LabeledTextField { label: "Z min: "; text: "1"; }
+            LabeledTextField { label: "Z max: "; text: "200"; }
         }
     }
 }
@@ -44,12 +44,13 @@ export component RubberbandPanel inherits EtchedBorder {
     GridLayout {
         spacing: 5px;
         Row {
-            LabeledTextField { label: "X min: "; label-width: 60px; text: ""; enabled: false; }
-            LabeledTextField { label: "X max: "; label-width: 60px; text: ""; enabled: false; }
+            // The second X/Y pairs in the dialog (`VolumeRangePanel`'s first).
+            LabeledTextField { label: "X min: "; occurrence: "#2"; text: ""; enabled: false; }
+            LabeledTextField { label: "X max: "; occurrence: "#2"; text: ""; enabled: false; }
         }
         Row {
-            LabeledTextField { label: "Y min: "; label-width: 60px; text: ""; enabled: false; }
-            LabeledTextField { label: "Y max: "; label-width: 60px; text: ""; enabled: false; }
+            LabeledTextField { label: "Y min: "; occurrence: "#2"; text: ""; enabled: false; }
+            LabeledTextField { label: "Y max: "; occurrence: "#2"; text: ""; enabled: false; }
         }
     }
 }
@@ -57,8 +58,12 @@ export component RubberbandPanel inherits EtchedBorder {
 // `TrimvolPanel` (`TrimvolPanel.java`), the "Trim vol" tab.
 export component TrimvolPanel inherits BeveledBorder {
     title: "Volume Trimming";
-    // `warning`: centered, empty until `setStartupWarnings` fills it in.
-    CenteredLabel { text: ""; }
+    // `warning`: centered, `ProcessControlPanel.colorNotStarted`, empty until
+    // `setStartupWarnings` fills it in (hidden when there is nothing to say).
+    HorizontalLayout {
+        alignment: center;
+        BridgedLabel { prefix: " values have been restored to defaults"; text: ""; color: #bf0000; }
+    }
     // `pnlImodFull`
     HorizontalLayout {
         alignment: space-around;
@@ -78,19 +83,18 @@ export component TrimvolPanel inherits BeveledBorder {
         }
         // `pnlScaleFixed`
         HorizontalLayout {
-            alignment: start;
             spacing: EtomoStyle.gap;
             RadioButton { text: "Scale to match contrast  "; selected: true; }
-            LabeledTextField { label: "black: "; label-width: 50px; text: ""; }
-            LabeledTextField { label: " white: "; label-width: 55px; text: ""; }
+            LabeledTextField { label: "black: "; text: ""; }
+            LabeledTextField { label: " white: "; text: ""; }
         }
         // `pnlScaleSection`
         HorizontalLayout {
-            alignment: start;
             spacing: EtomoStyle.gap;
             RadioButton { text: "Find scaling from sections  "; }
-            LabeledTextField { label: "Z min: "; label-width: 55px; text: ""; enabled: false; }
-            LabeledTextField { label: " Z max: "; label-width: 60px; text: ""; enabled: false; }
+            // The second "Z min"/"Z max" pair in the dialog (`VolumeRangePanel`'s first).
+            LabeledTextField { label: "Z min: "; occurrence: "#2"; text: ""; enabled: false; }
+            LabeledTextField { label: " Z max: "; name-label: "Z max: "; occurrence: "#2"; text: ""; enabled: false; }
         }
         RubberbandPanel { }
         // The rubberband panel's own button, added by `TrimvolPanel` below the
@@ -136,7 +140,7 @@ export component SmoothingAssessmentPanel inherits EtchedBorder {
     title: "Smoothing Assessment";
     LabeledTextField {
         label: "Smoothing factors to try: ";
-        label-width: 190px;
+        
         text: "1,2,4,6,8,10";
     }
     Rectangle { height: 5px; }
@@ -167,8 +171,7 @@ export component FlattenVolumePanel inherits BeveledBorder {
                 title: "";
                 HorizontalLayout {
                     spacing: EtomoStyle.gap;
-                    alignment: start;
-                    LabeledSpinner { label: "Open binned by "; label-width: 110px; text: "1"; }
+                    LabeledSpinner { label: "Open binned by "; text: "1"; }
                     Text { text: " in X and Y"; vertical-alignment: center; }
                 }
                 HorizontalLayout {
@@ -184,13 +187,12 @@ export component FlattenVolumePanel inherits BeveledBorder {
         }
         // `pnlWarpSpacing`
         HorizontalLayout {
-            alignment: start;
             spacing: EtomoStyle.gap;
-            LabeledTextField { label: "Spacing in X: "; label-width: 100px; text: ""; }
-            LabeledTextField { label: " and Y: "; label-width: 60px; text: ""; }
+            LabeledTextField { label: "Spacing in X: "; text: ""; }
+            LabeledTextField { label: " and Y: "; text: ""; }
         }
         SmoothingAssessmentPanel { }
-        LabeledTextField { label: "Smoothing factor: "; label-width: 140px; text: ""; }
+        LabeledTextField { label: "Smoothing factor: "; text: ""; }
         // `pnlFlattenWarpButtons`
         HorizontalLayout {
             alignment: center;
@@ -202,7 +204,7 @@ export component FlattenVolumePanel inherits BeveledBorder {
         alignment: start;
         CheckBox { text: "Linear interpolation"; }
     }
-    LabeledTextField { label: "Output thickness in Z: "; label-width: 180px; text: ""; }
+    LabeledTextField { label: "Output thickness in Z: "; text: ""; }
     FileTextField { label: "Temporary directory:"; text: ""; }
     // `pnlFlatten`
     HorizontalLayout {
@@ -224,12 +226,11 @@ export component SqueezeVolPanel inherits BeveledBorder {
     }
     // `pnlReduceByOverallFactor`: check box, bare field, then a labelled field.
     HorizontalLayout {
-        alignment: start;
         spacing: EtomoStyle.gap;
         CheckBox { text: "Reduce by overall factor (>=1)"; }
         TextField { label: "Reduce by overall factor (>=1)"; text: ""; enabled: false; }
         Rectangle { width: 10px; }
-        LabeledTextField { label: "Factor in Z "; label-width: 90px; text: ""; enabled: false; }
+        LabeledTextField { label: "Factor in Z "; text: ""; enabled: false; }
     }
     // `pnlFiltering`
     BeveledBorder {
@@ -242,42 +243,37 @@ export component SqueezeVolPanel inherits BeveledBorder {
             RadioButton { text: "Deconvolution"; }
         }
         HorizontalLayout {
-            alignment: start;
             LabeledTextField {
                 label: "Low pass cutoff and sigma (1/pixel) ";
-                label-width: 270px;
+                
                 text: "";
                 enabled: false;
             }
         }
         HorizontalLayout {
-            alignment: start;
             spacing: EtomoStyle.gap;
-            LabeledTextField { label: "Deconvolution strength "; label-width: 180px; text: ""; enabled: false; }
+            LabeledTextField { label: "Deconvolution strength "; text: ""; enabled: false; }
             Rectangle { width: 10px; }
-            LabeledTextField { label: "SNR falloff "; label-width: 100px; text: ""; enabled: false; }
+            LabeledTextField { label: "SNR falloff "; text: ""; enabled: false; }
         }
         HorizontalLayout {
-            alignment: start;
             LabeledTextField {
                 label: "High pass filter cutoff (fraction of Nyquist) ";
-                label-width: 320px;
+                
                 text: "";
                 enabled: false;
             }
         }
         HorizontalLayout {
-            alignment: start;
             spacing: EtomoStyle.gap;
-            LabeledTextField { label: "Defocus (microns) "; label-width: 150px; text: ""; enabled: false; }
+            LabeledTextField { label: "Defocus (microns) "; text: ""; enabled: false; }
             Rectangle { width: 10px; }
-            LabeledTextField { label: "Phase shift (degrees) "; label-width: 170px; text: ""; enabled: false; }
+            LabeledTextField { label: "Phase shift (degrees) "; text: ""; enabled: false; }
         }
     }
     // `pnlDataModeOfOutput`
     HorizontalLayout {
-        alignment: start;
-        LabeledTextField { label: "Data mode of output "; label-width: 160px; text: ""; }
+        LabeledTextField { label: "Data mode of output "; text: ""; }
     }
     // `pnlButtons`
     HorizontalLayout {
@@ -305,9 +301,8 @@ export component AltStackPanel inherits BeveledBorder {
     Rectangle { height: 5px; }
     // `pnlRootnameAlternativeStack`
     HorizontalLayout {
-        alignment: start;
         padding-left: 2px;
-        LabeledTextField { label: "Rootname of alternative stack "; label-width: 220px; text: ""; }
+        LabeledTextField { label: "Rootname of alternative stack "; text: ""; }
     }
     Rectangle { height: 5px; }
     // `pnlAxesToProcess`: dual axis only.
@@ -327,7 +322,7 @@ export component AltStackPanel inherits BeveledBorder {
     // "Parallel processing" row over a "Use the GPU" row
     // (`CpuGpuPanel.java:124-144`).
     VerticalLayout {
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
         // `pnlParallelProcess`.  `updateDisplay` does
         // `cbParallelProcess.setVisible(!alwaysParallel)`
         // (`CpuGpuPanel.java:356`) and `alwaysParallel` is false at
@@ -341,7 +336,7 @@ export component AltStackPanel inherits BeveledBorder {
             alignment: start;
             spacing: EtomoStyle.gap;
             CheckBox { text: "Use the GPU"; }
-            Text { text: ": Maximum number of GPUs recommended is 3"; vertical-alignment: center; }
+            BridgedLabel { prefix: ": Maximum number of GPUs recommended is "; text: ": Maximum number of GPUs recommended is 3"; }
         }
     }
     Rectangle { height: 5px; }
@@ -429,15 +424,14 @@ export component SubtomogramsPanel inherits BeveledBorder {
     Rectangle { height: 5px; }
     FileTextField { label: "Model or point file: "; text: ""; }
     Rectangle { height: 5px; }
-    LabeledTextField { label: "Objects with points to use: "; label-width: 210px; text: ""; }
+    LabeledTextField { label: "Objects with points to use: "; text: ""; }
     Rectangle { height: 5px; }
     // `pnlSizeInXYZ`: three fields side by side.
     HorizontalLayout {
-        alignment: start;
         spacing: EtomoStyle.gap;
-        LabeledTextField { label: "Output size in X: "; label-width: 130px; text: ""; }
-        LabeledTextField { label: "Y: "; label-width: 24px; text: ""; }
-        LabeledTextField { label: "Z: "; label-width: 24px; text: ""; }
+        LabeledTextField { label: "Output size in X: "; text: ""; }
+        LabeledTextField { label: "Y: "; text: ""; }
+        LabeledTextField { label: "Z: "; text: ""; }
     }
     Rectangle { height: 5px; }
     FileTextField { label: "Output directory for subvolumes: "; text: ""; clear-button: true; }
@@ -487,7 +481,6 @@ export component SubtomogramsPanel inherits BeveledBorder {
     Rectangle { height: 5px; }
     // `pnlExtentOfZLevelsInNm`
     HorizontalLayout {
-        alignment: start;
         spacing: EtomoStyle.gap;
         CheckBox { text: "Do 3D CTF correction with division into "; }
         TextField { label: "Do 3D CTF correction with division into "; text: ""; enabled: false; }
@@ -531,18 +524,18 @@ export component PostProcessingDialog inherits BeveledBorder {
     // The "Subtomograms" tab is added only for a single axis, non-montage
     // dataset (`PostProcessingDialog.java:70-77`).
     in property <bool> show-subtomograms: true;
-    TabbedPane {
+    post-tabs := BridgedTabbedPane {
         tabs: root.show-subtomograms
             ? ["Trim vol", "Flatten", "Reduce/filt vol", "Alt Stack", "Subtomograms"]
             : ["Trim vol", "Flatten", "Reduce/filt vol", "Alt Stack"];
         current: root.current-tab;
         // Swing keeps one root panel per tab and moves the live panel into the
         // selected one; only the selected tab's panel is ever on screen.
-        if root.current-tab == 0: TrimvolPanel { }
-        if root.current-tab == 1: FlattenVolumePanel { }
-        if root.current-tab == 2: SqueezeVolPanel { }
-        if root.current-tab == 3: AltStackPanel { }
-        if root.current-tab == 4: SubtomogramsPanel { }
+        if post-tabs.shown-current == 0: TrimvolPanel { }
+        if post-tabs.shown-current == 1: FlattenVolumePanel { }
+        if post-tabs.shown-current == 2: SqueezeVolPanel { }
+        if post-tabs.shown-current == 3: AltStackPanel { }
+        if post-tabs.shown-current == 4: SubtomogramsPanel { }
     }
     // `addExitButtons()`; `btnExecute.setText("Done")`.
     ExitButtons { execute-text: "Done"; }

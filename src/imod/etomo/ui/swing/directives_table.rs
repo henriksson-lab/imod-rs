@@ -1,439 +1,310 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/DirectivesTable.java`.
 //!
-//! The Swing panel/layout objects and the directive-description/autodoc
-//! readers are deliberately explicit boundaries.  The table itself owns the
-//! Java `RowList`, including its directive map, checkpoint/backup sequence,
-//! extras insertion order, and mutual-exclusion checks.  It stores the real
-//! neighbouring `DirectivesDirectiveRow` and `DirectivesSectionRow` source
-//! types; there is no table-local replacement row model.
-#![allow(dead_code)]
+//! Directive editor table: one section row per section of the directives description
+//! file and one directive row per directive, laid out with a `GridBagLayout`.  An event
+//! dispatch thread object owned by its `DirectivesDialog`.
+//!
+//! The inner class `RowList` also implements `DirectiveMapInterface`
+//! (`getDirective`, `getDirectiveFromPair`) for `setValues(BaseManager)`, which only
+//! the never-called `DirectivesDialog.setValues(BaseManager)` reaches; those three are
+//! dead in the Java too and are not translated (DEAD_CODE.md).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-use crate::imod::etomo::base_manager::BaseManager;
-use crate::imod::etomo::r#type::axis_id::AxisID;
-use crate::imod::etomo::r#type::directive_file_type::DirectiveFileType;
-
-use super::batch_run_tomo_step_panel::BatchRunTomoStatus;
-use super::cell::{CellGridBagConstraintsBoundary, CellGridBagLayoutBoundary, CellPanelBoundary};
-use super::directives_dialog::{
-    DirectiveFileInterfaceBoundary, DirectivesTableBoundary, FieldDisplayerBoundary,
-    WritableAutodocBoundary,
-};
-use super::directives_directive_row::{DirectiveDef, DirectiveValue, DirectivesDirectiveRow};
+use super::directives_dialog::DirectivesDialog;
+use super::directives_directive_row::DirectivesDirectiveRow;
 use super::directives_row::DirectivesRow;
 use super::directives_section_row::DirectivesSectionRow;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::{
+    GRID_BAG_BOTH, GRID_BAG_CENTER, GridBagConstraints, GridBagLayout, JComponent,
+};
+use crate::imod::etomo::logic::batch_tool::TemplateValues;
+use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
+use crate::imod::etomo::storage::directive_adaptor::DirectiveAdaptor;
+use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::storage::directive_descr_element::DirectiveDescrElement;
+use crate::imod::etomo::storage::directive_descr_file;
+use crate::imod::etomo::storage::directive_file_interface::DirectiveFileInterface;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::batch_run_tomo_status::{self, BatchRunTomoStatus};
+use crate::imod::etomo::r#type::directive_file_type::DirectiveFileType;
+use crate::imod::etomo::ui::field_displayer::FieldDisplayer;
 
-/// Calls which Java `DirectivesTable` makes to its `DirectivesDialog` parent.
-pub trait DirectivesTableParent {
-    fn is_find_sec_add_thickness_set(&self) -> bool;
-    fn is_scale_from_z_set(&self) -> bool;
-    fn has_dual(&self) -> bool;
+/// One row of the table: Java's `List<DirectivesRow>` entries, with the `instanceof`
+/// the class makes on them.
+#[derive(Clone)]
+enum Row {
+    Section(Rc<DirectivesSectionRow>),
+    Directive(Rc<DirectivesDirectiveRow>),
 }
 
-/// One parsed `DirectiveDescrFile.Iterator` element.  The storage parser owns
-/// how an autodoc line becomes this source-shaped value.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DirectiveDescriptionElement {
-    Section {
-        title: String,
-    },
-    Directive {
-        directive_def: DirectiveDef,
-        title: String,
-        section_title: String,
-        included: bool,
-        copy_arg_axis_id: Option<AxisID>,
-    },
-}
-
-/// One `ReadOnlyStatement` after Java `DirectiveAdaptor.set(statement)`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DirectiveStatement {
-    pub directive_def: DirectiveDef,
-    pub value: Option<DirectiveValue>,
-}
-
-/// Directive-file iterator boundary.  `DirectiveFileInterface` has not been
-/// replaced with a string map: callers which have parsed statements use the
-/// explicit `set_values_from_statements` overload below.
-pub trait DirectivesTableDirectiveFileBoundary: DirectiveFileInterfaceBoundary {
-    fn statements(&self, set_field_highlight_value: bool) -> Option<Vec<DirectiveStatement>>;
-}
-
-/// Java `JPanel` state directly mutated in `createPanel`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DirectivesTablePanelBoundary {
-    pub grid_bag_layout: bool,
-    pub black_line_border: bool,
-    pub fill_both: bool,
-    pub anchor_center: bool,
-    pub gridwidth: i32,
-    pub gridheight: i32,
-    pub weight_x_zero: bool,
-    pub weight_y_one: bool,
-}
-
-/// Java `RowList.list` members, retaining the actual neighbouring row types.
-pub enum DirectivesTableRow {
-    Section(Rc<RefCell<DirectivesSectionRow>>),
-    Directive(Rc<RefCell<DirectivesDirectiveRow>>),
-}
-
-impl DirectivesTableRow {
-    fn display(
-        &self,
-        panel: &mut CellPanelBoundary,
-        layout: &mut CellGridBagLayoutBoundary,
-        constraints: &mut CellGridBagConstraintsBoundary,
-    ) {
+impl Row {
+    fn as_row(&self) -> &dyn DirectivesRow {
         match self {
-            Self::Section(row) => row.borrow_mut().display(panel, layout, constraints),
-            Self::Directive(row) => row.borrow_mut().display(panel, layout, constraints),
-        }
-    }
-    fn remove(&self) {
-        match self {
-            Self::Section(row) => row.borrow_mut().remove(),
-            Self::Directive(row) => row.borrow_mut().remove(),
-        }
-    }
-    fn status_changed(&self, status: BatchRunTomoStatus) {
-        match self {
-            Self::Section(row) => row.borrow_mut().status_changed(status),
-            Self::Directive(row) => row.borrow_mut().status_changed(status),
+            Row::Section(row) => &**row,
+            Row::Directive(row) => &**row,
         }
     }
 }
 
-/// Java final `DirectivesTable`.
-pub struct DirectivesTable<P: DirectivesTableParent> {
-    pub pnl_root: DirectivesTablePanelBoundary,
-    pub list: Vec<DirectivesTableRow>,
-    pub directive_map: HashMap<DirectiveDef, Rc<RefCell<DirectivesDirectiveRow>>>,
-    pub extras_section: Option<Rc<RefCell<DirectivesSectionRow>>>,
-    pub manager: Option<&'static dyn BaseManager>,
-    pub parent: P,
-    pub directive_file_type: Option<DirectiveFileType>,
-    pub template_values: HashMap<DirectiveDef, String>,
-    pub excluded_directives: HashSet<DirectiveDef>,
-    pub debug: bool,
-    panel: CellPanelBoundary,
-    layout: CellGridBagLayoutBoundary,
-    constraints: CellGridBagConstraintsBoundary,
+/// Java package-private `final class DirectivesTable`.
+pub struct DirectivesTable {
+    /// Java private final `pnlRoot`.
+    pnl_root: Rc<JComponent>,
+    /// Java private final `layout`.
+    layout: GridBagLayout,
+    /// Java private final `constraints`.
+    constraints: RefCell<GridBagConstraints>,
+    /// Java private final `list` (the `RowList`).
+    list: RowList,
+
+    /// Java private final `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private final `parent`.
+    parent: Weak<DirectivesDialog>,
+    /// Java private final `directiveFileType`.
+    directive_file_type: Option<DirectiveFileType>,
+    /// Java private final `templateValues`.
+    template_values: Option<Rc<RefCell<TemplateValues>>>,
+    /// Java private final `excludedDirectives`.
+    excluded_directives: Option<Rc<RefCell<HashSet<DirectiveDef>>>>,
+
+    /// Java private `debug`, initially false.
+    debug: bool,
 }
 
-impl<P: DirectivesTableParent> DirectivesTable<P> {
-    /// Java package-private `DirectivesTable(...)`.
+impl DirectivesTable {
+    /// Java package-private `DirectivesTable(BaseManager, DirectivesDialog,
+    /// DirectiveFileType, Map<DirectiveDef, String>, Set<DirectiveDef>)`.
     pub fn new(
-        manager: Option<&'static dyn BaseManager>,
-        parent: P,
+        manager: &'static dyn BaseManager,
+        parent: Weak<DirectivesDialog>,
         directive_file_type: Option<DirectiveFileType>,
-        template_values: HashMap<DirectiveDef, String>,
-        excluded_directives: HashSet<DirectiveDef>,
-    ) -> Self {
-        Self {
-            pnl_root: DirectivesTablePanelBoundary::default(),
-            list: Vec::new(),
-            directive_map: HashMap::new(),
-            extras_section: None,
+        template_values: Option<Rc<RefCell<TemplateValues>>>,
+        excluded_directives: Option<Rc<RefCell<HashSet<DirectiveDef>>>>,
+    ) -> DirectivesTable {
+        DirectivesTable {
+            pnl_root: JComponent::new_panel(),
+            layout: GridBagLayout::new(),
+            constraints: RefCell::new(GridBagConstraints::default()),
+            list: RowList::new(),
             manager,
             parent,
             directive_file_type,
             template_values,
             excluded_directives,
             debug: false,
-            panel: CellPanelBoundary,
-            layout: CellGridBagLayoutBoundary,
-            constraints: CellGridBagConstraintsBoundary,
         }
     }
 
-    /// Java `init()`.  Description iteration remains a storage boundary and
-    /// is supplied through `create_panel_from_description`.
-    pub fn init(&mut self) {
+    fn parent(&self) -> Rc<DirectivesDialog> {
+        self.parent.upgrade().expect("the dialog owns its table")
+    }
+
+    /// Java package-private `validate(FieldDisplayer)`.
+    pub fn validate(&self, field_displayer: Option<Rc<dyn FieldDisplayer>>) -> bool {
+        self.list.validate(&self.parent(), field_displayer)
+    }
+
+    /// Java package-private `getRow(DirectiveDef)`.
+    pub fn get_row(&self, directive_def: Option<DirectiveDef>) -> Option<Rc<DirectivesDirectiveRow>> {
+        self.list.get_row(directive_def)
+    }
+
+    /// Java package-private `init()`.
+    pub fn init(&self) {
         self.create_panel();
+        self.list.create_panel(self);
     }
+
     /// Java private `createPanel()`.
-    pub fn create_panel(&mut self) {
-        self.pnl_root.grid_bag_layout = true;
-        self.pnl_root.black_line_border = true;
-        self.pnl_root.fill_both = true;
-        self.pnl_root.anchor_center = true;
-        self.pnl_root.gridwidth = 1;
-        self.pnl_root.gridheight = 1;
-        self.pnl_root.weight_x_zero = true;
-        self.pnl_root.weight_y_one = true;
+    fn create_panel(&self) {
+        // init
+        let mut constraints = self.constraints.borrow_mut();
+        constraints.fill = GRID_BAG_BOTH;
+        constraints.anchor = GRID_BAG_CENTER;
+        constraints.gridwidth = 1;
+        constraints.gridheight = 1;
+        constraints.weightx = 0.0;
+        constraints.weighty = 1.0;
+        // root: `pnlRoot.setLayout(layout)`; `setBorder(LineBorder.createBlackLineBorder())`.
     }
-    /// Java `getContainer()`.
-    pub fn get_container(&self) -> &'static str {
-        "DirectivesTable.pnlRoot"
+
+    /// Java package-private `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.pnl_root.clone()
     }
+
     /// Java private `getTable()`.
-    fn get_table(&mut self) -> &mut CellPanelBoundary {
-        &mut self.panel
-    }
-    /// Java `getRow(DirectiveDef)`.
-    pub fn get_row(
-        &self,
-        directive_def: &DirectiveDef,
-    ) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
-        self.directive_map.get(directive_def).cloned()
-    }
-    #[allow(non_snake_case)]
-    pub fn getDirective(
-        &self,
-        directive_def: &DirectiveDef,
-    ) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
-        self.get_row(directive_def)
-    }
-    /// Pair-key conversion is supplied by the directive-definition boundary;
-    /// callers pass the paired definition after applying that source rule.
-    #[allow(non_snake_case)]
-    pub fn getDirectiveFromPair(
-        &self,
-        directive_def: &DirectiveDef,
-    ) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
-        self.get_row(directive_def)
+    fn get_table(&self) -> Rc<JComponent> {
+        self.pnl_root.clone()
     }
 
-    /// The complete Java `RowList.createPanel()` loop after the storage unit
-    /// has parsed description elements and constructed canonical rows.  The
-    /// section and directive factories are explicit because their constructors
-    /// register Swing listeners on the real dialog owner.
-    pub fn create_panel_from_description(
-        &mut self,
-        elements: impl IntoIterator<Item = DirectiveDescriptionElement>,
-        mut make_section: impl FnMut(&str) -> Rc<RefCell<DirectivesSectionRow>>,
-        mut make_directive: impl FnMut(
-            &DirectiveDescriptionElement,
-            Option<Rc<RefCell<DirectivesSectionRow>>>,
-        ) -> Rc<RefCell<DirectivesDirectiveRow>>,
+    /// Java package-private `closeAllSections()`.
+    pub fn close_all_sections(&self) {
+        self.list.close_all_sections();
+    }
+
+    /// Java package-private `setValues(DirectiveFileInterface, boolean)`.
+    pub fn set_values(
+        &self,
+        directive_file: &dyn DirectiveFileInterface,
+        set_field_highlight_value: bool,
     ) {
-        let mut current_section: Option<Rc<RefCell<DirectivesSectionRow>>> = None;
-        let mut section_contains_directives = false;
-        for element in elements {
-            match &element {
-                DirectiveDescriptionElement::Section { title } => {
-                    if let Some(section) = current_section.take() {
-                        if !section_contains_directives {
-                            self.list.retain(|row| !matches!(row, DirectivesTableRow::Section(candidate) if Rc::ptr_eq(candidate, &section)));
-                        } else {
-                            section.borrow_mut().update_enabled();
-                        }
-                    }
-                    let section = make_section(title);
-                    self.list.push(DirectivesTableRow::Section(section.clone()));
-                    current_section = Some(section);
-                    section_contains_directives = false;
-                }
-                DirectiveDescriptionElement::Directive {
-                    directive_def,
-                    included,
-                    copy_arg_axis_id,
-                    ..
-                } => {
-                    if !included
-                        || self.excluded_directives.contains(directive_def)
-                        || (!self.parent.has_dual() && *copy_arg_axis_id == Some(AxisID::Second))
-                    {
-                        continue;
-                    }
-                    let row = make_directive(&element, current_section.clone());
-                    self.directive_map
-                        .insert(directive_def.clone(), row.clone());
-                    self.list.push(DirectivesTableRow::Directive(row));
-                    section_contains_directives = true;
-                }
-            }
-        }
-        if let Some(section) = current_section {
-            section.borrow_mut().update_enabled();
-        }
-        self.display_all_rows();
-        self.status_changed(BatchRunTomoStatus::DEFAULT);
+        self.list.set_values(self, directive_file, set_field_highlight_value);
     }
 
-    /// Java `setValues(BaseManager)`: the actual manager directive-map method
-    /// remains an explicit cross-unit boundary until its typed map signature
-    /// is translated.
-    pub fn set_values_from_manager(&mut self, _source_manager: &'static dyn BaseManager) {}
-    /// Java `closeAllSections()`.
-    pub fn close_all_sections(&mut self) {
-        for row in &self.list {
-            if let DirectivesTableRow::Section(section) = row {
-                section.borrow_mut().set_open(false);
-            }
-        }
+    /// Java package-private `clearTemplateValues()`.
+    pub fn clear_template_values(&self) {
+        self.list.clear_template_values();
     }
-    /// Java `clearTemplateValues()`.
-    pub fn clear_template_values(&mut self) {
-        for row in self.directive_map.values() {
-            row.borrow_mut().clear_template_value();
-        }
+
+    /// Java package-private `clear()`.
+    pub fn clear(&self) {
+        self.list.clear();
     }
-    /// Java `clear()`.
-    pub fn clear(&mut self) {
-        for row in self.directive_map.values() {
-            row.borrow_mut().clear();
-        }
+
+    /// Java package-private `checkpointAndRestoreFromBackup(boolean)`.
+    pub fn checkpoint_and_restore_from_backup(&self, retain_user_values: bool) {
+        self.list.checkpoint_and_restore_from_backup(retain_user_values);
     }
-    /// Java `checkpointAndRestoreFromBackup(boolean)`.
-    pub fn checkpoint_and_restore_from_backup(&mut self, retain_user_values: bool) {
-        for row in self.directive_map.values() {
-            let mut row = row.borrow_mut();
-            row.checkpoint();
-            if retain_user_values {
-                row.restore_from_backup();
-            }
-        }
+
+    /// Java package-private `backupIfChanged()`.
+    pub fn backup_if_changed(&self) -> bool {
+        self.list.backup_if_changed()
     }
-    /// Java `backupIfChanged()`.
-    pub fn backup_if_changed(&mut self) -> bool {
-        let mut changed = false;
-        for row in self.directive_map.values() {
-            let mut row = row.borrow_mut();
-            if row.is_different_from_checkpoint(true) {
-                row.backup();
-                changed = true;
-            }
-        }
-        changed
-    }
-    /// Java `saveAutodoc(...)`; the existing row source unit has the field
-    /// portion, while writable-autodoc serialization is retained at its storage boundary.
+
+    /// Java package-private `saveAutodoc(WritableAutodoc, boolean, FieldDisplayer,
+    /// boolean)`.
     pub fn save_autodoc(
-        &mut self,
-        autodoc: Option<&mut dyn WritableAutodocBoundary>,
+        &self,
+        autodoc: *mut Autodoc,
         do_validation: bool,
-        _field_displayer: &dyn FieldDisplayerBoundary,
+        field_displayer: Option<&dyn FieldDisplayer>,
         validate_only: bool,
     ) -> bool {
-        if (validate_only && !do_validation) || autodoc.is_none() {
-            return true;
-        }
-        true
+        self.list.save_autodoc(
+            autodoc,
+            do_validation,
+            field_displayer,
+            self.template_values.as_ref(),
+            validate_only,
+        )
     }
-    /// Java `setValues(DirectiveFileInterface, boolean)` after the file's
-    /// iterator has yielded `DirectiveAdaptor` values.
-    pub fn set_values_from_statements(
-        &mut self,
-        statements: impl IntoIterator<Item = DirectiveStatement>,
-        set_field_highlight_value: bool,
-        mut make_extras_section: impl FnMut() -> Rc<RefCell<DirectivesSectionRow>>,
-        mut make_unknown_directive: impl FnMut(
-            &DirectiveStatement,
-            Rc<RefCell<DirectivesSectionRow>>,
-        ) -> Rc<RefCell<DirectivesDirectiveRow>>,
-    ) {
-        let mut done_set = HashSet::new();
-        let mut row_added = false;
-        for statement in statements {
-            if self.excluded_directives.contains(&statement.directive_def)
-                || !done_set.insert(statement.directive_def.clone())
-            {
-                continue;
-            }
-            let row = if let Some(row) = self.get_row(&statement.directive_def) {
-                row
-            } else {
-                let extras = match &self.extras_section {
-                    Some(section) => section.clone(),
-                    None => {
-                        let section = make_extras_section();
-                        self.list
-                            .insert(0, DirectivesTableRow::Section(section.clone()));
-                        self.extras_section = Some(section.clone());
-                        row_added = true;
-                        section
-                    }
-                };
-                let row = make_unknown_directive(&statement, extras);
-                self.directive_map
-                    .insert(statement.directive_def.clone(), row.clone());
-                self.list
-                    .insert(1, DirectivesTableRow::Directive(row.clone()));
-                row_added = true;
-                row
-            };
-            row.borrow_mut()
-                .set_value_from_directive_value(statement.value, set_field_highlight_value);
-        }
-        if row_added {
-            if let Some(section) = &self.extras_section {
-                section.borrow_mut().update_enabled();
-            }
-            for row in &self.list {
-                row.remove();
-            }
-            self.display_all_rows();
+
+    /// Java package-private `statusChanged(BatchRunTomoStatus)`.
+    pub fn status_changed(&self, status: Option<BatchRunTomoStatus>) {
+        self.list.status_changed(status);
+    }
+}
+
+/// Java inner class `RowList`.
+struct RowList {
+    /// Java private final `list`.
+    list: RefCell<Vec<Row>>,
+    /// Java private final `directiveMap`.
+    directive_map: RefCell<HashMap<DirectiveDef, Rc<DirectivesDirectiveRow>>>,
+    /// Java private `extrasSection`, initially null.
+    extras_section: RefCell<Option<Rc<DirectivesSectionRow>>>,
+}
+
+impl RowList {
+    /// Java private `RowList()`.
+    fn new() -> RowList {
+        RowList {
+            list: RefCell::new(Vec::new()),
+            directive_map: RefCell::new(HashMap::new()),
+            extras_section: RefCell::new(None),
         }
     }
-    /// Java `statusChanged(BatchRunTomoStatus)`.
-    pub fn status_changed(&mut self, status: BatchRunTomoStatus) {
-        for row in &self.list {
-            row.status_changed(status);
-        }
-    }
-    /// Java `validate(FieldDisplayer)` and the five source mutual-exclusion groups.
-    pub fn validate(&self, _field_displayer: &dyn FieldDisplayerBoundary) -> bool {
-        let number = self.get_row(&DirectiveDef("NumberOfPatchesXandY".into()));
-        let overlap = self.get_row(&DirectiveDef("OverlapOfPatchesXandY".into()));
-        if let Some(number) = number {
-            let number = number.borrow();
-            let overlap = overlap.as_ref().map(|row| row.borrow());
-            if !number.validate_mutually_exclusive_rows(overlap.as_deref(), None) {
-                return false;
-            }
-        }
-        let first_inc = self.get_row(&DirectiveDef("FirstInc".into()));
-        let use_raw_tlt = self.get_row(&DirectiveDef("UseRawtlt".into()));
-        let extract = self.get_row(&DirectiveDef("Extract".into()));
-        if let Some(first_inc) = first_inc {
-            let first_inc = first_inc.borrow();
-            let use_raw_tlt = use_raw_tlt.as_ref().map(|row| row.borrow());
-            let extract = extract.as_ref().map(|row| row.borrow());
-            if !first_inc
-                .validate_mutually_exclusive_rows(use_raw_tlt.as_deref(), extract.as_deref())
-            {
-                return false;
-            }
-        }
-        let b_first_inc = self.get_row(&DirectiveDef("BFirstInc".into()));
-        let b_use_raw_tlt = self.get_row(&DirectiveDef("BUseRawtlt".into()));
-        let b_extract = self.get_row(&DirectiveDef("BExtract".into()));
-        if let Some(b_first_inc) = b_first_inc {
-            let b_first_inc = b_first_inc.borrow();
-            let b_use_raw_tlt = b_use_raw_tlt.as_ref().map(|row| row.borrow());
-            let b_extract = b_extract.as_ref().map(|row| row.borrow());
-            if !b_first_inc
-                .validate_mutually_exclusive_rows(b_use_raw_tlt.as_deref(), b_extract.as_deref())
-            {
-                return false;
-            }
-        }
-        if !self
-            .get_row(&DirectiveDef("ThicknessForTrimvol".into()))
-            .is_none_or(|row| {
-                row.borrow()
-                    .validate_mutually_exclusive_field(self.parent.is_find_sec_add_thickness_set())
-            })
+
+    /// Java private `validate(FieldDisplayer)`.
+    fn validate(
+        &self,
+        parent: &Rc<DirectivesDialog>,
+        field_displayer: Option<Rc<dyn FieldDisplayer>>,
+    ) -> bool {
+        // NumberOfPatchesXandY and OverlapOfPatchesXandY are mutually exclusive
+        let mut row = self.get_row(Some(DirectiveDef::NUMBER_OF_PATCHES_X_AND_Y));
+        if let Some(r) = &row
+            && !r.validate_mutually_exclusive_rows(
+                self.get_row(Some(DirectiveDef::OVERLAP_OF_PATCHES_X_AND_Y)).as_ref(),
+                None,
+                "Use only one of the following fields: \"Number of patches to track in X and Y\" or \"Fractional overlap of patches in X and Y\".",
+                field_displayer.clone(),
+            )
         {
             return false;
         }
-        if let Some(scale_to_mean_sd) = self.get_row(&DirectiveDef("ScaleToMeanSD".into())) {
-            let scale_to_mean_sd = scale_to_mean_sd.borrow();
-            let scale_from_x = self.get_row(&DirectiveDef("ScaleFromX".into()));
-            let scale_from_x = scale_from_x.as_ref().map(|row| row.borrow());
-            let scale_from_y = self.get_row(&DirectiveDef("ScaleFromY".into()));
-            let scale_from_y = scale_from_y.as_ref().map(|row| row.borrow());
-            if !scale_to_mean_sd
-                .validate_mutually_exclusive_field(self.parent.is_scale_from_z_set())
-                || !scale_to_mean_sd.validate_mutually_exclusive_rows(
-                    scale_from_x.as_deref(),
-                    scale_from_y.as_deref(),
+        // firstinc, userawtlt, and extract are mutually exclusive
+        row = self.get_row(Some(DirectiveDef::FIRST_INC));
+        if let Some(r) = &row
+            && !r.validate_mutually_exclusive_rows(
+                self.get_row(Some(DirectiveDef::USE_RAW_TLT)).as_ref(),
+                self.get_row(Some(DirectiveDef::EXTRACT)).as_ref(),
+                "Only one method for getting tilt angles can be used for an axis.  Please choose only one of these fields: \"First tilt angle & increment\", \"Use existing .rawtlt file\", or \"Extract tilt angles from data file\".",
+                field_displayer.clone(),
+            )
+        {
+            return false;
+        }
+        // bfirstinc, buserawtlt, and bextract are mutually exclusive
+        row = self.get_row(Some(DirectiveDef::BFIRST_INC));
+        if let Some(r) = &row
+            && !r.validate_mutually_exclusive_rows(
+                self.get_row(Some(DirectiveDef::BUSE_RAW_TLT)).as_ref(),
+                self.get_row(Some(DirectiveDef::BEXTRACT)).as_ref(),
+                "Only one method for getting tilt angles can be used for the B axis.  Please choose only one of these fields: \"First tilt angle & increment for B axis\",  \"Use existing .rawtlt file for B axis\", or \"Extract tilt angles from B axis data file\".",
+                field_displayer.clone(),
+            )
+        {
+            return false;
+        }
+        // trimvol.thickness and trimvol.findSecAddThickness
+        row = self.get_row(Some(DirectiveDef::THICKNESS_FOR_TRIMVOL));
+        if let Some(r) = &row
+            && !r.validate_mutually_exclusive_set(
+                parent.is_find_sec_add_thickness_set(),
+                "Use only one of the following fields: \"Fraction or # of slices to trim to in Z\" or the \"Find plastic section limits and add\" check-box/text-field in the Basic dialog.",
+                field_displayer.clone(),
+            )
+        {
+            return false;
+        }
+        // trimvol.scaleToMeanSD and trimvol.scaleFromZ
+        row = self.get_row(Some(DirectiveDef::SCALE_TO_MEAN_SD));
+        if let Some(r) = row {
+            if !r.validate_mutually_exclusive_set(
+                parent.is_scale_from_z_set(),
+                "Only one scaling method can be used.  Use either \"Mean and SD for byte scaling\" or the \"Fraction of Z slices to analyze\" check-box/text-field in the Basic dialog.",
+                field_displayer.clone(),
+            ) {
+                return false;
+            }
+            let compare_to_row = r;
+            // trimvol.scaleFromX and trimvol.scaleToMeanSD
+            let row = self.get_row(Some(DirectiveDef::SCALE_FROM_X));
+            if let Some(r) = &row
+                && !r.validate_mutually_exclusive_rows(
+                    Some(&compare_to_row),
+                    None,
+                    "Only one scaling method can be used.  Use either \"Mean and SD for byte scaling\" or \"Frac or # of pixels in X for byte scaling\".",
+                    field_displayer.clone(),
+                )
+            {
+                return false;
+            }
+            // trimvol.scaleFromY and trimvol.scaleToMeanSD
+            let row = self.get_row(Some(DirectiveDef::SCALE_FROM_Y));
+            if let Some(r) = &row
+                && !r.validate_mutually_exclusive_rows(
+                    Some(&compare_to_row),
+                    None,
+                    "Only one scaling method can be used.  Use either \"Mean and SD for byte scaling\" or \"Frac or # of pixels in Y for byte scaling\".",
+                    field_displayer,
                 )
             {
                 return false;
@@ -441,215 +312,285 @@ impl<P: DirectivesTableParent> DirectivesTable<P> {
         }
         true
     }
-    fn display_all_rows(&mut self) {
-        // Borrowing the panel separately preserves Java's shared panel/layout/constraints.
-        let mut panel = CellPanelBoundary;
-        for row in &self.list {
-            row.display(&mut panel, &mut self.layout, &mut self.constraints);
+
+    /// Java package-private `createPanel()`.
+    fn create_panel(&self, table: &DirectivesTable) {
+        let parent = table.parent();
+        let Some(mut iterator) = directive_descr_file::INSTANCE.get_iterator(None, None) else {
+            // Java dereferences the null iterator of an unreadable description file;
+            // fixed in translation: the table stays empty (BUGS.md).
+            return;
+        };
+        let mut current_section: Option<Rc<DirectivesSectionRow>> = None;
+        let pnl_table = table.get_table();
+        let mut section_contains_directives = false;
+        let mut directive_def: Option<DirectiveDef> = None;
+        while iterator.has_next() {
+            let prev_directive_def = directive_def;
+            directive_def = None;
+            let line_array = iterator.next();
+            let line_array = line_array.as_deref();
+            if DirectiveDescrElement::is_section_from_line_array(line_array) {
+                // Finish previous section
+                if let Some(section) = &current_section {
+                    if !section_contains_directives {
+                        self.list.borrow_mut().retain(|row| {
+                            !matches!(row, Row::Section(existing) if Rc::ptr_eq(existing, section))
+                        });
+                    } else {
+                        section.update_enabled();
+                    }
+                }
+                // Start processing new section
+                let section = DirectivesSectionRow::get_instance(&parent, line_array);
+                self.list.borrow_mut().push(Row::Section(section.clone()));
+                current_section = Some(section);
+                section_contains_directives = false;
+            } else {
+                // If any of the datasets are dual axis, allow CopyArg B axis directives.
+                directive_def =
+                    DirectiveDescrElement::get_directive_def(line_array, prev_directive_def);
+                if let Some(def) = directive_def
+                    && DirectiveDescrElement::is_directive_from_line_array(line_array)
+                    && DirectiveDescrElement::is_included(line_array, table.directive_file_type)
+                    && table
+                        .excluded_directives
+                        .as_ref()
+                        .is_none_or(|excluded| !excluded.borrow().contains(&def))
+                    && (parent.has_dual()
+                        || def.get_copy_arg_axis_id(
+                            DirectiveDescrElement::get_name_from_line_array(line_array).as_deref(),
+                        ) != Some(AxisID::Second))
+                {
+                    // Java passes the current section, which the description file always
+                    // opens before its first directive.
+                    let Some(section) = current_section.clone() else {
+                        continue;
+                    };
+                    let row = DirectivesDirectiveRow::get_instance_line_array(
+                        table.manager,
+                        &parent,
+                        section,
+                        line_array,
+                        table.directive_file_type.is_none(),
+                        directive_def,
+                        table.debug,
+                    );
+                    self.list.borrow_mut().push(Row::Directive(row.clone()));
+                    section_contains_directives = true;
+                    self.directive_map.borrow_mut().insert(def, row);
+                }
+            }
+        }
+        if let Some(section) = &current_section {
+            section.update_enabled();
+        }
+        let list = self.list.borrow().clone();
+        for row in &list {
+            let mut constraints = *table.constraints.borrow();
+            row.as_row()
+                .display(&table.get_table(), &table.layout, &mut constraints);
+            *table.constraints.borrow_mut() = constraints;
+        }
+        let _ = pnl_table;
+        self.status_changed(Some(batch_run_tomo_status::DEFAULT));
+    }
+
+    /// Java private `closeAllSections()`.
+    fn close_all_sections(&self) {
+        let list = self.list.borrow().clone();
+        for row in &list {
+            if let Row::Section(section) = row {
+                section.set_open(false);
+            }
         }
     }
-}
 
-/// Java `DirectiveIterator`, retaining its look-ahead behavior while skipping
-/// section rows in the table's real mixed row list.
-pub struct DirectiveIterator {
-    rows: Vec<Rc<RefCell<DirectivesDirectiveRow>>>,
-    cursor: usize,
-}
-impl DirectiveIterator {
-    pub fn new<P: DirectivesTableParent>(table: &DirectivesTable<P>) -> Self {
-        Self {
-            rows: table
-                .list
-                .iter()
-                .filter_map(|row| match row {
-                    DirectivesTableRow::Directive(row) => Some(row.clone()),
-                    DirectivesTableRow::Section(_) => None,
-                })
-                .collect(),
-            cursor: 0,
+    /// Java private `getRow(DirectiveDef)`.
+    fn get_row(&self, directive_def: Option<DirectiveDef>) -> Option<Rc<DirectivesDirectiveRow>> {
+        let directive_def = directive_def?;
+        self.directive_map.borrow().get(&directive_def).cloned()
+    }
+
+    /// Every directive row in list order (Java `DirectiveIterator`).
+    fn directive_rows(&self) -> Vec<Rc<DirectivesDirectiveRow>> {
+        self.list
+            .borrow()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Directive(row) => Some(row.clone()),
+                Row::Section(_) => None,
+            })
+            .collect()
+    }
+
+    /// Java private `clearTemplateValues()`.
+    fn clear_template_values(&self) {
+        for row in self.directive_rows() {
+            row.clear_template_value();
         }
     }
-    #[allow(non_snake_case)]
-    pub fn hasNext(&self) -> bool {
-        self.cursor < self.rows.len()
-    }
-    #[allow(non_snake_case)]
-    pub fn next(&mut self) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
-        let value = self.rows.get(self.cursor).cloned();
-        self.cursor += usize::from(value.is_some());
-        value
-    }
-    #[allow(non_snake_case)]
-    pub fn getNext(&mut self) -> Option<Rc<RefCell<DirectivesDirectiveRow>>> {
-        self.next()
-    }
-}
 
-impl<P: DirectivesTableParent> DirectivesTableBoundary for DirectivesTable<P> {
-    fn init(&mut self) {
-        self.init();
+    /// Java private `clear()`.
+    fn clear(&self) {
+        for row in self.directive_rows() {
+            row.clear();
+        }
     }
-    fn get_container(&self) -> &'static str {
-        self.get_container()
+
+    /// Java private `checkpointAndRestoreFromBackup(boolean)`.
+    fn checkpoint_and_restore_from_backup(&self, retain_user_values: bool) {
+        for row in self.directive_rows() {
+            // checkpoint
+            row.checkpoint();
+            // If the user wants to retain their values, apply backed up values and then
+            // delete them.
+            if retain_user_values {
+                row.restore_from_backup();
+            }
+        }
     }
-    fn get_row(&self, directive_def: &str) -> Option<String> {
-        self.get_row(&DirectiveDef(directive_def.into()))
-            .map(|row| row.borrow().to_string_value())
+
+    /// Java private `backupIfChanged()`.  Check isDifferentFromCheckpoint on all data
+    /// entry fields; returns true if any field's isDifferentFromCheckpoint returned
+    /// true.
+    fn backup_if_changed(&self) -> bool {
+        let mut changed = false;
+        for row in self.directive_rows() {
+            if row.is_different_from_checkpoint(true) {
+                row.backup();
+                changed = true;
+            }
+        }
+        changed
     }
-    fn set_values_from_manager(&mut self, source_manager: &'static dyn BaseManager) {
-        self.set_values_from_manager(source_manager);
-    }
-    fn set_values_from_directive_file(
-        &mut self,
-        _directive_file: &dyn DirectiveFileInterfaceBoundary,
-        _set_field_highlight_value: bool,
-    ) {
-    }
-    fn clear_template_values(&mut self) {
-        self.clear_template_values();
-    }
-    fn clear(&mut self) {
-        self.clear();
-    }
-    fn checkpoint_and_restore_from_backup(&mut self, retain_user_values: bool) {
-        self.checkpoint_and_restore_from_backup(retain_user_values);
-    }
-    fn validate(&self, field_displayer: &dyn FieldDisplayerBoundary) -> bool {
-        self.validate(field_displayer)
-    }
-    fn backup_if_changed(&mut self) -> bool {
-        self.backup_if_changed()
-    }
+
+    /// Java private `saveAutodoc(WritableAutodoc, boolean, FieldDisplayer, boolean)`.
     fn save_autodoc(
-        &mut self,
-        autodoc: &mut dyn WritableAutodocBoundary,
+        &self,
+        autodoc: *mut Autodoc,
         do_validation: bool,
-        field_displayer: &dyn FieldDisplayerBoundary,
+        field_displayer: Option<&dyn FieldDisplayer>,
+        template_values: Option<&Rc<RefCell<TemplateValues>>>,
         validate_only: bool,
     ) -> bool {
-        self.save_autodoc(Some(autodoc), do_validation, field_displayer, validate_only)
+        if (validate_only && !do_validation) || autodoc.is_null() {
+            return true;
+        }
+        let template_values = template_values.map(|template_values| template_values.borrow());
+        for row in self.directive_rows() {
+            if row
+                .save_autodoc(
+                    autodoc,
+                    do_validation,
+                    field_displayer,
+                    template_values.as_deref(),
+                    validate_only,
+                )
+                .is_err()
+            {
+                // catch (FieldValidationFailedException e)
+                return false;
+            }
+        }
+        true
     }
-    fn status_changed(&mut self, status: BatchRunTomoStatus) {
-        self.status_changed(status);
-    }
-    fn close_all_sections(&mut self) {
-        self.close_all_sections();
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct Parent {
-        thickness: bool,
-        scale_z: bool,
-        dual: bool,
-    }
-    impl DirectivesTableParent for Parent {
-        fn is_find_sec_add_thickness_set(&self) -> bool {
-            self.thickness
+    /// Java package-private `setValues(DirectiveFileInterface, boolean)`.  Look for a
+    /// matching directive in the table for each directive in directiveFiles and set or
+    /// override the row value based on the directive.  If a directive does not exist
+    /// in the table, then add it to an "Extras" section at the top.
+    fn set_values(
+        &self,
+        table: &DirectivesTable,
+        directive_files: &dyn DirectiveFileInterface,
+        set_field_highlight_value: bool,
+    ) {
+        let Some(statements) = directive_files.iterator_statements(set_field_highlight_value)
+        else {
+            return;
+        };
+        let parent = table.parent();
+        let mut directive = DirectiveAdaptor::new();
+        let mut done_set: HashSet<DirectiveDef> = HashSet::new();
+        let mut row_added = false;
+        for statement in statements {
+            directive.set(Some(statement));
+            let directive_def = directive.get_directive_def();
+            // Ignore most B axis only directives, excluded directives, and directives that
+            // have already been processed.
+            let Some(def) = directive_def else {
+                continue;
+            };
+            if table
+                .excluded_directives
+                .as_ref()
+                .is_none_or(|excluded| excluded.borrow().contains(&def))
+                || done_set.contains(&def)
+            {
+                continue;
+            }
+            let mut row = self.get_row(Some(def));
+            if row.is_none() {
+                // add unknown directive to the Extras section
+                if self.extras_section.borrow().is_none() {
+                    let extras = DirectivesSectionRow::get_extras_instance(&parent);
+                    *self.extras_section.borrow_mut() = Some(extras.clone());
+                    self.list.borrow_mut().push(Row::Section(extras));
+                    row_added = true;
+                }
+                // Put the new unknown one below the section header.
+                let extras = self.extras_section.borrow().clone().unwrap();
+                let new_row = DirectivesDirectiveRow::get_instance_directive(
+                    table.manager,
+                    &parent,
+                    extras,
+                    &mut directive,
+                    true,
+                );
+                self.list.borrow_mut().push(Row::Directive(new_row.clone()));
+                row_added = true;
+                self.directive_map.borrow_mut().insert(def, new_row.clone());
+                row = Some(new_row);
+            }
+            if let Some(row) = row {
+                let mut template_values = table
+                    .template_values
+                    .as_ref()
+                    .map(|template_values| template_values.borrow_mut());
+                row.set_value(
+                    directive_files,
+                    set_field_highlight_value,
+                    template_values.as_deref_mut(),
+                );
+            }
+            // The whole collection is used to set the directive value, so only the first
+            // instance of a directive has to be processed
+            done_set.insert(def);
         }
-        fn is_scale_from_z_set(&self) -> bool {
-            self.scale_z
+        // If anything was added, remove and display everything.
+        if row_added {
+            if let Some(extras) = self.extras_section.borrow().as_ref() {
+                extras.update_enabled();
+            }
+            let list = self.list.borrow().clone();
+            for row in &list {
+                row.as_row().remove();
+            }
+            for row in &list {
+                let mut constraints = *table.constraints.borrow();
+                row.as_row()
+                    .display(&table.get_table(), &table.layout, &mut constraints);
+                *table.constraints.borrow_mut() = constraints;
+            }
         }
-        fn has_dual(&self) -> bool {
-            self.dual
+    }
+
+    /// Java package-private `statusChanged(BatchRunTomoStatus)`.
+    fn status_changed(&self, status: Option<BatchRunTomoStatus>) {
+        let list = self.list.borrow().clone();
+        for row in &list {
+            row.as_row().status_changed(status);
         }
-    }
-    struct Display;
-    impl FieldDisplayerBoundary for Display {}
-    fn row(key: &str, value: &str) -> Rc<RefCell<DirectivesDirectiveRow>> {
-        let mut row = DirectivesDirectiveRow::new_description(
-            None,
-            key.into(),
-            "s".into(),
-            super::super::directives_directive_row::DirectiveValueType::String,
-            false,
-            DirectiveDef(key.into()),
-            false,
-        );
-        row.set_value_string(value);
-        Rc::new(RefCell::new(row))
-    }
-    #[test]
-    fn map_backups_and_clear_use_canonical_directive_rows() {
-        let mut table = DirectivesTable::new(
-            None,
-            Parent {
-                thickness: false,
-                scale_z: false,
-                dual: false,
-            },
-            None,
-            HashMap::new(),
-            HashSet::new(),
-        );
-        table.init();
-        let row = row("one", "value");
-        table
-            .directive_map
-            .insert(DirectiveDef("one".into()), row.clone());
-        table.checkpoint_and_restore_from_backup(false);
-        row.borrow_mut().set_value_string("changed");
-        assert!(table.backup_if_changed());
-        table.clear();
-        assert_eq!(row.borrow().get_value(), Some(String::new()));
-        assert!(table.pnl_root.black_line_border);
-    }
-    #[test]
-    fn mutual_exclusion_matches_java_number_of_patches_rule() {
-        let mut table = DirectivesTable::new(
-            None,
-            Parent {
-                thickness: false,
-                scale_z: false,
-                dual: false,
-            },
-            None,
-            HashMap::new(),
-            HashSet::new(),
-        );
-        table.directive_map.insert(
-            DirectiveDef("NumberOfPatchesXandY".into()),
-            row("NumberOfPatchesXandY", "2"),
-        );
-        table.directive_map.insert(
-            DirectiveDef("OverlapOfPatchesXandY".into()),
-            row("OverlapOfPatchesXandY", "0.1"),
-        );
-        assert!(!table.validate(&Display));
-    }
-    #[test]
-    fn unknown_statement_is_inserted_once_and_value_is_applied() {
-        let mut table = DirectivesTable::new(
-            None,
-            Parent {
-                thickness: false,
-                scale_z: false,
-                dual: false,
-            },
-            None,
-            HashMap::new(),
-            HashSet::new(),
-        );
-        // The table's source ordering/deduplication is testable independently of
-        // the dialog-owned section listener factory.
-        let mut seen = HashSet::new();
-        let statements = [
-            DirectiveStatement {
-                directive_def: DirectiveDef("x".into()),
-                value: Some(DirectiveValue {
-                    override_value: false,
-                    batch: true,
-                }),
-            },
-            DirectiveStatement {
-                directive_def: DirectiveDef("x".into()),
-                value: None,
-            },
-        ];
-        assert!(seen.insert(statements[0].directive_def.clone()));
-        assert!(!seen.insert(statements[1].directive_def.clone()));
     }
 }

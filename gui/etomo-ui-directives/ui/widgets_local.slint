@@ -8,7 +8,7 @@
 // here: the established convention in the other `gui/*` crates is a text glyph
 // standing in for a vendored icon, so that is what these use too.
 
-import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtomoStyle, EtomoBridge } from "../../etomo-ui-common/ui/widgets.slint";
 
 // `EtchedBorder` (`EtchedBorder.java`): a `TitledBorder` wrapped around
 // `BorderFactory.createEtchedBorder(highlight, shadow)`.  Used untitled as
@@ -16,15 +16,21 @@ import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
 // `DirectiveEditorDialog.createPanel`.
 export component EtchedBorder inherits Rectangle {
     in property <string> title;
+    // Wired: false while the titled panel is not showing (`visible-value`
+    // "brd"); the box then takes no room.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.title == ""
+        || EtomoBridge.visible-value("brd", root.title, true, EtomoBridge.generation);
+    height: root.shown-visible ? etched-layout.preferred-height : 0px;
     background: EtomoStyle.panel;
-    border-width: 1px;
+    border-width: root.shown-visible ? 1px : 0px;
     // Swing's etched border is a light line (248,254,255) inside a dark one
     // (121,124,136).  Slint has one border colour per rectangle, so only the
     // dark line is drawn.
     border-color: #797c88;
-    VerticalLayout {
+    etched-layout := VerticalLayout {
+        visible: root.shown-visible;
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
         // Slint has no titled border, so the title is the first row inside the
         // box instead of being drawn into its top edge.
         if root.title != "": Text {

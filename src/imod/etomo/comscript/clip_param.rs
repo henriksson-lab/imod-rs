@@ -1,10 +1,6 @@
 //! `IMOD/Etomo/src/etomo/comscript/ClipParam.java`.
 //!
 //! The `clip rotx` and `clip stats` command lines.
-//!
-// TODO(unit): needs etomo/comscript/Utilities.java - `MONTAGE_SEPARATION`
-// (comscript::utilities::MONTAGE_SEPARATION).
-// TODO(unit): needs etomo/type/MetaData.java - `applicationManager.getConstMetaData()`.
 
 use std::path::{Path, PathBuf};
 
@@ -16,13 +12,13 @@ use super::process_details::ProcessDetails;
 use super::utilities;
 use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::base_manager::{self, BaseManager};
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::ConstEtomoNumber;
 use crate::imod::etomo::r#type::file_key::FileKey;
 use crate::imod::etomo::r#type::file_type::FileType;
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::view_type::ViewType;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::util::mrc_header::MRCHeader;
 use crate::imod::etomo::util::utilities::java_io_file_get_absolute_path;
 
@@ -357,7 +353,10 @@ impl ProcessDetails for ClipParam {
     }
 
     /// Java `getHashtable(FieldInterface)`.
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
@@ -367,7 +366,10 @@ impl ProcessDetails for ClipParam {
     }
 
     /// Java `getIntKeyList(FieldInterface)`.
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -382,7 +384,10 @@ impl ProcessDetails for ClipParam {
     }
 
     /// Java `getIteratorElementList(FieldInterface)`.
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 }

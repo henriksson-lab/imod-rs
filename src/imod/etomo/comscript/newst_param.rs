@@ -2,18 +2,7 @@
 //!
 //! Parameters for newstack (and colornewst) in prenewst.com, newst.com and their
 //! variants.
-//!
-// TODO(unit): needs etomo/type/StringParameter.java - `outputFile`, `fileOfInputs`,
-// `fileOfOutputs`, `transformFile`, `useTransformLines`, `distortionField`,
-// `gradientFile` (r#type::string_parameter::StringParameter).
-// TODO(unit): needs etomo/comscript/Utilities.java - `is90DegreeImageRotation`
-// (comscript::utilities::is_90_degree_image_rotation(f64) -> bool).
-// TODO(unit): needs FortranInputString `validateAndSet(ComScriptCommand)` and
-// `updateScriptParameter(ComScriptCommand)` (TODOs in fortran_input_string.rs) -
-// assumed as `validate_and_set_com_script(&mut self, &ComScriptCommand) ->
-// Result<(), ParseComScriptError>` and `update_script_parameter(&self, &mut
-// ComScriptCommand)`.
-//
+
 // Kept as in the source: `updateComScriptCommand` writes each `InputFile`,
 // `SectionsToRead` and `NumberToOutput` entry with `setValue`, which replaces the
 // existing keyword, so only the last entry of each list reaches the com file.
@@ -36,6 +25,7 @@ use super::process_details::ProcessDetails;
 use super::utilities;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::const_etomo_number::{ConstEtomoNumber, Number, Type};
@@ -46,7 +36,6 @@ use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::script_parameter::ScriptParameter;
 use crate::imod::etomo::r#type::string_parameter::StringParameter;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::ui::swing::ui_harness;
 use crate::imod::etomo::util::mrc_header::MRCHeader;
 
@@ -548,7 +537,7 @@ impl NewstParam {
                 header
                     .borrow_mut()
                     .read_with_manager(self.manager)
-                    .map_err(SetSizeToOutputInXandYError::HeaderRead)?;
+                    .map_err(|e| SetSizeToOutputInXandYError::HeaderRead(e.to_string()))?;
                 let header = header.borrow();
                 // Set y from columns (x)
                 self.size_to_output_in_xand_y
@@ -1299,7 +1288,10 @@ impl ProcessDetails for NewstParam {
     }
 
     /// Java `getIteratorElementList(FieldInterface)`.
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 
@@ -1342,12 +1334,18 @@ impl ProcessDetails for NewstParam {
     }
 
     /// Java `getIntKeyList(FieldInterface)`.
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
     /// Java `getHashtable(FieldInterface)`.
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 }

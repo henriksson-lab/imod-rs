@@ -71,7 +71,8 @@ pub struct ReconUIExpert {
     /// Java package-private final `dialogType`.
     pub dialog_type: DialogType,
     /// Java private final `mainPanel`.
-    main_panel: Rc<MainTomogramPanel>,
+    /// Null when eTomo runs headless (`ApplicationManager` has no main panel).
+    main_panel: Option<Rc<MainTomogramPanel>>,
     /// Java private final `processTrack`; the Java tests it for null.
     process_track: Option<&'static ProcessTrack>,
     /// Java private `dialogOutOfDate`.
@@ -85,7 +86,7 @@ impl ReconUIExpert {
     /// AxisID, DialogType)`.
     pub fn new(
         manager: &'static ApplicationManager,
-        main_panel: Rc<MainTomogramPanel>,
+        main_panel: Option<Rc<MainTomogramPanel>>,
         process_track: Option<&'static ProcessTrack>,
         axis_id: AxisID,
         dialog_type: DialogType,
@@ -124,7 +125,10 @@ impl ReconUIExpert {
             self.meta_data,
             self.axis_id,
         ) {
-            self.main_panel.show_blank_process(self.axis_id);
+            self.main_panel
+                .as_ref()
+                .unwrap()
+                .show_blank_process(self.axis_id);
             return false;
         }
         true
@@ -140,12 +144,16 @@ impl ReconUIExpert {
         action_message: Option<&str>,
     ) -> bool {
         self.main_panel
+            .as_ref()
+            .unwrap()
             .select_button(self.axis_id, &self.dialog_type.to_string());
         let dialog = match dialog {
             Some(dialog) if !self.dialog_out_of_date.get() => dialog,
             _ => return false,
         };
         self.main_panel
+            .as_ref()
+            .unwrap()
             .show_process(&dialog.get_container(), self.axis_id);
         if let Some(action_message) = action_message {
             eprintln!("{action_message}");
@@ -167,6 +175,8 @@ impl ReconUIExpert {
     ) {
         self.dialog_out_of_date.set(false);
         self.main_panel
+            .as_ref()
+            .unwrap()
             .show_process(&dialog.get_container(), self.axis_id);
         if let Some(action_message) = action_message {
             eprintln!("{action_message}");
@@ -201,10 +211,16 @@ impl ReconUIExpert {
     /// Java final package-private `leaveDialog(DialogExitState)`.
     pub fn leave_dialog(&self, exit_state: DialogExitState) {
         if exit_state == DialogExitState::Cancel {
-            self.main_panel.show_blank_process(self.axis_id);
+            self.main_panel
+                .as_ref()
+                .unwrap()
+                .show_blank_process(self.axis_id);
         } else if exit_state == DialogExitState::Postpone {
             self.set_dialog_state(ProcessState::InProgress);
-            self.main_panel.show_blank_process(self.axis_id);
+            self.main_panel
+                .as_ref()
+                .unwrap()
+                .show_blank_process(self.axis_id);
         } else if exit_state == DialogExitState::Execute {
             self.set_dialog_state(ProcessState::Complete);
             self.manager
@@ -218,11 +234,14 @@ impl ReconUIExpert {
         if let Some(process_track) = self.process_track {
             process_track.set_state_dialog_type(process_state, self.axis_id, self.dialog_type);
         }
-        self.main_panel.set_state_process_state_axis_id_dialog_type(
-            process_state,
-            self.axis_id,
-            self.dialog_type,
-        );
+        self.main_panel
+            .as_ref()
+            .unwrap()
+            .set_state_process_state_axis_id_dialog_type(
+                process_state,
+                self.axis_id,
+                self.dialog_type,
+            );
     }
 
     /// Java public final `doneDialog(DialogExitState)`.
@@ -356,7 +375,10 @@ impl ReconUIExpert {
 
     /// Java final package-private `getParallelPanel()`.
     pub fn get_parallel_panel(&self) -> Option<Rc<ParallelPanel>> {
-        self.main_panel.get_parallel_panel(self.axis_id)
+        self.main_panel
+            .as_ref()
+            .unwrap()
+            .get_parallel_panel(self.axis_id)
     }
 
     /// Java final public `setProgressBar(String, int, AxisID)`.
@@ -373,23 +395,26 @@ impl ReconUIExpert {
         axis_id: AxisID,
         _process_name: Option<ProcessName>,
     ) {
-        self.main_panel.set_progress_bar_string_int_boolean_axis_id(
-            Some(label),
-            n_steps,
-            false,
-            axis_id,
-        );
+        self.main_panel
+            .as_ref()
+            .unwrap()
+            .set_progress_bar_string_int_boolean_axis_id(Some(label), n_steps, false, axis_id);
     }
 
     /// Java final public `startProgressBar(String, AxisID)`.
     pub fn start_progress_bar(&self, label: &str, axis_id: AxisID) {
         self.main_panel
+            .as_ref()
+            .unwrap()
             .start_progress_bar_string_axis_id(Some(label), axis_id);
     }
 
     /// Java final public `stopProgressBar(AxisID)`.
     pub fn stop_progress_bar_axis_id(&self, axis_id: AxisID) {
-        self.main_panel.stop_progress_bar_axis_id(axis_id);
+        self.main_panel
+            .as_ref()
+            .unwrap()
+            .stop_progress_bar_axis_id(axis_id);
     }
 
     /// Java final public `stopProgressBar(AxisID, ProcessEndState)`.
@@ -399,6 +424,8 @@ impl ReconUIExpert {
         end_state: ProcessEndState,
     ) {
         self.main_panel
+            .as_ref()
+            .unwrap()
             .stop_progress_bar_axis_id_process_end_state(axis_id, Some(end_state));
     }
 }

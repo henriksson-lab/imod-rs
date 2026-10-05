@@ -101,7 +101,7 @@ impl FinalAlignedStackExpert {
     /// ProcessTrack, AxisID)` (FinalAlignedStackExpert.java:65).
     pub fn new(
         manager: &'static ApplicationManager,
-        main_panel: Rc<MainTomogramPanel>,
+        main_panel: Option<Rc<MainTomogramPanel>>,
         process_track: Option<&'static ProcessTrack>,
         axis_id: AxisID,
     ) -> Rc<FinalAlignedStackExpert> {

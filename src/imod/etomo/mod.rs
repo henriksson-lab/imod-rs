@@ -2,6 +2,7 @@
 
 pub mod application_manager;
 pub mod arguments;
+pub mod auto_alignment_controller;
 pub mod base_manager;
 pub mod batch_run_tomo_manager;
 pub mod comscript;
@@ -27,3 +28,4 @@ pub mod util;
 pub mod processing_method_mediator;
 pub mod ui_tester;
 pub mod peet_manager;
+pub mod plugin;

@@ -1,9 +1,6 @@
 //! `IMOD/Etomo/src/etomo/comscript/ExcludeViewsParam.java`.
 //!
 //! Parameters and run command for excludeviews batch process.
-//!
-// TODO(unit): needs etomo/type/StringParameter.java - `stackName` and `viewsToExclude`
-// (r#type::string_parameter::StringParameter).
 
 use std::path::PathBuf;
 use std::sync::Mutex;

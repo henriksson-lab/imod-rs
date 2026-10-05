@@ -9,7 +9,7 @@ import { EtomoStyle, LabeledTextField, RadioButton,
 import { EtchedBorder } from "widgets_local.slint";
 
 export component RaptorPanel inherits VerticalLayout {
-    spacing: EtomoStyle.gap;
+    spacing: EtomoStyle.row-gap;
 
     // `pnlRoot.setBorder(new EtchedBorder(RUN_RAPTOR_LABEL).getBorder())`
     // (`:141`); `RUN_RAPTOR_LABEL` is "Run RAPTOR" (`:70`).
@@ -39,8 +39,8 @@ export component RaptorPanel inherits VerticalLayout {
         }
 
         // `MARK_LABEL + ": "` and `DIAM_LABEL + " (in pixels): "` (`:68-69`).
-        LabeledTextField { label: "# of beads to choose: "; text: ""; label-width: 260px; }
-        LabeledTextField { label: "Unbinned Bead diameter (in pixels): "; text: ""; label-width: 260px; }
+        LabeledTextField { label: "# of beads to choose: "; text: ""; }
+        LabeledTextField { label: "Unbinned Bead diameter (in pixels): "; text: ""; }
 
         // `pnlRaptorButtons`.  `btnRaptor` and `btnUseRaptorResult` come from
         // the display factory (`ProcessResultDisplayFactory.java:57-61`) and

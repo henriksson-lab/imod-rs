@@ -61,6 +61,7 @@ use super::local_arguments::LocalArguments;
 use super::logic::version_control;
 use super::manager_key::ManagerKey;
 use super::parallel_manager::ParallelManager;
+use super::peet_manager::PeetManager;
 use super::process::intermittent_background_process::IntermittentBackgroundProcess;
 use super::process::process_messages::ProcessMessages;
 use super::process::process_restarter::ProcessRestarter;
@@ -82,6 +83,7 @@ use super::r#type::etomo_number::EtomoNumber;
 use super::r#type::image_filename_style::ImageFilenameStyle;
 use super::r#type::imod_version;
 use super::r#type::interface_type::InterfaceType;
+use super::r#type::join_meta_data::JoinMetaData;
 use super::r#type::meta_data::MetaData;
 use super::r#type::parallel_meta_data;
 use super::r#type::user_configuration::UserConfiguration;
@@ -95,6 +97,7 @@ use super::ui_tester::UITester;
 use super::util::clean_print::CleanPrint;
 use super::util::environment_variable;
 use super::util::event_queue::{self, EdtCell, ReentrantLock};
+use super::util::java_hash_map;
 use super::util::redactor;
 use super::util::unique_hashed_array::UniqueHashedArray;
 use super::util::unique_key::UniqueKey;
@@ -165,17 +168,13 @@ pub const FILE_INFO_DIAGNOSTICS: bool = false;
 /// Java private static final `SIMULATE_WINDOWS`.
 const SIMULATE_WINDOWS: bool = false;
 
-// TODO(unit): needs etomo/type/JoinMetaData.java - `getNewFileTitle()` returns the
-// private `newJoinTitle` (JoinMetaData.java:167).
-const JOIN_META_DATA_NEW_FILE_TITLE: &str = "New Join";
-// TODO(unit): needs etomo/type/BatchRunTomoMetaData.java - `NEW_TITLE`
-// (BatchRunTomoMetaData.java:25).
-const BATCH_RUN_TOMO_META_DATA_NEW_TITLE: &str = "Batch Run Tomo";
-// TODO(unit): needs etomo/type/PeetMetaData.java - `NEW_TITLE` (PeetMetaData.java:119).
-const PEET_META_DATA_NEW_TITLE: &str = "PEET";
-// TODO(unit): needs etomo/type/SerialSectionsMetaData.java - `NEW_TITLE`
-// (SerialSectionsMetaData.java:29).
-const SERIAL_SECTIONS_META_DATA_NEW_TITLE: &str = "Serial Sections";
+/// Java `BatchRunTomoMetaData.NEW_TITLE` (BatchRunTomoMetaData.java:25).
+const BATCH_RUN_TOMO_META_DATA_NEW_TITLE: &str = super::r#type::batch_run_tomo_meta_data::NEW_TITLE;
+/// Java `PeetMetaData.NEW_TITLE` (PeetMetaData.java:119).
+const PEET_META_DATA_NEW_TITLE: &str = super::r#type::peet_meta_data::NEW_TITLE;
+/// Java `SerialSectionsMetaData.NEW_TITLE` (SerialSectionsMetaData.java:29).
+const SERIAL_SECTIONS_META_DATA_NEW_TITLE: &str =
+    super::r#type::serial_sections_meta_data::NEW_TITLE;
 
 /// Java private field `testFailed`, kept outside the director so it can be read
 /// by code that must not reach the director (see [`is_test_failed`]).
@@ -332,7 +331,11 @@ impl EtomoDirector {
         if !grab_it {
             let headless = ARGUMENTS.lock().unwrap().is_headless();
             if headless {
-                EtomoDirector::setup();
+                // Java runs `setup()` on the main thread here.  The translation
+                // confines Swing-side state (`EdtCell`) to the event dispatch
+                // thread, which the process monitors post to, so the same call
+                // runs there while this thread waits for it.
+                event_queue::invoke_and_wait(EtomoDirector::setup);
                 // The JVM waits for the non-daemon UtilityThread.
                 let handle = INSTANCE.utility_thread_handle.lock().unwrap().take();
                 if let Some(handle) = handle {
@@ -363,12 +366,7 @@ impl EtomoDirector {
                 }
             }
         } else {
-            // ProcessMessages.grabIt(): reads each argument file; the parsed
-            // messages are returned to this caller, which has no use for them.
-            let arguments = ARGUMENTS.lock().unwrap().clone();
-            if let Err(error) = ProcessMessages::grab_it(&arguments) {
-                eprintln!("{}", error);
-            }
+            ProcessMessages::grab_it();
         }
     }
 
@@ -440,7 +438,7 @@ impl EtomoDirector {
             Ok(parameter_store) => {
                 let mut store = self.parameter_store.lock().unwrap();
                 *store = parameter_store;
-                if let Some(store) = store.as_ref() {
+                if let Some(store) = store.as_mut() {
                     let _guard = USER_CONFIG.lock.lock();
                     store.load(&USER_CONFIG.value);
                 }
@@ -512,9 +510,9 @@ impl EtomoDirector {
             eprintln!("\nEnvironment variables:\n");
             let is_test = ARGUMENTS.lock().unwrap().is_test();
             if !is_test {
-                for (key, value) in std::env::vars_os() {
-                    let key = key.to_string_lossy().into_owned();
-                    let value = value.to_string_lossy().into_owned();
+                // `System.getenv().keySet()` iterates a Java `HashMap` built from
+                // `environ`; `java_lang_system_getenv` reproduces that order.
+                for (key, value) in java_hash_map::java_lang_system_getenv() {
                     // value.split("\\R"): a split with no match is the whole
                     // input; otherwise trailing empty strings are dropped.
                     let mut array: Vec<&str> = line_break.split(&value).collect();
@@ -1216,7 +1214,7 @@ impl EtomoDirector {
     ) -> Option<Arc<Mutex<ManagerKey>>> {
         self.close_default_window(axis_id);
         self.open_join_string_boolean_axis_id(
-            Some(JOIN_META_DATA_NEW_FILE_TITLE),
+            Some(JoinMetaData::get_new_file_title()),
             make_current,
             axis_id,
         )
@@ -1475,7 +1473,7 @@ impl EtomoDirector {
     ) -> Option<Arc<Mutex<ManagerKey>>> {
         let manager: &'static JoinManager;
         if etomo_join_file_name.is_none()
-            || etomo_join_file_name == Some(JOIN_META_DATA_NEW_FILE_TITLE)
+            || etomo_join_file_name == Some(JoinMetaData::get_new_file_title())
         {
             manager = JoinManager::new(Some(""), axis_id);
             ui_harness::with(|harness| harness.set_enabled_new_join_menu_item(false));
@@ -1541,25 +1539,28 @@ impl EtomoDirector {
         make_current: bool,
         axis_id: Option<AxisID>,
     ) -> Option<Arc<Mutex<ManagerKey>>> {
-        // TODO(unit): needs etomo/PeetManager.java - the body is
-        //   final PeetManager manager;
-        //   if (peetFileName == null || peetFileName.equals(PeetMetaData.NEW_TITLE)) {
-        //     manager = PeetManager.getInstance();
-        //     UIHarness.INSTANCE.setEnabledNewPeetMenuItem(false);
-        //   }
-        //   else {
-        //     manager = PeetManager.getInstance(peetFileName);
-        //   }
-        //   ManagerKey key = setManager(manager, axisID, makeCurrent);
-        //   manager.display();
-        //   if (!manager.isValid()) {
-        //     closeCurrentManager(AxisID.ONLY, false);
-        //     return null;
-        //   }
-        //   return key;
-        // Without the manager no PEET interface is opened.
-        let _ = (peet_file_name, make_current, axis_id);
-        None
+        let manager: &'static PeetManager;
+        if peet_file_name.is_none() || peet_file_name == Some(PEET_META_DATA_NEW_TITLE) {
+            manager = PeetManager::get_instance();
+            ui_harness::with(|harness| harness.set_enabled_new_peet_menu_item(false));
+        } else {
+            manager = PeetManager::get_instance_string(peet_file_name);
+        }
+        let key = self.set_manager(manager, axis_id, make_current);
+        manager.display();
+        // Java's `display()` blocks in the modal startup dialog until it is closed;
+        // the validity check runs then (PeetManager::after_display).  The key is
+        // returned at once; Java returns null for a manager that turned out
+        // invalid, which none of the callers reads.
+        manager.after_display(Box::new(move || {
+            if !BaseManager::is_valid(manager) {
+                INSTANCE.close_current_manager(Some(AxisID::Only), false);
+            }
+        }));
+        if !BaseManager::is_valid(manager) && manager.get_peet_startup_dialog().is_none() {
+            return None;
+        }
+        key
     }
 
     /// Java private `openSerialSections(String, boolean, AxisID)`.
@@ -1581,8 +1582,15 @@ impl EtomoDirector {
         }
         let key = self.set_manager(manager, axis_id, make_current);
         manager.display();
+        // Java's `display()` returns only once the modal startup dialog is closed; the
+        // check after it runs then (`SerialSectionsManager.display_then`), at once
+        // when no startup dialog is showing.
+        manager.display_then(Box::new(move || {
+            if !BaseManager::is_valid(manager) {
+                INSTANCE.close_current_manager(Some(AxisID::Only), false);
+            }
+        }));
         if !BaseManager::is_valid(manager) {
-            self.close_current_manager(Some(AxisID::Only), false);
             return None;
         }
         key
@@ -1930,7 +1938,7 @@ impl EtomoDirector {
         };
         if key.get_name() == MetaData::get_new_file_title() {
             ui_harness::with(|harness| harness.set_enabled_new_tomogram_menu_item(true));
-        } else if key.get_name() == JOIN_META_DATA_NEW_FILE_TITLE {
+        } else if key.get_name() == JoinMetaData::get_new_file_title() {
             ui_harness::with(|harness| harness.set_enabled_new_join_menu_item(true));
         } else if key.get_name() == parallel_meta_data::NEW_GENERIC_PARALLEL_PROCESS_TITLE {
             ui_harness::with(|harness| harness.set_enabled_new_generic_parallel_menu_item(true));

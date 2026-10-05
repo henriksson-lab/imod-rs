@@ -861,10 +861,15 @@ impl FinalAlignedStackDialog {
             .add_action_listener(self.final_aligned_stack_listener.clone());
         // Mouse adapter for context menu
         let context_menu: Weak<dyn ContextMenu> = self.this.clone();
-        let _mouse_adapter = GenericMouseAdapter::new(context_menu);
-        // Swing events: rootPanel.addMouseListener(mouseAdapter);
-        // tabbedPane.addMouseListener(mouseAdapter) - mouse events are not
-        // modelled by the Swing stand-in.
+        let mouse_adapter: Rc<dyn crate::imod::etomo::jdk::MouseListener> =
+            GenericMouseAdapter::new(context_menu);
+        self.base
+            .root_panel
+            .get_component()
+            .add_mouse_listener(mouse_adapter.clone());
+        self.tabbed_pane
+            .get_component()
+            .add_mouse_listener(mouse_adapter);
     }
 
     /// Java public static `getTilt3dFindButtonLabel()`.
@@ -2439,7 +2444,6 @@ impl FinalAlignedStackDialog {
             "{}{}",
             "Use the results of running mtffilter as the new full ", "aligned stack."
         )));
-        autodoc = None;
         match unsafe {
             autodoc_factory::get_instance(
                 Some(manager),
@@ -2454,8 +2458,8 @@ impl FinalAlignedStackDialog {
             // catch (final LogFileException | IOException except)
             Err(except) => eprintln!("{except}"),
         }
-        // Java keeps the previous (mtffilter) autodoc when this lookup fails:
-        // `autodoc` is only reassigned on success.  See the note below.
+        // `autodoc` is only reassigned on success, so a failed lookup keeps the
+        // previous autodoc, as in the source.
         if let Some(autodoc_ptr) = autodoc {
             let autodoc_ref: &dyn ReadOnlyAutodoc = unsafe { &*autodoc_ptr };
             Field::set_tool_tip_text(
@@ -2546,7 +2550,6 @@ impl FinalAlignedStackDialog {
         }
         self.btn_ctf_plotter
             .set_tool_tip_text(Some("Run ctfplotter"));
-        autodoc = None;
         match unsafe {
             autodoc_factory::get_instance(
                 Some(manager),
@@ -2635,17 +2638,6 @@ impl FinalAlignedStackDialog {
                 .unwrap_or_else(|| "null".to_string()),
             ctf_corrected_file_name
         )));
-        // Note on the Java's autodoc reuse: `autodoc` is a single local that is
-        // reassigned only when `AutodocFactory.getInstance` succeeds, so a failed
-        // ctfplotter (or ctfphaseflip) lookup leaves the previous autodoc in
-        // place and the Java then reads ctfplotter keys from the mtffilter
-        // autodoc (which has none, so every tooltip is null and the "Also used
-        // in" ones read "null  Also used in ...").  Here a failed lookup skips
-        // the block; the only difference is that those fields keep no tooltip
-        // instead of a null / "null ..." one.
-        // TODO(unit): confirm against etomo/type/EtomoAutodoc.java whether a
-        // lookup of a missing field returns null (then the two agree up to the
-        // "null  Also used in" text).
     }
 }
 

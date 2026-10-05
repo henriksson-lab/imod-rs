@@ -27,6 +27,7 @@ use super::parallel_param::ParallelParam;
 use super::process_details::ProcessDetails;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::storage::cpu_adoc;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::storage::network::Network;
 use crate::imod::etomo::storage::pc_option_type::PcOptionType;
 use crate::imod::etomo::r#type::axis_id::AxisID;
@@ -41,9 +42,9 @@ use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::queue_mode::QueueMode;
 use crate::imod::etomo::r#type::queue_type::QueueType;
 use crate::imod::etomo::r#type::substitution_string::SubstitutionString;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::ui::swing::ui_harness;
 use crate::imod::etomo::util::dataset_files;
+use crate::imod::etomo::util::java_hash_map::JavaHashMap;
 use crate::imod::etomo::util::remote_path;
 use crate::imod::etomo::util::utilities;
 
@@ -1020,16 +1021,19 @@ impl ProcesschunksParam {
 
     /// Java `reorderComputerMapGpuFirst`.
     ///
-    /// The source copies the map into a `HashMap`, moves the first
-    /// GPU-available computer it meets in that (unspecified) order to the front,
-    /// and re-adds the rest in `HashMap` order.  Here the scan and the remainder
-    /// follow the machine map's own insertion order, which is one of the orders
-    /// the source can produce.
+    /// `tempMachineMap` is `new HashMap<String, Element>(machineMap)`, so the
+    /// computers are tested, and the rest re-added after the first GPU computer, in
+    /// Java's `HashMap` order (`JavaHashMap`), not in the machine map's own order.
     pub fn reorder_computer_map_gpu_first(&self) -> bool {
         let mut state = self.state.lock().unwrap();
-        let temp_machine_map = state.machine_map.clone();
+        let mut temp_machine_map: JavaHashMap<String, Element> =
+            JavaHashMap::from_map(state.machine_map.iter().cloned());
+        let machine_set: Vec<(String, Element)> = temp_machine_map
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
         let mut gpu_found = false;
-        for (index, machine) in temp_machine_map.iter().enumerate() {
+        for machine in machine_set {
             if Network::is_gpu_available(
                 &machine.0,
                 self.manager,
@@ -1037,10 +1041,16 @@ impl ProcesschunksParam {
                 self.manager.get_property_user_dir().as_deref(),
             ) {
                 state.machine_map.clear();
-                let mut rest = temp_machine_map.clone();
-                rest.remove(index);
-                state.machine_map.push(machine.clone());
-                state.machine_map.extend(rest);
+                temp_machine_map.remove(&machine.0);
+
+                state.machine_map.push(machine);
+                // `machineMap.putAll(tempMachineMap)`: a `LinkedHashMap` appends
+                // the new keys in `tempMachineMap`'s iteration order.
+                state.machine_map.extend(
+                    temp_machine_map
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone())),
+                );
                 gpu_found = true;
                 break;
             }
@@ -1265,7 +1275,10 @@ impl ProcessDetails for ProcesschunksParam {
         None
     }
 
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 
@@ -1281,7 +1294,10 @@ impl ProcessDetails for ProcesschunksParam {
         None
     }
 
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
@@ -1293,7 +1309,10 @@ impl ProcessDetails for ProcesschunksParam {
         None
     }
 
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 }

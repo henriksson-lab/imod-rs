@@ -198,11 +198,10 @@ impl Run3dmodButton {
     }
 
     /// Java private `addListeners()`.
-    fn add_listeners(&self) {
-        // Swing mouse: addMouseListener(new GenericMouseAdapter(this)).  Mouse
-        // events are not modelled; the adapter's only effect is to call
-        // popUpContextMenu on a right-button press, which a driver calls
-        // directly.
+    fn add_listeners(self: &Rc<Self>) {
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.base
+            .add_mouse_listener(super::generic_mouse_adapter::GenericMouseAdapter::new(context_menu));
     }
 
     /// Java public `setDeferred3dmodButton(Deferred3dmodButton)`.

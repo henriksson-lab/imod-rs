@@ -3,9 +3,8 @@
 //! Parent class for meta data classes.
 //!
 //! **Representation.**  `BaseMetaData` is an abstract class with five abstract methods
-//! (`getMetaDataFileName`, `getName`, `getDatasetName`, `isValid`, `getGroupKey`) whose
-//! concrete subclasses - `MetaData`, `JoinMetaData`, `PeetMetaData` and the rest - are
-//! not translated.  As in `etomo/storage/autodoc/statement.rs`, the class splits into
+//! (`getMetaDataFileName`, `getName`, `getDatasetName`, `isValid`, `getGroupKey`),
+//! implemented by `MetaData`, `JoinMetaData`, `PeetMetaData` and the rest.  As in `etomo/storage/autodoc/statement.rs`, the class splits into
 //! the `BaseMetaData` trait (the abstract methods plus every method that calls one) and
 //! `BaseMetaDataBase` (the fields it declares), reached through `base()`.
 //!
@@ -636,7 +635,7 @@ impl BaseMetaDataBase {
     /// `canCorrectImageFilenameStyle` test.
     pub fn load_with_created_prepend(
         &self,
-        props: &BTreeMap<String, String>,
+        props: &mut BTreeMap<String, String>,
         prepend: Option<&str>,
     ) -> bool {
         // reset

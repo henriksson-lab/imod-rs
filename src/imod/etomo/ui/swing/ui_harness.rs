@@ -174,18 +174,6 @@ pub enum MessageType {
     Error,
 }
 
-/// `ProcessMessages.print(MessageType)` as a list of lines, for callers that
-/// hold a `ProcessMessages` through this interface.
-pub trait ProcessMessagesBoundary {
-    fn print(&self, message_type: Option<MessageType>) -> Vec<String>;
-}
-
-/// A caller-side stand-in for a `UIComponent` parent that cannot cross to
-/// the event dispatch thread (`logic/dataset_tool.rs`).
-pub trait UiComponentBoundary {
-    fn has_component(&self) -> bool;
-}
-
 // ---------------------------------------------------------------------------
 // UIHarness
 // ---------------------------------------------------------------------------
@@ -455,6 +443,13 @@ impl UIHarness {
             .borrow()
             .as_ref()
             .map(|main_frame| main_frame.get_root_component())
+    }
+
+    /// The `ManagerFrame`s in `managerFrameTable` (Rust-only plumbing for the Slint
+    /// bridge and the click driver, which list the frames as `Window.getWindows()`
+    /// does), with their managers, in the order they were added.
+    pub fn get_manager_frames(&self) -> Vec<(&'static dyn BaseManager, Rc<ManagerFrame>)> {
+        self.manager_frame_table.borrow().clone()
     }
 
     /// Menu events recorded from the Slint main window, in event-loop order.
@@ -2231,15 +2226,7 @@ impl UIHarness {
         axis_id: Option<AxisID>,
     ) {
         self.log_header(title, axis_id);
-        // Java `ProcessMessages.print(MessageType)`: prints the list to stderr only
-        // when DEBUG (`--debug`) is set.
-        let printed = match process_messages.print(process_messages::MessageType::Error) {
-            Some(text) if etomo_director::ARGUMENTS.lock().unwrap().is_debug() => {
-                eprintln!("{text}");
-                true
-            }
-            _ => false,
-        };
+        let printed = process_messages.print(Some(process_messages::MessageType::Error));
         if printed {
             eprintln!();
         }
@@ -2261,17 +2248,7 @@ impl UIHarness {
             // printed || processMessages.print(...)`, which stops printing the
             // remaining lists as soon as one list printed; every list is
             // printed here.
-            let printed_list = list_type.is_some_and(|list_type| {
-                // Java `ProcessMessages.print(ListType)`: prints the list to
-                // stderr only when DEBUG (`--debug`) is set.
-                match process_messages.print_list(list_type) {
-                    Some(text) if etomo_director::ARGUMENTS.lock().unwrap().is_debug() => {
-                        eprintln!("{text}");
-                        true
-                    }
-                    _ => false,
-                }
-            });
+            let printed_list = process_messages.print_list_type(Some(list_type));
             printed = printed_list || printed;
         }
         if printed {
@@ -2287,15 +2264,7 @@ impl UIHarness {
         axis_id: Option<AxisID>,
     ) {
         self.log_header(title, axis_id);
-        // Java `ProcessMessages.print(MessageType)`: prints the list to stderr only
-        // when DEBUG (`--debug`) is set.
-        let printed = match process_messages.print(process_messages::MessageType::Info) {
-            Some(text) if etomo_director::ARGUMENTS.lock().unwrap().is_debug() => {
-                eprintln!("{text}");
-                true
-            }
-            _ => false,
-        };
+        let printed = process_messages.print(Some(process_messages::MessageType::Info));
         if printed {
             eprintln!();
         }
@@ -2309,15 +2278,7 @@ impl UIHarness {
         axis_id: Option<AxisID>,
     ) {
         self.log_header(title, axis_id);
-        // Java `ProcessMessages.print(MessageType)`: prints the list to stderr only
-        // when DEBUG (`--debug`) is set.
-        let printed = match process_messages.print(process_messages::MessageType::Warning) {
-            Some(text) if etomo_director::ARGUMENTS.lock().unwrap().is_debug() => {
-                eprintln!("{text}");
-                true
-            }
-            _ => false,
-        };
+        let printed = process_messages.print(Some(process_messages::MessageType::Warning));
         if printed {
             eprintln!();
         }
@@ -2375,28 +2336,6 @@ impl UIHarness {
 // Process-thread entry points (kept with their existing signatures)
 // ---------------------------------------------------------------------------
 
-/// `ProcessMessages.print(MessageType)` as `UIHarness`'s logging reads it.
-impl ProcessMessagesBoundary for ProcessMessages {
-    fn print(&self, message_type: Option<MessageType>) -> Vec<String> {
-        use crate::imod::etomo::process::process_messages::MessageType as PmType;
-        let types: &[PmType] = match message_type {
-            Some(MessageType::Error) => &[PmType::Error],
-            Some(MessageType::Warning) => &[PmType::Warning],
-            Some(MessageType::Info) => &[PmType::Info],
-            _ => &[PmType::Error, PmType::Warning, PmType::Info],
-        };
-        let mut lines = Vec::new();
-        for ty in types {
-            for index in 0..self.size(*ty) {
-                if let Some(line) = self.get(*ty, index) {
-                    lines.push(line.to_owned());
-                }
-            }
-        }
-        lines
-    }
-}
-
 /// Runs `call` on the event dispatch thread's harness: directly when already
 /// there, otherwise with the calling thread's own harness, which has no main
 /// frame and so logs (the Java calls `UIHarness` from process threads
@@ -2436,19 +2375,36 @@ pub fn open_message_dialog_from_process(
 }
 
 /// `UIHarness.INSTANCE.openMessageDialog(BaseManager, UIComponent, String,
-/// String[, AxisID])` from any thread.  The component only parents the
-/// popup (and, for a manager in its own frame, puts the popup on the main
-/// frame); it cannot cross threads, so the popup is parented by the manager's
-/// frame.
+/// String, AxisID)`.  A `UIComponent` is an event dispatch thread object, so a
+/// call that carries one is on that thread; one without a component may come
+/// from any thread and goes through [`open_message_dialog_from_process`].
 pub fn open_message_dialog_with_component_from_process(
     manager: Option<&'static dyn BaseManager>,
-    ui_component: Option<&dyn UiComponentBoundary>,
+    ui_component: Option<&dyn crate::imod::etomo::ui::ui_component::UIComponent>,
     message: &str,
     title: &str,
     axis_id: Option<AxisID>,
 ) {
-    let _ = ui_component;
-    open_message_dialog_from_process(manager, message, title, axis_id);
+    let Some(ui_component) = ui_component else {
+        open_message_dialog_from_process(manager, message, title, axis_id);
+        return;
+    };
+    with(|harness| match axis_id {
+        Some(axis_id) => harness
+            .open_message_dialog_base_manager_ui_component_string_string_axis_id(
+                manager,
+                Some(ui_component),
+                message,
+                title,
+                Some(axis_id),
+            ),
+        None => harness.open_message_dialog_base_manager_ui_component_string_string(
+            manager,
+            Some(ui_component),
+            message,
+            title,
+        ),
+    });
 }
 
 /// `UIHarness.INSTANCE.openInfoMessageDialog(BaseManager, String, String,
@@ -2480,7 +2436,7 @@ pub fn open_info_message_dialog_from_process(
 
 /// `UIHarness.INSTANCE.openErrorMessageDialog(BaseManager, ProcessMessages,
 /// String, AxisID)`; run on the event dispatch thread (see
-/// [`post_error_message_dialog`]).
+/// [`open_error_message_dialog_and_wait`]).
 pub fn open_error_message_dialog_from_process(
     manager: Option<&'static dyn BaseManager>,
     messages: &ProcessMessages,
@@ -2529,15 +2485,22 @@ pub fn post_message_dialog(
     });
 }
 
-/// Posts [`open_error_message_dialog_from_process`] to the event dispatch
-/// thread.
-pub fn post_error_message_dialog(
+/// Runs [`open_error_message_dialog_from_process`] on the event dispatch
+/// thread and waits until the dialog is closed: the Java opens this modal
+/// dialog from the process's own thread (`msgComScriptDone`,
+/// `msgProcessDone`, `BackgroundProcess.processDone`), which blocks there
+/// until it is answered, so what the thread does next (`errorProcess`,
+/// `clearThread`, which interrupts the process monitor) happens after the
+/// monitor has been mapped.  Posting it and carrying on cleared the thread
+/// before a fast-failing com script's monitor was mapped, which then never
+/// stopped (the axis stayed busy).
+pub fn open_error_message_dialog_and_wait(
     manager: Option<&'static dyn BaseManager>,
     messages: ProcessMessages,
     title: String,
     axis_id: AxisID,
 ) {
-    event_queue::invoke_later(move || {
+    event_queue::invoke_and_wait(move || {
         open_error_message_dialog_from_process(manager, &messages, &title, axis_id);
     });
 }

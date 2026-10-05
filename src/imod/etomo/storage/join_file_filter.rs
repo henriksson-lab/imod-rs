@@ -33,6 +33,17 @@ impl JoinFileFilter {
     }
 }
 
+/// Java `FileFilter` (the chooser filter the main panel hands out).
+impl crate::imod::etomo::jdk::FileFilter for JoinFileFilter {
+    fn accept(&self, file: &Path) -> bool {
+        JoinFileFilter::accept(self, file)
+    }
+
+    fn get_description(&self) -> Option<String> {
+        Some(JoinFileFilter::get_description(self).to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

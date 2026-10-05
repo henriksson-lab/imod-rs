@@ -11,8 +11,12 @@
 // — and the warnings are expected.
 
 // The frame and the two shared panel bases.
-import { MainFrame, MainFrameWindow, EtomoBridge, TextPageWindowWindow } from "MainFrame.slint";
-import { OptionPaneWindow } from "OptionPaneWindow.slint";
+import { MainFrame, MainFrameWindow, EtomoBridge, TextPageWindowWindow, TabbedTextWindowWindow, ParallelPanelRow,
+         BridgedTableRow, BridgedTableCell, BridgedPopupItem, DirectiveSectionData, DirectivePanelData } from "MainFrame.slint";
+import { ParallelPanel } from "ParallelPanel.slint";
+import { OptionPaneWindow, HtmlLine, HtmlRun } from "OptionPaneWindow.slint";
+import { FileChooserWindow } from "FileChooserWindow.slint";
+import { SubFrameWindow } from "SubFrame.slint";
 import { MainPanel } from "MainPanel.slint";
 import { AxisProcessPanel } from "AxisProcessPanel.slint";
 
@@ -39,8 +43,12 @@ import { BatchRunTomoProcessPanel, BatchRunTomoProcessPanelWindow } from "BatchR
 import { DirectiveEditorProcessPanel, DirectiveEditorProcessPanelWindow } from "DirectiveEditorProcessPanel.slint";
 import { DirectivesProcessPanel, DirectivesProcessPanelWindow } from "DirectivesProcessPanel.slint";
 
-export { MainFrame, MainFrameWindow, EtomoBridge, TextPageWindowWindow }
-export { OptionPaneWindow }
+export { MainFrame, MainFrameWindow, EtomoBridge, TextPageWindowWindow, TabbedTextWindowWindow, ParallelPanelRow,
+         BridgedTableRow, BridgedTableCell, BridgedPopupItem, DirectiveSectionData, DirectivePanelData }
+export { ParallelPanel }
+export { OptionPaneWindow, HtmlLine, HtmlRun }
+export { FileChooserWindow }
+export { SubFrameWindow }
 export { MainPanel }
 export { AxisProcessPanel }
 

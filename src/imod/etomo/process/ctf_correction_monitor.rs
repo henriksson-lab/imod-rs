@@ -100,7 +100,7 @@ impl FileSizeProcessMonitorImpl for CtfCorrectionMonitor {
         let mut output_header = output_header.borrow_mut();
         if !output_header
             .read_with_manager(manager)
-            .map_err(CalcFileSizeError::Io)?
+            .map_err(CalcFileSizeError::from)?
         {
             return Ok(false);
         }
@@ -115,7 +115,12 @@ impl FileSizeProcessMonitorImpl for CtfCorrectionMonitor {
         base.n_k_bytes.store(n_k_bytes, Ordering::SeqCst);
         let title = self.get_title(base);
         manager.post_main_panel(Box::new(move |panel| {
-            panel.set_progress_bar_string_int_boolean_axis_id(Some(&title), n_k_bytes, false, axis_id);
+            panel.set_progress_bar_string_int_boolean_axis_id(
+                Some(&title),
+                n_k_bytes,
+                false,
+                axis_id,
+            );
         }));
         Ok(true)
     }

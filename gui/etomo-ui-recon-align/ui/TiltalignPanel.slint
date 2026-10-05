@@ -9,7 +9,7 @@
 // static default.
 
 import { EtomoStyle, LabeledTextField, CheckBox, RadioButton, PanelHeader,
-         TabbedPane } from "../../etomo-ui-common/ui/widgets.slint";
+         TabbedPane, BridgedTabbedPane } from "../../etomo-ui-common/ui/widgets.slint";
 import { EtchedBorder, RadioTextField, CheckTextField, SingleLineButton }
     from "widgets_local.slint";
 
@@ -20,13 +20,13 @@ export component TiltalignPanel inherits VerticalLayout {
 
     EtchedBorder {
         title: "Tiltalign Parameters";
-        TabbedPane {
+        tiltalign-tabs := BridgedTabbedPane {
             tabs: ["General", "Global Variables", "Local Variables"];
             current: root.tab;
 
             // ---- General (`createGeneralTab`) ----
-            if root.tab == 0: VerticalLayout {
-                spacing: EtomoStyle.gap;
+            if tiltalign-tabs.shown-current == 0: VerticalLayout {
+                spacing: EtomoStyle.row-gap;
                 padding: EtomoStyle.inset;
                 LabeledTextField { label: "List of views to exclude: "; text: ""; }
                 LabeledTextField { label: "Separate view groups: "; text: ""; }
@@ -34,8 +34,7 @@ export component TiltalignPanel inherits VerticalLayout {
                     title: "Residual Reporting";
                     HorizontalLayout {
                         spacing: EtomoStyle.gap;
-                        alignment: start;
-                        LabeledTextField { label: "Threshold for residual report: "; text: "3.0"; label-width: 210px; }
+                        LabeledTextField { label: "Threshold for residual report: "; text: "3.0"; }
                         Text { text: "s.d."; vertical-alignment: center; }
                     }
                     HorizontalLayout {
@@ -67,9 +66,8 @@ export component TiltalignPanel inherits VerticalLayout {
                     }
                     HorizontalLayout {
                         spacing: 3px;
-                        alignment: start;
-                        LabeledTextField { label: "Metro factor: "; text: "0.25"; label-width: 90px; }
-                        LabeledTextField { label: "Iteration limit: "; text: "1000"; label-width: 90px; }
+                        LabeledTextField { label: "Metro factor: "; text: "0.25"; }
+                        LabeledTextField { label: "Iteration limit: "; text: "1000"; }
                     }
                 }
                 EtchedBorder {
@@ -80,13 +78,13 @@ export component TiltalignPanel inherits VerticalLayout {
                         EtchedBorder {
                             title: "Local Patch Layout:";
                             RadioTextField { label: "Target patch size (x,y): "; text: "700,700"; selected: true; }
-                            RadioTextField { label: "# of local patches (x,y): "; text: "5,5"; }
+                            RadioTextField { label: "# of local patches (x,y): "; labels: "# of local patches (x,y): |# of full-field patches (x, y)"; text: "5,5"; }
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
+                            spacing: EtomoStyle.row-gap;
                             LabeledTextField { label: "Overlap factor (x,y): "; text: "0.5,0.5"; }
-                            LabeledTextField { label: "Min. # of fiducials (total, each surface): "; text: "8,3"; label-width: 240px; }
+                            LabeledTextField { label: "Min. # of fiducials (total, each surface): "; text: "8,3"; }
                             CheckBox { text: "Use global X-Y-Z coordinates"; checked: true; }
                         }
                     }
@@ -110,9 +108,8 @@ export component TiltalignPanel inherits VerticalLayout {
                     }
                     HorizontalLayout {
                         spacing: 10px;
-                        alignment: start;
-                        LabeledTextField { label: "Fallback ratio of measurements to unknowns:  Target "; text: ""; label-width: 300px; }
-                        LabeledTextField { label: "Minimum "; text: ""; label-width: 60px; }
+                        LabeledTextField { label: "Fallback ratio of measurements to unknowns:  Target "; text: ""; }
+                        LabeledTextField { label: "Minimum "; text: ""; }
                     }
                     HorizontalLayout {
                         alignment: center;
@@ -122,8 +119,8 @@ export component TiltalignPanel inherits VerticalLayout {
             }
 
             // ---- Global Variables (`createGlobalSolutionTab`) ----
-            if root.tab == 1: VerticalLayout {
-                spacing: EtomoStyle.gap;
+            if tiltalign-tabs.shown-current == 1: VerticalLayout {
+                spacing: EtomoStyle.row-gap;
                 padding: EtomoStyle.inset;
                 // `createVariablePanel`: button column, a 40px rigid area, then the
                 // column of fields; the solution type is the etched border title.
@@ -141,7 +138,7 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
+                            spacing: EtomoStyle.row-gap;
                             LabeledTextField { label: "Rotation angle: "; text: "0.0"; }
                             LabeledTextField { label: "Group size: "; text: "5"; }
                             LabeledTextField { label: "Non-default grouping: "; text: ""; }
@@ -163,7 +160,7 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
+                            spacing: EtomoStyle.row-gap;
                             LabeledTextField { label: "Reference view: "; text: "1"; }
                             LabeledTextField { label: "Group size: "; text: "4"; }
                             LabeledTextField { label: "Non-default grouping: "; text: ""; }
@@ -185,7 +182,7 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
+                            spacing: EtomoStyle.row-gap;
                             LabeledTextField { label: "Group size: "; text: "5"; }
                             LabeledTextField { label: "Non-default grouping: "; text: ""; }
                         }
@@ -206,11 +203,11 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
-                            LabeledTextField { label: "X stretch group size: "; text: "7"; label-width: 210px; }
-                            LabeledTextField { label: "X stretch non-default grouping: "; text: ""; label-width: 210px; }
-                            LabeledTextField { label: "Skew group size: "; text: "11"; label-width: 210px; }
-                            LabeledTextField { label: "Skew non-default grouping: "; text: ""; label-width: 210px; }
+                            spacing: EtomoStyle.row-gap;
+                            LabeledTextField { label: "X stretch group size: "; text: "7"; }
+                            LabeledTextField { label: "X stretch non-default grouping: "; text: ""; }
+                            LabeledTextField { label: "Skew group size: "; text: "11"; }
+                            LabeledTextField { label: "Skew non-default grouping: "; text: ""; }
                         }
                     }
                 }
@@ -222,33 +219,37 @@ export component TiltalignPanel inherits VerticalLayout {
                     border-color: EtomoStyle.border;
                     VerticalLayout {
                         padding: EtomoStyle.inset;
-                        spacing: EtomoStyle.gap;
-                        PanelHeader { title: "Single Variables: Beam Tilt, X Tilt, Projection Stretch"; }
-                        // `createGlobalSolutionTab` adds `pnlBeamTiltRadioButtons`
-                        // to `pnlSingleVariablesBody` twice; in Swing the second
-                        // add just re-parents the same component, so it appears
-                        // once.  Added once here.
-                        Rectangle {
-                            background: EtomoStyle.panel;
-                            border-width: 1px;
-                            border-color: EtomoStyle.border;
-                            VerticalLayout {
-                                padding: EtomoStyle.inset;
-                                spacing: EtomoStyle.gap;
-                                RadioButton { text: "No beam tilt"; selected: true; }
-                                RadioTextField { label: "Fixed beam tilt (degrees): "; text: "0.0"; }
-                                RadioButton { text: "Solve for beam tilt"; }
+                        spacing: EtomoStyle.row-gap;
+                        ph-body-7 := PanelHeader { title: "Single Variables: Beam Tilt, X Tilt, Projection Stretch"; }
+                        // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+                        if ph-body-7.shown-open: VerticalLayout {
+                            spacing: EtomoStyle.row-gap;
+                            // `createGlobalSolutionTab` adds `pnlBeamTiltRadioButtons`
+                            // to `pnlSingleVariablesBody` twice; in Swing the second
+                            // add just re-parents the same component, so it appears
+                            // once.  Added once here.
+                            Rectangle {
+                                background: EtomoStyle.panel;
+                                border-width: 1px;
+                                border-color: EtomoStyle.border;
+                                VerticalLayout {
+                                    padding: EtomoStyle.inset;
+                                    spacing: EtomoStyle.row-gap;
+                                    RadioButton { text: "No beam tilt"; selected: true; }
+                                    RadioTextField { label: "Fixed beam tilt (degrees): "; text: "0.0"; }
+                                    RadioButton { text: "Solve for beam tilt"; }
+                                }
                             }
+                            CheckBox { text: "Solve for X axis tilt between separate groups"; }
+                            CheckBox { text: "Solve for single stretch during projection"; }
                         }
-                        CheckBox { text: "Solve for X axis tilt between separate groups"; }
-                        CheckBox { text: "Solve for single stretch during projection"; }
                     }
                 }
             }
 
             // ---- Local Variables (`createLocalSolutionTab`) ----
-            if root.tab == 2: VerticalLayout {
-                spacing: EtomoStyle.gap;
+            if tiltalign-tabs.shown-current == 2: VerticalLayout {
+                spacing: EtomoStyle.row-gap;
                 padding: EtomoStyle.inset;
                 // `createVariablePanel`: button column, a 40px rigid area, then the
                 // column of fields; the solution type is the etched border title.
@@ -263,7 +264,7 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
+                            spacing: EtomoStyle.row-gap;
                             LabeledTextField { label: "Group size: "; text: "6"; }
                             LabeledTextField { label: "Non-default grouping: "; text: ""; }
                         }
@@ -282,7 +283,7 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
+                            spacing: EtomoStyle.row-gap;
                             LabeledTextField { label: "Group size: "; text: "7"; }
                             LabeledTextField { label: "Non-default grouping: "; text: ""; }
                         }
@@ -301,7 +302,7 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
+                            spacing: EtomoStyle.row-gap;
                             LabeledTextField { label: "Group size: "; text: "6"; }
                             LabeledTextField { label: "Non-default grouping: "; text: ""; }
                         }
@@ -322,11 +323,11 @@ export component TiltalignPanel inherits VerticalLayout {
                         }
                         VerticalLayout {
                             alignment: start;
-                            spacing: EtomoStyle.gap;
-                            LabeledTextField { label: "X stretch group size: "; text: "7"; label-width: 210px; }
-                            LabeledTextField { label: "X stretch non-default grouping: "; text: ""; label-width: 210px; }
-                            LabeledTextField { label: "Skew group size: "; text: "11"; label-width: 210px; }
-                            LabeledTextField { label: "Skew non-default grouping: "; text: ""; label-width: 210px; }
+                            spacing: EtomoStyle.row-gap;
+                            LabeledTextField { label: "X stretch group size: "; text: "7"; }
+                            LabeledTextField { label: "X stretch non-default grouping: "; text: ""; }
+                            LabeledTextField { label: "Skew group size: "; text: "11"; }
+                            LabeledTextField { label: "Skew non-default grouping: "; text: ""; }
                         }
                     }
                 }

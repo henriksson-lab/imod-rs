@@ -617,7 +617,8 @@ impl Arguments {
                     }
                     i += 1;
                 }
-            } else if two_dash_tag(TIMESTAMP_TAG) { /* Java Utilities.setTimestamp(true): JVM logging boundary. */
+            } else if two_dash_tag(TIMESTAMP_TAG) {
+                crate::imod::etomo::util::utilities::set_timestamp(true);
             } else if two_dash_tag(NEWSTUFF_TAG) {
                 self.newstuff = true;
             } else if argument == "-dataset" || two_dash_tag("-rawimagestack") {

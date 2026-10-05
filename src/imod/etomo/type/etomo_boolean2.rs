@@ -882,6 +882,43 @@ impl EtomoBoolean2 {
             }
         }
     }
+
+    /// Java inherited `EtomoNumber.loadIfPresent(Properties, String)`, whose virtual
+    /// `load` (and so `set(String)`) resolves to this class's override.  Without it the
+    /// `EtomoNumber` body (reached through `Deref`) parses "true"/"false" as numbers
+    /// and loses the value (`LogWindow`'s `Visible` read back as false).
+    pub fn load_if_present(
+        &mut self,
+        props: &BTreeMap<String, String>,
+        prepend: Option<&str>,
+    ) -> bool {
+        let key = match prepend {
+            None => self.base.base.base.name.clone(),
+            Some(prepend) if java_lang_string_matches_whitespace(prepend) => {
+                self.base.base.base.name.clone()
+            }
+            Some(prepend) => format!("{}.{}", prepend, self.base.base.base.name),
+        };
+        if props.get(&key).is_none() {
+            return false;
+        }
+        self.load_with_prepend(props, prepend);
+        true
+    }
+
+    /// Java inherited `EtomoNumber.load(Properties, String, boolean)`, through this
+    /// class's `loadIfPresent` and `set(boolean)`.
+    pub fn load_with_default_boolean(
+        &mut self,
+        props: &BTreeMap<String, String>,
+        prepend: Option<&str>,
+        default_value: bool,
+    ) {
+        if self.load_if_present(props, prepend) {
+            return;
+        }
+        self.set_boolean(default_value);
+    }
 }
 
 /// Java `toString()`, inherited from `ConstEtomoNumber`, which calls this class's

@@ -366,7 +366,7 @@ impl SetupDialogExpert {
                 MetaData::new(Some(self.manager), self.manager.get_log_properties(), true);
             match ParameterStore::get_instance(Some(edf_file.clone())) {
                 Ok(param_store) => {
-                    if let Some(param_store) = param_store {
+                    if let Some(mut param_store) = param_store {
                         param_store.load(&mut saved_meta_data);
                     }
                 }
@@ -550,8 +550,6 @@ impl SetupDialogExpert {
         // Parallel processing is optional in tomogram reconstruction, so only
         // use it if the user set it up.
         let property_user_dir = self.get_property_user_dir();
-        // TODO(unit): needs etomo/logic/UserEnv.java - `isParallelProcessing`,
-        // `isGpuProcessingEnabled`, `isGpuProcessing`.
         self.dialog().set_parallel_process(
             crate::imod::etomo::logic::user_env::is_parallel_processing(
                 self.manager,
@@ -868,8 +866,6 @@ impl SetupDialogExpert {
             "This radio button selector will choose whether the \
              data consists of one or two tilt axis.",
         );
-        // TODO(unit): needs etomo/util/SharedConstants.java - `VIEW_TYPE_TOOLTIP`,
-        // `DISTORTION_FIELD_TOOLTIP`, `IMAGES_ARE_BINNED_TOOLTIP`.
         dialog.set_view_type_tooltip(shared_constants::VIEW_TYPE_TOOLTIP);
 
         dialog.set_pixel_size_tooltip("Enter the view image pixel size in nanometers here.");

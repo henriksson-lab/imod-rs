@@ -10,7 +10,3 @@ pub trait FindBeads3dDisplay {
     /// Java `isFiducialess()`.
     fn is_fiducialess(&self) -> bool;
 }
-
-// TODO(unit): FindBeads3dPanel.java implements FindBeads3dDisplay; the Rust
-// `find_beads3d_panel.rs` takes manager/parent arguments and a boundary param,
-// so the impl waits for that unit.

@@ -18,8 +18,6 @@ use crate::imod::etomo::process::imod_process::RUBBERBAND_RESULTS_STRING;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_meta_data::ConstMetaData;
 use crate::imod::etomo::r#type::meta_data::MetaData;
-// TODO(unit): needs etomo/type/ParallelMetaData.java - `setXMin`..`setZMax`,
-// `getXMin`..`getZMax`, `setNewStyleZ` in the three ParallelMetaData methods below.
 use crate::imod::etomo::r#type::parallel_meta_data::ParallelMetaData;
 use crate::imod::etomo::ui::field_type::FieldType;
 

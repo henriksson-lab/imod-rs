@@ -8,18 +8,15 @@
 //! frame, and `EtomoLogger` calls back into it from `AppendLater.run()` on the
 //! event dispatch thread.
 //!
-//! The `etomo.storage.FileReader`, `etomo.storage.FileWriter` and
-//! `etomo.storage.Loggable` interfaces this one names, and the
-//! `javax.swing.text.BadLocationException` it throws, are declared here as
-//! the boundaries the rest of the translation already imports.
-// TODO(unit): needs etomo/storage/FileReader.java, etomo/storage/FileWriter.java and
-// etomo/storage/Loggable.java - their own modules; the traits below stand for them.
+//! The `javax.swing.text.BadLocationException` it throws is declared here, at the
+//! text-component boundary.
 
-use std::cell::RefCell;
 use std::path::Path;
-use std::rc::Rc;
 
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::storage::file_reader::FileReaderRef;
+use crate::imod::etomo::storage::file_writer::FileWriterRef;
+use crate::imod::etomo::storage::loggable::Loggable;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 
 /// Java `javax.swing.text.BadLocationException` at the text-component boundary.
@@ -27,46 +24,6 @@ use crate::imod::etomo::r#type::axis_id::AxisID;
 pub struct BadLocationException {
     pub message: String,
 }
-
-/// Declared-type boundary for `etomo.storage.FileReader`.
-pub trait FileReader {
-    /// Java `isReadable()`.
-    fn is_readable(&self) -> bool;
-    /// Java `readLine()`.
-    fn read_line(&mut self) -> Option<String>;
-}
-
-/// Declared-type boundary for `etomo.storage.FileWriter`.
-pub trait FileWriter {
-    /// Java `append(String)`.
-    fn append(&mut self, string: &str) -> bool;
-    /// Java `flush()`.
-    fn flush(&mut self);
-    /// Java `getPrevLineEndOffset()`.
-    fn get_prev_line_end_offset(&self) -> Result<usize, BadLocationException>;
-}
-
-/// Declared-type boundary for `etomo.storage.Loggable`.
-pub trait Loggable {
-    /// Java `getName()`.
-    fn get_name(&self) -> String;
-    /// Java `getLogMessage()`.
-    fn get_log_message(&self) -> Result<Vec<Option<String>>, LoggableException>;
-}
-
-/// The three exceptions `Loggable.getLogMessage()` throws
-/// (`LogFileException`, `IOException`, `LockException`).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LoggableException {
-    LogFile(String),
-    Io(String),
-    Lock(String),
-}
-
-/// A Java reference to a `FileReader`.
-pub type FileReaderRef = Rc<RefCell<dyn FileReader>>;
-/// A Java reference to a `FileWriter`.
-pub type FileWriterRef = Rc<RefCell<dyn FileWriter>>;
 
 /// Java `public interface LogInterface`.
 pub trait LogInterface {

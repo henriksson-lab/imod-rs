@@ -39,6 +39,22 @@ use crate::imod::etomo::r#type::panel_id::PanelId;
 use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
 
+/// A `TiltPanel` or an object of a subclass of it (`DemoTiltPanel`), as the
+/// `TomogramGenerationDialog` holds its `tiltPanel` field (Java type `TiltPanel`).
+/// Overridden methods are reached through the supertraits (`update_display` through
+/// `AbstractTiltPanel`'s dispatch, `get_processing_method` through
+/// `TrialTiltParent`); everything else through [`TiltPanelVirtual::tilt_panel`].
+pub trait TiltPanelVirtual: AbstractTiltPanelVirtual + ProcessDisplay {
+    /// The embedded `TiltPanel` (the Java superclass part, or the object itself).
+    fn tilt_panel(&self) -> &TiltPanel;
+}
+
+impl TiltPanelVirtual for TiltPanel {
+    fn tilt_panel(&self) -> &TiltPanel {
+        self
+    }
+}
+
 /// Java `public class TiltPanel extends AbstractTiltPanel /*implements
 /// ResumeObserver */`.
 pub struct TiltPanel {
@@ -67,25 +83,49 @@ impl TiltPanel {
         parent: Weak<dyn TomogramGenerationParent>,
     ) -> Rc<TiltPanel> {
         Rc::new_cyclic(|this: &Weak<TiltPanel>| {
-            // super(manager, axisID, dialogType, globalAdvancedButton, panelId, false,
-            // parent)
-            let base = AbstractTiltPanel::new(
+            TiltPanel::new_base(
                 manager,
                 axis_id,
                 dialog_type,
-                Some(global_advanced_button),
+                global_advanced_button,
                 panel_id,
-                false,
                 parent,
                 this,
-            );
-            // Field initializer.
-            let pnl_tilt_panel_root = JComponent::new_panel();
-            TiltPanel {
-                base,
-                pnl_tilt_panel_root,
-            }
+            )
         })
+    }
+
+    /// The body of the Java protected constructor, for this class and for a subclass
+    /// (`DemoTiltPanel`): `this` is the object being constructed (the subclass object
+    /// when there is one), which the superclass dispatches its overridable methods
+    /// to.
+    pub fn new_base<T: AbstractTiltPanelVirtual + 'static>(
+        manager: &'static ApplicationManager,
+        axis_id: AxisID,
+        dialog_type: DialogType,
+        global_advanced_button: &Rc<GlobalExpandButton>,
+        panel_id: PanelId,
+        parent: Weak<dyn TomogramGenerationParent>,
+        this: &Weak<T>,
+    ) -> TiltPanel {
+        // super(manager, axisID, dialogType, globalAdvancedButton, panelId, false,
+        // parent)
+        let base = AbstractTiltPanel::new(
+            manager,
+            axis_id,
+            dialog_type,
+            Some(global_advanced_button),
+            panel_id,
+            false,
+            parent,
+            this,
+        );
+        // Field initializer.
+        let pnl_tilt_panel_root = JComponent::new_panel();
+        TiltPanel {
+            base,
+            pnl_tilt_panel_root,
+        }
     }
 
     /// Java package-private static `getInstance(ApplicationManager, AxisID,
@@ -153,8 +193,10 @@ impl TiltPanel {
     pub fn msg_resume_changed(&self, _resume: bool) {}
 
     /// Java protected override `updateDisplay()`.  Z shift is an advanced
-    /// field.
-    pub fn update_display(&self) {
+    /// field.  This is the body (a subclass's `super.updateDisplay()`); calls on the
+    /// object dispatch through `AbstractTiltPanel::update_display` to the most derived
+    /// override.
+    pub fn update_display_tilt_panel(&self) {
         self.base.update_display_super();
         let advanced = self.base.is_advanced();
         self.base.ltf_z_shift.set_visible(advanced);
@@ -250,7 +292,7 @@ impl AbstractTiltPanelVirtual for TiltPanel {
 
     /// Java protected override `updateDisplay()`.
     fn update_display(&self) {
-        TiltPanel::update_display(self);
+        TiltPanel::update_display_tilt_panel(self);
     }
 
     /// Java protected override `setAdvancedFieldDisplayer()`.

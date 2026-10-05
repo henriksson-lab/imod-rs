@@ -17,7 +17,6 @@
 //! routines take an axis by value, so they get `AxisID::Only`; dialogs keep
 //! Java's null (`None`).
 
-use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -1187,9 +1186,7 @@ impl ToolsManager {
     }
 
     /// Java `getState()`: null.
-    // TODO(unit): needs etomo/type/ParallelState.java - the declared return type;
-    // the source always returns null.
-    pub fn get_state(&self) -> Option<Infallible> {
+    pub fn get_state(&self) -> Option<&crate::imod::etomo::r#type::parallel_state::ParallelState> {
         None
     }
 

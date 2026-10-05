@@ -13,7 +13,7 @@
 
 import {
     EtomoStyle, BeveledBorder, LabeledTextField, CheckBox, RadioButton,
-    MultiLineButton,
+    MultiLineButton, BridgedLabel,
 } from "../../etomo-ui-common/ui/widgets.slint";
 import {
     EtchedBorder, TextField, FileTextField, ButtonControlTextEfield, ComboBox,
@@ -41,11 +41,10 @@ component TiltAnglePanel inherits VerticalLayout {
     // `rbSpecify` is not selected.
     HorizontalLayout {
         spacing: 10px;
-        alignment: start;
         LabeledTextField {
             label: "Starting angle:";
             occurrence: root.occurrence;
-            label-width: 100px;
+            
             width: 190px;
             text: "";
             enabled: false;
@@ -53,7 +52,7 @@ component TiltAnglePanel inherits VerticalLayout {
         LabeledTextField {
             label: "Increment:";
             occurrence: root.occurrence;
-            label-width: 70px;
+            
             width: 160px;
             text: "";
             enabled: false;
@@ -93,13 +92,14 @@ component AxisInfoPanel inherits BeveledBorder {
         LabeledTextField {
             label: "Exclude views: ";
             occurrence: root.occurrence;
-            label-width: 100px;
+            
             text: "";
             enabled: root.enabled;
         }
         // `lRemoveExcludeViewsMsgA`: empty until excludeviews has run; painted
-        // in `ProcessControlPanel.colorComplete` when set.
-        Text { text: ""; height: 0px; }
+        // in `ProcessControlPanel.colorComplete` when set.  Wired, the Swing
+        // label's text while it is set (`BridgedLabel`).
+        BridgedLabel { prefix: "Excluded views have been removed" + root.occurrence; text: ""; color: #009900; }
         Rectangle { height: 10px; }
         MultiLineButton {
             text: "View Raw Image Stack";
@@ -133,12 +133,12 @@ export component SetupDialog inherits Rectangle {
             spacing: 10px;
             ButtonControlTextEfield {
                 label: "Raw Image Stack: ";
-                label-width: 130px;
+                
                 text: "";
             }
             FileTextField {
                 label: "Backup directory: ";
-                label-width: 130px;
+                
                 text: "";
             }
         }
@@ -189,23 +189,22 @@ export component SetupDialog inherits Rectangle {
             // `pnlStackInfo`
             HorizontalLayout {
                 spacing: 10px;
-                alignment: start;
                 MultiLineButton { text: "Scan Header"; width: 130px; }
                 LabeledTextField {
                     label: "Pixel size (nm): ";
-                    label-width: 110px;
+                    
                     width: 190px;
                     text: "";
                 }
                 LabeledTextField {
                     label: "Fiducial diameter (nm): ";
-                    label-width: 150px;
+                    
                     width: 220px;
                     text: "";
                 }
                 LabeledTextField {
                     label: "Image rotation (degrees): ";
-                    label-width: 165px;
+                    
                     width: 235px;
                     text: "";
                 }
@@ -241,12 +240,12 @@ export component SetupDialog inherits Rectangle {
                 spacing: 10px;
                 FileTextField {
                     label: "Image distortion field file: ";
-                    label-width: 170px;
+                    
                     text: "";
                 }
                 LabeledTextField {
                     label: "Binning: ";
-                    label-width: 60px;
+                    
                     width: 130px;
                     text: "1";
                 }
@@ -257,7 +256,7 @@ export component SetupDialog inherits Rectangle {
                 spacing: 0px;
                 FileTextField {
                     label: "Mag gradients correction: ";
-                    label-width: 170px;
+                    
                     text: "";
                 }
                 Rectangle { width: 119px; }
@@ -288,7 +287,7 @@ export component SetupDialog inherits Rectangle {
             alignment: center;
             MultiLineButton { text: "Cancel"; width: 140px; }
             MultiLineButton { text: "Create Com Scripts"; width: 140px; }
-            MultiLineButton { text: "Advanced"; width: 140px; }
+            MultiLineButton { text: "Advanced"; labels: "Advanced|Basic"; width: 140px; }
         }
     }
 }

@@ -11,6 +11,7 @@ use std::rc::{Rc, Weak};
 use super::ccd_eraser_display::CcdEraserDisplay;
 use super::check_box::CheckBox;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::etched_border::EtchedBorder;
@@ -387,9 +388,10 @@ impl CcdEraserXRaysPanel {
     }
 
     /// Java `addListeners()` (CcdEraserXRaysPanel.java:242-257).
-    fn add_listeners(&self) {
-        // Mouse adapter for context menu: `pnlCCDEraser.addMouseListener(new
-        // GenericMouseAdapter(this))` - mouse events are not modelled.
+    fn add_listeners(self: &Rc<Self>) {
+        // Mouse adapter for context menu
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.pnl_ccd_eraser.add_mouse_listener(GenericMouseAdapter::new(context_menu));
         let listener = &self.ccd_eraser_action_listener;
         self.btn_find_x_rays.add_action_listener(listener.clone());
         self.btn_view_x_ray_model

@@ -7,6 +7,3 @@ pub trait SubtomoSetupDisplay {
     /// Java `getParameters(SubtomoSetupParam, boolean)`.
     fn get_parameters(&self, param: &mut SubtomoSetupParam, do_validation: bool) -> bool;
 }
-
-// TODO(unit): SubtomogramsPanel.java implements SubtomoSetupDisplay; the Rust
-// `subtomograms_panel.rs` takes extra explicit inputs and a boundary param.

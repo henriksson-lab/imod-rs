@@ -300,11 +300,15 @@ impl TransferfidPanel {
     pub fn set_parameters_void(&self) {
         let mut params = TransferfidParam::new(self.manager, self.axis_id);
         params.initialize();
-        // TODO(unit): needs etomo/comscript/TransferfidParam.java in MetaData -
-        // `if (axisID == AxisID.SECOND)
-        // manager.getMetaData().getTransferfidBFields(params); else
-        // manager.getMetaData().getTransferfidAFields(params);` (MetaData does not
-        // hold its TransferfidParams yet; the initialized params are used).
+        if self.axis_id == AxisID::Second {
+            self.manager
+                .get_meta_data()
+                .get_transferfid_b_fields(&mut params);
+        } else {
+            self.manager
+                .get_meta_data()
+                .get_transferfid_a_fields(&mut params);
+        }
         self.cb_run_midas
             .set_selected_boolean(params.get_run_midas().is());
         self.ltf_center_view_a
@@ -400,11 +404,13 @@ impl TransferfidPanel {
                 .expect("bgMirrorInX has a selected RadioButtonModel");
             params.set_mirror_xaxis(Some(&enumerated_type.get_value()));
             if self.axis_id == AxisID::Second {
-                // TODO(unit): needs etomo/comscript/TransferfidParam.java in
-                // MetaData - `manager.getMetaData().setTransferfidBFields(params)`.
+                self.manager
+                    .get_meta_data()
+                    .set_transferfid_b_fields(params);
             } else {
-                // TODO(unit): needs etomo/comscript/TransferfidParam.java in
-                // MetaData - `manager.getMetaData().setTransferfidAFields(params)`.
+                self.manager
+                    .get_meta_data()
+                    .set_transferfid_a_fields(params);
             }
             Ok(true)
         })();

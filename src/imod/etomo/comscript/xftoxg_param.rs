@@ -3,8 +3,8 @@
 //! **Java `EnumeratedType` parameters.**  `setHybridFits(EnumeratedType)` and
 //! `setNumberToFit(EnumeratedType)` read only `getValue()`; the only enumerated types
 //! a caller passes are this unit's own `HybridFits` and `NumberToFit` (the
-//! SerialSectionsDialog radio buttons), and there is no Rust `EnumeratedType` unit, so
-//! the Rust parameters are those two types.
+//! SerialSectionsDialog radio buttons), so the Rust parameters are those two types;
+//! both implement `EnumeratedType` for the radio buttons that carry them.
 //!
 //! **The cached command array.**  `getCommandArray` builds `commandArray` once and
 //! keeps it; the `Command` interface is reached through a shared reference here, so
@@ -386,5 +386,31 @@ impl NumberToFit {
 impl std::fmt::Display for NumberToFit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.get_value())
+    }
+}
+
+/// Java `HybridFits implements EnumeratedType`.
+impl crate::imod::etomo::r#type::enumerated_type::EnumeratedType for HybridFits {
+    fn is_default(&self) -> bool {
+        HybridFits::is_default(self)
+    }
+    fn get_value(&self) -> ConstEtomoNumber {
+        HybridFits::get_value(self)
+    }
+    fn get_label(&self) -> Option<String> {
+        HybridFits::get_label(self)
+    }
+}
+
+/// Java `NumberToFit implements EnumeratedType`.
+impl crate::imod::etomo::r#type::enumerated_type::EnumeratedType for NumberToFit {
+    fn is_default(&self) -> bool {
+        NumberToFit::is_default(self)
+    }
+    fn get_value(&self) -> ConstEtomoNumber {
+        NumberToFit::get_value(self)
+    }
+    fn get_label(&self) -> Option<String> {
+        NumberToFit::get_label(self)
     }
 }

@@ -436,12 +436,12 @@ impl StorableValue for TransferfidParam {
     }
 
     /// Java `load(Properties)`.
-    fn load(&mut self, props: &BTreeMap<String, String>) {
+    fn load(&mut self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
     /// Java `load(Properties, String)`.
-    fn load_with_prepend(&mut self, props: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, props: &mut BTreeMap<String, String>, prepend: &str) {
         self.reset_storable_fields();
         let prepend = self.create_prepend(prepend);
         let prepend = Some(prepend.as_str());

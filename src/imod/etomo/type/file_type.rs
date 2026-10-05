@@ -20,13 +20,10 @@
 //! initialisers in declaration order the first time the class is touched and each
 //! constructor registers the instance in `namedFileTypeList`; one lazy static each would
 //! register them in call order instead.  `etomo/type/extension.rs` uses the same
-//! modelling.  Three deprecated singletons are the exception - see the `TODO(unit)` in
-//! `CLASS`.
+//! modelling.
 //!
-//! **Frontier.**  The unit's remaining blockers are named by the `// TODO(unit):`
-//! comments below.  `FileType.Variable.toFormattedString` and the five
-//! `VariableTestTool` wrappers need `java.text.DecimalFormat` with a run-time pattern
-//! and `BigDecimal.setScale(HALF_UP)`, which is a JDK class rather than an etomo unit.
+//! `Variable.toFormattedString` reproduces the `java.text.DecimalFormat` patterns and
+//! `BigDecimal.setScale(HALF_UP)` the source builds at run time.
 #![allow(dead_code)]
 
 use std::sync::{Arc, LazyLock, Mutex, Weak};
@@ -44,6 +41,7 @@ use super::status::Status;
 use super::validation_type::ValidationType;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::logic::dataset_tool;
 use crate::imod::etomo::process::imod_manager;
 use crate::imod::etomo::util::utilities;
 use crate::imod::etomo::util::utilities::java_io_file_get_absolute_path;
@@ -503,11 +501,39 @@ impl VariableTestTool {
     }
 }
 
-// Untranslated: Java's nested `VariableTestTool` class
-// (`toOneDigitIntegerFormattedString`, `toTwoDigitIntegerFormattedString`,
-// `toFloatFormattedString`, `toPrecisionThreeFloatFormattedString`,
-// `toPrecisionThreeFractionFormattedString`) delegates to
-// `Variable.toFormattedString`, which is blocked above on java.text.DecimalFormat.
+/// Java package-private nested `static final class VariableTestTool`
+/// (FileType.java:237-260): test access to `Variable.toFormattedString`.  `input` is
+/// the `Number`'s `toString()`, as [`Variable::to_formatted_string`] takes it.
+pub(crate) mod variable_test_tool {
+    use super::Variable;
+
+    /// Java `toOneDigitIntegerFormattedString(Number)`.
+    pub(crate) fn to_one_digit_integer_formatted_string(input: Option<&str>) -> Option<String> {
+        Variable::one_digit_integer().to_formatted_string(input)
+    }
+
+    /// Java `toTwoDigitIntegerFormattedString(Number)`.
+    pub(crate) fn to_two_digit_integer_formatted_string(input: Option<&str>) -> Option<String> {
+        Variable::two_digit_integer().to_formatted_string(input)
+    }
+
+    /// Java `toFloatFormattedString(Number)`.
+    pub(crate) fn to_float_formatted_string(input: Option<&str>) -> Option<String> {
+        Variable::float().to_formatted_string(input)
+    }
+
+    /// Java `toPrecisionThreeFloatFormattedString(Number)`.
+    pub(crate) fn to_precision_three_float_formatted_string(input: Option<&str>) -> Option<String> {
+        Variable::precision_three_float().to_formatted_string(input)
+    }
+
+    /// Java `toPrecisionThreeFractionFormattedString(Number)`.
+    pub(crate) fn to_precision_three_fraction_formatted_string(
+        input: Option<&str>,
+    ) -> Option<String> {
+        Variable::precision_three_fraction().to_formatted_string(input)
+    }
+}
 
 /// Java `containsValidDatasetName`.  Checks a file name, or path, to see if it contains
 /// a valid dataset name.  `err_msg`, when it is not null, collects a message if the
@@ -921,10 +947,14 @@ pub struct ClassStatics {
     pub sirt_subarea_output_template_old: Arc<FileType>,
     /// Java `SIRT_SUBAREA_OUTPUT_TEMPLATE`.
     pub sirt_subarea_output_template: Arc<FileType>,
+    /// Java `RAW_STACK_OLD` (deprecated).
+    pub raw_stack_old: Arc<FileType>,
     /// Java `RAW_STACK`.
     pub raw_stack: Arc<FileType>,
     /// Java `STATS_LOG_OLD`.
     pub stats_log_old: Arc<FileType>,
+    /// Java `FIXED_XRAYS_STACK_OLD` (deprecated).
+    pub fixed_xrays_stack_old: Arc<FileType>,
     /// Java `PROCESSCHUNKS_LOG`.
     pub processchunks_log: Arc<FileType>,
     /// Java `STATS_LOG`.
@@ -935,6 +965,8 @@ pub struct ClassStatics {
     pub fixed_stats_log_old: Arc<FileType>,
     /// Java `FIXED_STATS_LOG`.
     pub fixed_stats_log: Arc<FileType>,
+    /// Java `ORIGINAL_RAW_STACK_OLD` (deprecated).
+    pub original_raw_stack_old: Arc<FileType>,
     /// Java `ORIGINAL_RAW_STACK`.
     pub original_raw_stack: Arc<FileType>,
     /// Java `FULL_VSR`.
@@ -1891,9 +1923,14 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         PatternElement::Extension(extension::CLASS.srec.clone()),
         PatternElement::Variable(Variable::two_digit_integer()),
     ]));
-    // TODO(unit): needs etomo/logic/DatasetTool.java - Java `RAW_STACK_OLD` is
-    // `FileType.constructTwoImodRawImageFileInstance(...)` with `DatasetTool.STANDARD_DATASET_EXT`, and that
-    // constant has no module.
+    let raw_stack_old = FileType::construct_two_imod_raw_image_file_instance(
+        true,
+        true,
+        Some(""),
+        Some(dataset_tool::STANDARD_DATASET_EXT),
+        Some(imod_manager::RAW_STACK_KEY),
+        Some(imod_manager::PREVIEW_KEY),
+    );
     let raw_stack = FileType::construct_instance_two_keys(
         Some(vec![
             PatternElement::Variable(Variable::dataset_and_axis()),
@@ -1905,9 +1942,13 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         None,
     );
     let stats_log_old = FileType::construct_instance(true, true, Some(".st_stats"), Some(".log"));
-    // TODO(unit): needs etomo/logic/DatasetTool.java - Java `FIXED_XRAYS_STACK_OLD` is
-    // `FileType.constructImodImageFileInstance(...)` with `DatasetTool.STANDARD_DATASET_EXT`, and that
-    // constant has no module.
+    let fixed_xrays_stack_old = FileType::construct_imod_image_file_instance(
+        true,
+        true,
+        Some("_fixed"),
+        Some(dataset_tool::STANDARD_DATASET_EXT),
+        Some(imod_manager::ERASED_STACK_KEY),
+    );
     let processchunks_log = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str(CHUNK_NUMBER_DIVIDER.to_string()),
@@ -1944,9 +1985,12 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         ]),
         Some(imod_manager::JOIN_KEY),
     );
-    // TODO(unit): needs etomo/logic/DatasetTool.java - Java `ORIGINAL_RAW_STACK_OLD` is
-    // `FileType.constructRawImageFileInstance(...)` with `DatasetTool.STANDARD_DATASET_EXT`, and that
-    // constant has no module.
+    let original_raw_stack_old = FileType::construct_raw_image_file_instance(
+        true,
+        true,
+        Some("_orig"),
+        Some(dataset_tool::STANDARD_DATASET_EXT),
+    );
     let original_raw_stack = FileType::construct_instance_pattern(Some(vec![
         PatternElement::Variable(Variable::dataset_and_axis()),
         PatternElement::Str("_orig".to_string()),
@@ -2247,13 +2291,16 @@ pub static CLASS: LazyLock<ClassStatics> = LazyLock::new(|| {
         sirt_output_template,
         sirt_subarea_output_template_old,
         sirt_subarea_output_template,
+        raw_stack_old,
         raw_stack,
         stats_log_old,
+        fixed_xrays_stack_old,
         processchunks_log,
         stats_log,
         fixed_xrays_stack,
         fixed_stats_log_old,
         fixed_stats_log,
+        original_raw_stack_old,
         original_raw_stack,
         full_vsr,
         sub_vsr,
@@ -2397,8 +2444,9 @@ impl FileType {
         image_file: bool,
         expanded_image_extension_set: bool,
     ) -> Arc<FileType> {
-        let instance = Arc::new(FileType {
-            file_key: FileKey::new_with_descr(imod_manager_key, imod_manager_key2, descr),
+        let instance = Arc::new_cyclic(|this| FileType {
+            file_key: FileKey::new_with_descr(imod_manager_key, imod_manager_key2, descr)
+                .with_file_type(this.clone()),
             uses_dataset,
             uses_axis_id,
             type_string: type_string.map(|value| value.to_string()),
@@ -2458,8 +2506,9 @@ impl FileType {
         imod_manager_key2: Option<&str>,
         descr: Option<&str>,
     ) -> Arc<FileType> {
-        let instance = Arc::new(FileType {
-            file_key: FileKey::new_with_descr(imod_manager_key, imod_manager_key2, descr),
+        let instance = Arc::new_cyclic(|this| FileType {
+            file_key: FileKey::new_with_descr(imod_manager_key, imod_manager_key2, descr)
+                .with_file_type(this.clone()),
             directory,
             file_name_pattern,
             single_axis_file_name_pattern,
@@ -4328,10 +4377,8 @@ impl FileType {
     ///   a variable piece
     /// * `formatted_numeric2` - required if the file has a second variable piece
     ///
-    /// Note: the source also accepts raw `Number numeric1`/`numeric2` and converts them
-    /// with `Variable.toFormattedString`, which needs `etomo/logic/Converter.java`; see
-    /// the `TODO(unit)` on `Variable`.  Only the already-formatted parameters are
-    /// accepted here.
+    /// `numeric1`/`numeric2` are the raw `Number`s as their `toString()`; they are
+    /// converted with `Variable.toFormattedString`.
     #[allow(clippy::too_many_arguments)]
     pub fn get_file_name_from_pattern(
         &self,
@@ -5610,13 +5657,16 @@ mod statics_tests {
                 "SIRT_SUBAREA_OUTPUT_TEMPLATE",
                 &CLASS.sirt_subarea_output_template,
             ),
+            dump("RAW_STACK_OLD", &CLASS.raw_stack_old),
             dump("RAW_STACK", &CLASS.raw_stack),
             dump("STATS_LOG_OLD", &CLASS.stats_log_old),
+            dump("FIXED_XRAYS_STACK_OLD", &CLASS.fixed_xrays_stack_old),
             dump("PROCESSCHUNKS_LOG", &CLASS.processchunks_log),
             dump("STATS_LOG", &CLASS.stats_log),
             dump("FIXED_XRAYS_STACK", &CLASS.fixed_xrays_stack),
             dump("FIXED_STATS_LOG_OLD", &CLASS.fixed_stats_log_old),
             dump("FIXED_STATS_LOG", &CLASS.fixed_stats_log),
+            dump("ORIGINAL_RAW_STACK_OLD", &CLASS.original_raw_stack_old),
             dump("ORIGINAL_RAW_STACK", &CLASS.original_raw_stack),
             dump("FULL_VSR", &CLASS.full_vsr),
             dump("SUB_VSR", &CLASS.sub_vsr),
@@ -5681,7 +5731,9 @@ mod statics_tests {
     /// one per constructor shape the declarations use.
     #[test]
     fn jvm_verified_statics() {
-        assert_eq!(table().len(), 205);
+        // FileType.java declares 208 static FileTypes (205 `public` ones, which the
+        // harness table covered, and three package-private).
+        assert_eq!(table().len(), 208);
         assert_eq!(
             dump("ORIG_COMS_DIR", &CLASS.orig_coms_dir),
             "ORIG_COMS_DIR	origcoms|key=null|key2=null|descr=null|usesDataset=false|usesAxisID=false|typeString=origcoms|extension=|composite=false|inSubdirectory=false|unnamed=false|template=false|inImodSubdirectory=null|versioned=false|templateOnlyMiddlePiece=null|imageFile=false|expandedImageExtensionSet=false|dynamicLocation=null|subFileType=null|singleFileType=null|dualFileType=null|subdir=null|directory=null|parentFileType=null"

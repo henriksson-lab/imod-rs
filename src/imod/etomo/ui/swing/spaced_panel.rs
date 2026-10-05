@@ -284,9 +284,10 @@ impl SpacedPanel {
         // Swing layout: `button.setAlignmentX(componentAlignmentX)` when set.
     }
 
-    /// Java `addMouseListener(MouseListener)`: mouse events are not modelled (the
-    /// context popups they open are reached through `ContextPopup` directly).
-    pub fn add_mouse_listener<T>(&self, _mouse_listener: T) {}
+    /// Java `addMouseListener(MouseListener)`.
+    pub fn add_mouse_listener(&self, mouse_listener: Rc<dyn crate::imod::etomo::jdk::MouseListener>) {
+        self.panel.get_component().add_mouse_listener(mouse_listener);
+    }
 
     /// Java `addHorizontalGlue()`.
     pub fn add_horizontal_glue(&self) {

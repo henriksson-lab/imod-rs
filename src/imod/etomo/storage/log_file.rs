@@ -11,20 +11,6 @@
 //!
 //! `LogFile` is an n'ton, and should only have one instance per physical file.
 //!
-//! **Frontier.**  The lock machinery is translated: `Handle` and its members, the `Id`
-//! hierarchy (`Id`, `ReadId` and the nine concrete id classes), `Lock`, `Reporter`,
-//! `BlockingIdIterator`, `Lockable`, `LockException`, and every `LogFile` member that
-//! takes an `Id`.  Two names are left, both `copyToNumberedFile` (LogFile.java:2106 and
-//! its `Handle` wrapper at 2417): they need `NumberedFileType.contructInstance`,
-//! `searchDirectory`, `SearchResults.getNextUnusedNumber`, `getFile` and `getOldestFile`,
-//! none of which `src/imod/etomo/type/numbered_file_type.rs` has, and `searchDirectory`
-//! additionally takes an `etomo/BaseManager.java`.  `getInstance(BaseManager, AxisID,
-//! FileType, EmergencyMonitor)` is blocked on the same manager and on the untranslated
-//! `FileType.getFile(BaseManager, AxisID)`; its six sibling overloads are here.  `copy`
-//! and `rename` are translated - only their `UIHarness.openWarningMessageDialog` branch
-//! is marked in place, and the `BaseManager` they take is `Option<Infallible>`, the Rust
-//! type with exactly the one inhabitant (`null`) a translated caller can supply.
-//!
 //! **Java's instance monitors are not reproduced.**  Nearly every `LogFile` and `Lock`
 //! method is `synchronized`, and Java's monitors are reentrant while Rust's `Mutex` is
 //! not - `lock()` calls `isLocked()` calls `isLocked(LockType)`, and one instance-wide
@@ -34,6 +20,7 @@
 #![allow(dead_code)]
 
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::util::java_hash_map::JavaConcurrentHashMap;
 use std::collections::HashMap;
 use std::io::{BufRead, Read, Write};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -257,11 +244,6 @@ impl LogFile {
     ) -> Result<Arc<Handle>, LogFileError> {
         LogFile::get_instance_stress_test(file, true, None)
     }
-
-    // TODO(unit): needs etomo/BaseManager.java - Java
-    // `getInstance(BaseManager, AxisID, FileType, EmergencyMonitor)` (LogFile.java:203)
-    // reads `manager.getEmergencyMonitor(axisID)` and calls the untranslated
-    // `FileType.getFile(BaseManager, AxisID)`.
 
     /// Java `getInstance(File, boolean, EmergencyMonitor)`.
     pub fn get_instance_stress_test(
@@ -794,10 +776,22 @@ impl LogFile {
                         }
                     );
                     if popup_err_msg && !stack_trace.is_starting() && !stack_trace.is_exiting() {
-                        // TODO(unit): needs etomo/ui/swing/UIHarness.java -
                         // `UIHarness.INSTANCE.openWarningMessageDialog(manager, message,
-                        // title, axisID)`.
-                        let _ = (&message, title, manager, axis_id);
+                        // title, axisID)`, on the event dispatch thread.
+                        let (message, title) = (message.clone(), title.to_owned());
+                        let show = move || {
+                            crate::imod::etomo::ui::swing::ui_harness::with(|harness| {
+                                harness
+                                    .open_warning_message_dialog_base_manager_string_string_axis_id(
+                                        manager, &message, &title, axis_id,
+                                    )
+                            })
+                        };
+                        if crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+                            show();
+                        } else {
+                            crate::imod::etomo::util::event_queue::invoke_later(show);
+                        }
                     } else {
                         eprintln!("{}\n{}", title, message);
                     }
@@ -954,10 +948,21 @@ impl LogFile {
                     }
                 );
                 if popup_err_msg && !stack_trace.is_starting() && !stack_trace.is_exiting() {
-                    // TODO(unit): needs etomo/ui/swing/UIHarness.java -
                     // `UIHarness.INSTANCE.openWarningMessageDialog(manager, errMessage,
-                    // errTitle, axisID)`.
-                    let _ = (&err_message, err_title, manager, axis_id);
+                    // errTitle, axisID)`, on the event dispatch thread.
+                    let (message, title) = (err_message.clone(), err_title.to_owned());
+                    let show = move || {
+                        crate::imod::etomo::ui::swing::ui_harness::with(|harness| {
+                            harness.open_warning_message_dialog_base_manager_string_string_axis_id(
+                                manager, &message, &title, axis_id,
+                            )
+                        })
+                    };
+                    if crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+                        show();
+                    } else {
+                        crate::imod::etomo::util::event_queue::invoke_later(show);
+                    }
                 } else {
                     eprintln!("\n{}\n{}\n", err_title, err_message);
                 }
@@ -3771,8 +3776,9 @@ static FILE_LOCK_TABLE: LazyLock<Mutex<Vec<(u64, u64)>>> = LazyLock::new(|| Mute
 /// Java `Lock`.
 #[derive(Debug)]
 struct Lock {
-    /// Java field `readIdHashMap`.  The key is the lock number.
-    read_id_hash_map: Mutex<HashMap<i32, Arc<Id>>>,
+    /// Java field `readIdHashMap`, a `ConcurrentHashMap<Integer, Id>`.  The key is the
+    /// lock number.  `toString` and `BlockingIdIterator` walk it in Java's order.
+    read_id_hash_map: Mutex<JavaConcurrentHashMap<i32, Arc<Id>>>,
     /// Java field `logFile`.  The enclosing instance is not yet reachable through an
     /// `Arc` when the constructor runs, so `LogFile::new` builds it with
     /// `Arc::new_cyclic` and the back-reference is weak.
@@ -3796,7 +3802,7 @@ impl Lock {
     /// Java `Lock(LogFile)`.
     fn new(log_file: std::sync::Weak<LogFile>) -> Lock {
         Lock {
-            read_id_hash_map: Mutex::new(HashMap::new()),
+            read_id_hash_map: Mutex::new(JavaConcurrentHashMap::new()),
             log_file,
             warning_displayed: Mutex::new(false),
             cur_lock_number: Mutex::new(NO_ID),

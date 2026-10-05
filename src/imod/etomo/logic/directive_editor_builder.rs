@@ -1,402 +1,210 @@
 //! `IMOD/Etomo/src/etomo/logic/DirectiveEditorBuilder.java`.
 //!
-//! `Directive`, `DirectiveMap`, `DirectiveDescrFile`, `ComFile`, and the local
-//! directive-file `Autodoc` reader are separate storage source units.  They have not
-//! all acquired one shared concrete Rust representation yet.  `DirectiveEditorBuilderSource`
-//! is therefore the direct boundary for exactly those source calls; this unit retains
-//! the builder's ordering, filtering, value precedence, dropped-directive handling,
-//! and default save-location policy.
-#![allow(dead_code)]
+//! Builds the list of directives to use in the directive editor: the directive names,
+//! descriptions and sections from `$IMOD_DIR/com/directives.csv`
+//! (`DirectiveDescrFile`), values from the local directive files (scope, system, user
+//! and batch), the setupset/runtime values from the source manager, and the comparam
+//! values and default values from the dataset's `.com` and `origcoms/*.com` files.
+//!
+//! An event dispatch thread object: `DirectiveEditorManager` builds it and the
+//! `DirectiveEditorDialog` keeps it (`Rc<DirectiveEditorBuilder>`), so its mutable
+//! fields are cells.
 
-use std::collections::{BTreeMap, HashMap};
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::logic::config_tool;
+use crate::imod::etomo::storage::autodoc::autodoc_factory;
+use crate::imod::etomo::storage::autodoc::read_only_statement::ReadOnlyStatement;
+use crate::imod::etomo::storage::autodoc::read_only_statement_list::ReadOnlyStatementList;
+use crate::imod::etomo::storage::autodoc::statement;
+use crate::imod::etomo::storage::com_file::ComFile;
+use crate::imod::etomo::storage::directive::Directive;
+use crate::imod::etomo::storage::directive_descr_file;
+use crate::imod::etomo::storage::directive_descr_section::DirectiveDescrSection;
+use crate::imod::etomo::storage::directive_map::DirectiveMap;
+use crate::imod::etomo::storage::directive_name::DirectiveName;
+use crate::imod::etomo::storage::directive_type::DirectiveType;
+use crate::imod::etomo::storage::directive_value_type::DirectiveValueType;
+use crate::imod::etomo::storage::log_file::LogFileError;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
-use crate::imod::etomo::r#type::directive_file_type::{DirectiveFileType, NUM};
-use crate::imod::etomo::ui::swing::directive_section_panel::{
-    Directive as UiDirective, DirectiveDescrSection, DirectiveMap as UiDirectiveMap,
-};
+use crate::imod::etomo::r#type::directive_file_type::{self, DirectiveFileType};
+use crate::imod::etomo::util::utilities::java_io_file_get_absolute_path;
 
-/// Java private static `SECTION_OTHER_HEADER`.
+/// Java private static final `SECTION_OTHER_HEADER`.
 const SECTION_OTHER_HEADER: &str = "Other Directives";
-/// Java private static `SPECIAL_CASE_PROGRAM_NAME`.
+/// Java private static final `AXID_ID`.
+const AXID_ID: AxisID = AxisID::Only;
+/// Java private static final `SPECIAL_CASE_PROGRAM_NAME`.
 const SPECIAL_CASE_PROGRAM_NAME: &str = "ctfplotter";
 
-/// The `DirectiveType` values which `DirectiveEditorBuilder` tests directly.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DirectiveType {
-    /// Java `DirectiveType.COM_PARAM`.
-    ComParam,
-    /// Java `DirectiveType.SETUP_SET`.
-    SetupSet,
-    /// Java `DirectiveType.RUN_TIME`.
-    RunTime,
-    /// A storage type which this source unit does not handle specially.
-    Other,
-}
+/// A command map: Java `Map<String, String>` whose values may be null.
+type CommandMap = HashMap<String, Option<String>>;
 
-/// Java `DirectiveValueType`, as needed by this source unit.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DirectiveValueType {
-    /// Java `BOOLEAN`.
-    Boolean,
-    /// Every non-boolean source value type.
-    Other,
-}
-
-/// Java `DirectiveValues.Value`, at this unit's storage boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DirectiveStoredValue {
-    /// Java `setValue(String)` or `setDefaultValue(String)`.
-    String(String),
-    /// Java `setValue(true)` or `setDefaultValue(true)`.
-    Boolean(bool),
-}
-
-/// Java `DirectiveDescrElement`, projected to the fields read by this source unit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DirectiveDescrElement {
-    /// Java `element.isSection()` and `getSectionHeader()`.
-    Section(String),
-    /// Java `element.isDirective()` and the `Directive(DirectiveDescrElement)` data.
-    Directive(DirectiveDescr),
-    /// A non-section/non-directive CSV element.
-    Other,
-}
-
-/// The `DirectiveDescr` data read by Java's `Directive` constructor here.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DirectiveDescr {
-    pub name: String,
-    pub directive_type: DirectiveType,
-    pub value_type: DirectiveValueType,
-    pub batch: bool,
-    pub template: bool,
-}
-
-/// A name/value autodoc statement after Java's `ReadOnlyStatement` filter.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DirectiveStatement {
-    pub left_side: String,
-    pub right_side: Option<String>,
-}
-
-/// Java `DirectiveName`, reduced only to the source calls made in this unit.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct DirectiveName {
-    pub key: Option<String>,
-    pub directive_type: Option<DirectiveType>,
-    pub com_file_name: Option<String>,
-    pub program_name: Option<String>,
-    pub parameter_name: Option<String>,
-}
-
-impl DirectiveName {
-    /// Java `DirectiveName()`.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Java `setKey(String)`.
-    pub fn set_key(&mut self, input: &str) -> Option<AxisID> {
-        let mut part: Vec<String> = input.split('.').map(str::to_string).collect();
-        self.directive_type = match part.first().map(String::as_str) {
-            Some("comparam") => Some(DirectiveType::ComParam),
-            Some("setupset") => Some(DirectiveType::SetupSet),
-            Some("runtime") => Some(DirectiveType::RunTime),
-            Some(_) => Some(DirectiveType::Other),
-            None => None,
-        };
-        let mut axis_id = None;
-        if self.directive_type == Some(DirectiveType::ComParam) && part.len() > 1 {
-            if part[1].ends_with('a') {
-                axis_id = Some(AxisID::First);
-                part[1].pop();
-            } else if part[1].ends_with('b') {
-                axis_id = Some(AxisID::Second);
-                part[1].pop();
-            }
-        } else if self.directive_type == Some(DirectiveType::RunTime) && part.len() > 2 {
-            if part[2] == "a" {
-                axis_id = Some(AxisID::First);
-                part[2] = "any".to_string();
-            } else if part[2] == "b" {
-                axis_id = Some(AxisID::Second);
-                part[2] = "any".to_string();
-            }
-        }
-        self.com_file_name = (self.directive_type == Some(DirectiveType::ComParam))
-            .then(|| part.get(1).cloned())
-            .flatten();
-        self.program_name = (self.directive_type == Some(DirectiveType::ComParam))
-            .then(|| part.get(2).cloned())
-            .flatten();
-        self.parameter_name = match self.directive_type {
-            Some(DirectiveType::SetupSet) if part.get(1).map(String::as_str) == Some("copyarg") => {
-                part.get(2).cloned()
-            }
-            Some(DirectiveType::SetupSet) => part.get(1).cloned(),
-            Some(DirectiveType::ComParam) | Some(DirectiveType::RunTime) => part.get(3).cloned(),
-            _ => None,
-        };
-        self.key = (!part.is_empty()).then(|| part.join("."));
-        axis_id
-    }
-}
-
-/// Java `Directive`, with the fields and value mutations used by this source unit.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Directive {
-    pub name: DirectiveName,
-    pub batch: bool,
-    pub template: bool,
-    pub value_type: DirectiveValueType,
-    pub in_directive_file: [bool; NUM as usize],
-    pub value: Option<DirectiveStoredValue>,
-    pub default_value: Option<DirectiveStoredValue>,
-}
-
-impl Directive {
-    /// Java `Directive(DirectiveDescr)`.
-    pub fn from_descr(descr: &DirectiveDescr) -> Self {
-        let mut name = DirectiveName::new();
-        name.set_key(&descr.name);
-        Self {
-            name,
-            batch: descr.batch,
-            template: descr.template,
-            value_type: descr.value_type,
-            in_directive_file: [false; NUM as usize],
-            value: None,
-            default_value: None,
-        }
-    }
-
-    /// Java `Directive(DirectiveName)`.
-    pub fn from_name(name: &DirectiveName) -> Self {
-        Self {
-            name: name.clone(),
-            batch: true,
-            template: true,
-            value_type: DirectiveValueType::Other,
-            in_directive_file: [false; NUM as usize],
-            value: None,
-            default_value: None,
-        }
-    }
-
-    /// Java `isValid()`.
-    pub fn is_valid(&self) -> bool {
-        self.name.directive_type.is_some()
-            && self
-                .name
-                .key
-                .as_ref()
-                .map(|key| key.split('.').count() > 1)
-                .unwrap_or(false)
-    }
-
-    /// Java `getKey()`.
-    pub fn get_key(&self) -> Option<&str> {
-        self.name.key.as_deref()
-    }
-
-    /// Java `getType()`.
-    pub fn get_type(&self) -> Option<DirectiveType> {
-        self.name.directive_type
-    }
-
-    /// Java `setInDirectiveFile(DirectiveFileType, boolean)`.
-    pub fn set_in_directive_file(&mut self, file_type: DirectiveFileType, input: bool) {
-        self.in_directive_file[file_type.get_index() as usize] = input;
-    }
-}
-
-/// Java `ComFile`, at this source unit's direct boundary.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ComFile {
-    pub axis_id: AxisID,
-    pub directory: Option<String>,
-    pub com_file_name: Option<String>,
-    pub program_name: Option<String>,
-}
-
-impl ComFile {
-    /// Java `ComFile(BaseManager, AxisID)` and `ComFile(BaseManager, AxisID, String)`.
-    pub fn new(axis_id: AxisID, directory: Option<&str>) -> Self {
-        Self {
-            axis_id,
-            directory: directory.map(str::to_string),
-            com_file_name: None,
-            program_name: None,
-        }
-    }
-
-    /// Java `equalsComFileName(String)`.
-    pub fn equals_com_file_name(&self, name: Option<&str>) -> bool {
-        self.com_file_name.is_some() && self.com_file_name.as_deref() == name
-    }
-
-    /// Java `setComFileName(String)`.
-    pub fn set_com_file_name(&mut self, name: Option<&str>) {
-        if !self.equals_com_file_name(name) {
-            self.com_file_name = name.map(str::to_string);
-            self.program_name = None;
-        }
-    }
-
-    /// Java `equalsProgramName(String)`.
-    pub fn equals_program_name(&self, name: Option<&str>) -> bool {
-        self.program_name.is_some() && self.program_name.as_deref() == name
-    }
-}
-
-/// Direct storage and manager calls made by `DirectiveEditorBuilder`.
-pub trait DirectiveEditorBuilderSource: Send + Sync {
-    /// Java `DirectiveDescrFile.INSTANCE.getIterator` after the title and column header.
-    fn get_directive_descr_elements(
-        &self,
-        manager: &'static dyn BaseManager,
-    ) -> Option<Vec<DirectiveDescrElement>>;
-    /// Java local-file existence, `AutodocFactory.getInstance`, and statement iteration.
-    fn get_local_directive_statements(
-        &self,
-        manager: &'static dyn BaseManager,
-        file_type: DirectiveFileType,
-    ) -> Result<Option<Vec<DirectiveStatement>>, String>;
-    /// Java `manager.updateDirectiveMap`.
-    fn update_directive_map(
-        &self,
-        manager: &'static dyn BaseManager,
-        directive_map: &mut BTreeMap<String, Directive>,
-        errmsg: &mut String,
-    );
-    /// Java `ComFile.getCommandMap`.
-    fn get_command_map(
-        &self,
-        manager: &'static dyn BaseManager,
-        com_file: &ComFile,
-        program_name: Option<&str>,
-        errmsg: &mut String,
-    ) -> Option<HashMap<String, Option<String>>>;
-    /// Java `EtomoDirector.INSTANCE.getUserConfiguration` and `ConfigTool.getDefaultUserTemplateDir`.
-    fn get_user_template_dir(&self) -> Option<PathBuf>;
-}
-
-/// Java final `DirectiveEditorBuilder`.
+/// Java `public final class DirectiveEditorBuilder`.
 pub struct DirectiveEditorBuilder {
-    pub directive_map: BTreeMap<String, Directive>,
-    pub section_array: Vec<DirectiveDescrSection>,
-    pub file_type_exists: [bool; NUM as usize],
-    pub dropped_directives: Vec<String>,
-    pub manager: &'static dyn BaseManager,
-    pub directive_file_type: DirectiveFileType,
-    pub debug: bool,
-    pub other_section: Option<DirectiveDescrSection>,
-    pub source: &'static dyn DirectiveEditorBuilderSource,
+    /// Java private final `directiveMap = new DirectiveMap()`.
+    directive_map: RefCell<DirectiveMap>,
+    /// Java private final `sectionArray = new ArrayList<DirectiveDescrSection>()`.
+    section_array: RefCell<Vec<Rc<DirectiveDescrSection>>>,
+    /// Java private `fileTypeExists = new boolean[DirectiveFileType.NUM]`.
+    file_type_exists: RefCell<Vec<bool>>,
+    /// Java private final `droppedDirectives = new ArrayList<String>()`.
+    dropped_directives: RefCell<Vec<String>>,
+    /// Java private final `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private final `type`.
+    r#type: Option<DirectiveFileType>,
+    /// Java private `debug`, initialised to false.  Never read in the source.
+    debug: Cell<bool>,
+    /// Java private `otherSection`, initialised to null.
+    other_section: RefCell<Option<Rc<DirectiveDescrSection>>>,
 }
 
 impl DirectiveEditorBuilder {
     /// Java `DirectiveEditorBuilder(BaseManager, DirectiveFileType)`.
     pub fn new(
         manager: &'static dyn BaseManager,
-        directive_file_type: DirectiveFileType,
-        source: &'static dyn DirectiveEditorBuilderSource,
-    ) -> Self {
-        Self {
-            directive_map: BTreeMap::new(),
-            section_array: Vec::new(),
-            file_type_exists: [false; NUM as usize],
-            dropped_directives: Vec::new(),
+        r#type: Option<DirectiveFileType>,
+    ) -> DirectiveEditorBuilder {
+        DirectiveEditorBuilder {
+            directive_map: RefCell::new(DirectiveMap::new()),
+            section_array: RefCell::new(Vec::new()),
+            file_type_exists: RefCell::new(vec![false; directive_file_type::NUM as usize]),
+            dropped_directives: RefCell::new(Vec::new()),
             manager,
-            directive_file_type,
-            debug: false,
-            other_section: None,
-            source,
+            r#type,
+            debug: Cell::new(false),
+            other_section: RefCell::new(None),
         }
     }
 
-    /// Java `build(AxisType, StringBuffer)`.
-    pub fn build(&mut self, source_axis_type: AxisType, mut errmsg: Option<String>) -> String {
-        self.directive_map.clear();
-        self.section_array.clear();
-        self.file_type_exists = [false; NUM as usize];
-        self.other_section = None;
-        let mut errmsg = errmsg.take().unwrap_or_default();
-        if let Some(element_array) = self.source.get_directive_descr_elements(self.manager) {
-            let mut section_index: Option<usize> = None;
-            let mut directive_count = 0;
+    /// Java `build(AxisType, StringBuffer)`.  Builds a list of directives.  Gets the
+    /// directive names and descriptions from directives.csv and the local directive
+    /// file matching the type member variable.  Gets the values and default values from
+    /// ApplicationManager and the .com and origcoms/.com files.  `errmsg` may be null;
+    /// returns errmsg.
+    pub fn build(&self, source_axis_type: AxisType, errmsg: Option<String>) -> String {
+        // reset
+        self.directive_map.borrow_mut().clear();
+        self.section_array.borrow_mut().clear();
+        for i in 0..directive_file_type::NUM as usize {
+            self.file_type_exists.borrow_mut()[i] = false;
+        }
+        *self.other_section.borrow_mut() = None;
+        // Load and update directives, and load sections.
+        let mut errmsg = errmsg.unwrap_or_default();
+        // Load the directives from directives.csv.
+        let descr_iterator =
+            directive_descr_file::INSTANCE.get_iterator(Some(self.manager), Some(AXID_ID));
+        if let Some(mut descr_iterator) = descr_iterator {
+            // Skip title and column header
+            descr_iterator.has_next();
+            descr_iterator.has_next();
+            let mut section: Option<Rc<DirectiveDescrSection>> = None;
+            let mut d_count = 0;
             let mut matches_type = false;
-            for element in element_array {
-                match element {
-                    DirectiveDescrElement::Section(header) => {
-                        if let Some(index) = section_index {
-                            self.section_array[index].contains_editable_directives = matches_type;
-                            if directive_count == 0 {
-                                self.section_array.remove(index);
-                            }
-                        }
-                        section_index = Some(self.section_array.len());
-                        directive_count = 0;
-                        matches_type = false;
-                        self.section_array.push(DirectiveDescrSection {
-                            title: header,
-                            names: Vec::new(),
-                            contains_editable_directives: true,
-                        });
-                    }
-                    DirectiveDescrElement::Directive(descr) => {
-                        let directive = Directive::from_descr(&descr);
-                        if directive.is_valid() {
-                            if (!matches_type
-                                && self.directive_file_type != DirectiveFileType::Batch
-                                && (directive.template || !directive.batch))
-                                || (self.directive_file_type == DirectiveFileType::Batch
-                                    && (!directive.template || directive.batch))
+            while descr_iterator.has_next() {
+                let Some(element) = descr_iterator.next_element() else {
+                    break;
+                };
+                // Get the section - directives following this section are associated
+                // with it.
+                if element.is_section() {
+                    if let Some(section) = &section {
+                        // Record whether any of the directives in the section match the
+                        // directive file type. Directives that don't match the type
+                        // cannot be edited in this editor.
+                        section.set_contains_editable_directives(matches_type);
+                        if d_count == 0 {
+                            let mut section_array = self.section_array.borrow_mut();
+                            if let Some(index) = section_array
+                                .iter()
+                                .position(|listed| Rc::ptr_eq(listed, section))
                             {
-                                matches_type = true;
-                            }
-                            directive_count += 1;
-                            let key = directive.get_key().unwrap().to_string();
-                            self.directive_map.insert(key.clone(), directive);
-                            if let Some(index) = section_index {
-                                self.section_array[index].names.push(key);
-                            } else {
-                                eprintln!(
-                                    "Error: directive {}, not inside a section in the directives.csv file.  It cannot be edited.",
-                                    descr.name
-                                );
+                                section_array.remove(index);
                             }
                         }
                     }
-                    DirectiveDescrElement::Other => {}
+                    let new_section = Rc::new(DirectiveDescrSection::new(
+                        element.get_section_header().as_deref(),
+                    ));
+                    matches_type = false;
+                    d_count = 0;
+                    self.section_array.borrow_mut().push(new_section.clone());
+                    section = Some(new_section);
+                } else if element.is_directive() {
+                    // Get the directive
+                    let directive = Directive::new_directive_descr(element);
+                    // Only save valid directives.
+                    if directive.is_valid() {
+                        // Check to see if this directive matches the type
+                        if !matches_type
+                            && (self.r#type != Some(DirectiveFileType::Batch)
+                                && (directive.is_template() || !directive.is_batch()))
+                            || (self.r#type == Some(DirectiveFileType::Batch)
+                                && (!directive.is_template() || directive.is_batch()))
+                        {
+                            matches_type = true;
+                        }
+                        d_count += 1;
+                        let directive = Arc::new(directive);
+                        let key = directive.get_key();
+                        // Store the directive in the map
+                        self.directive_map
+                            .borrow_mut()
+                            .put(key.as_deref().unwrap_or("null"), directive.clone());
+                        // Store the directive under current section - directives are
+                        // always stored under sections, so section should not be null.
+                        if let Some(section) = &section {
+                            section.add_directive(Some(&directive));
+                        } else {
+                            eprintln!(
+                                "Error: directive {}, not inside a section in the directives.csv file.  It cannot be edited.",
+                                directive.get_title().as_deref().unwrap_or("null")
+                            );
+                        }
+                    }
                 }
             }
+            directive_descr_file::INSTANCE.release_iterator(&descr_iterator);
         }
-        self.update_from_local_directive_file(DirectiveFileType::Scope, &mut errmsg);
-        self.update_from_local_directive_file(DirectiveFileType::System, &mut errmsg);
-        self.update_from_local_directive_file(DirectiveFileType::User, &mut errmsg);
-        self.update_from_local_directive_file(DirectiveFileType::Batch, &mut errmsg);
-        self.source
-            .update_directive_map(self.manager, &mut self.directive_map, &mut errmsg);
+        // Add information and undocumented directives from the current directive files.
+        self.update_from_local_directive_file(Some(DirectiveFileType::Scope), &mut errmsg);
+        self.update_from_local_directive_file(Some(DirectiveFileType::System), &mut errmsg);
+        self.update_from_local_directive_file(Some(DirectiveFileType::User), &mut errmsg);
+        self.update_from_local_directive_file(Some(DirectiveFileType::Batch), &mut errmsg);
+        // update setupset and runtime
+        self.manager
+            .update_directive_map_directive_map(&self.directive_map.borrow(), &mut errmsg);
+        // update paramMap from *.com and origcoms/*.com
+        // Get a sorted list of comparam directive names
+        let mut iterator = self
+            .directive_map
+            .borrow()
+            .key_set(Some(DirectiveType::COM_PARAM))
+            .iterator();
         let first_axis_id = if source_axis_type == AxisType::DualAxis {
             AxisID::First
         } else {
             AxisID::Only
         };
-        let mut com_file = ComFile::new(first_axis_id, None);
-        let mut command_map = None;
-        let mut com_file_defaults = ComFile::new(first_axis_id, Some("origcoms"));
-        let mut command_map_defaults = None;
-        for directive_name in self
-            .directive_map
-            .values()
-            .filter(|directive| directive.get_type() == Some(DirectiveType::ComParam))
-            .map(|directive| directive.name.clone())
-            .collect::<Vec<_>>()
-        {
+        // A or only axis
+        let mut com_file = ComFile::new(self.manager, first_axis_id);
+        let mut command_map: Option<CommandMap> = None;
+        let mut com_file_defaults =
+            ComFile::new_subdirectory(self.manager, first_axis_id, Some("origcoms"));
+        let mut command_map_defaults: Option<CommandMap> = None;
+        let mut directive_name = DirectiveName::new();
+        while iterator.has_next() {
+            directive_name.set_key_string(iterator.next().as_deref());
+            // save values
             command_map = self.get_command_map(
                 &directive_name,
                 &mut com_file,
@@ -404,9 +212,10 @@ impl DirectiveEditorBuilder {
                 &mut errmsg,
                 false,
             );
-            if let Some(ref command_map) = command_map {
-                self.set_directive_value(command_map, &directive_name, false);
+            if let Some(command_map) = &command_map {
+                self.set_directive_value(Some(command_map), &directive_name, false);
             }
+            // save default values
             command_map_defaults = self.get_command_map(
                 &directive_name,
                 &mut com_file_defaults,
@@ -414,92 +223,168 @@ impl DirectiveEditorBuilder {
                 &mut errmsg,
                 true,
             );
-            if let Some(ref command_map) = command_map_defaults {
-                self.set_directive_value(command_map, &directive_name, true);
+            if let Some(command_map_defaults) = &command_map_defaults {
+                self.set_directive_value(Some(command_map_defaults), &directive_name, true);
             }
         }
         errmsg
     }
 
-    /// Java `updateFromLocalDirectiveFile(DirectiveFileType, StringBuffer)`.
+    // Updates done
+
+    /// Java private `updateFromLocalDirectiveFile(DirectiveFileType, StringBuffer)`.
+    /// Updates existing directives and loads ones that are not in directive.csv.
+    /// Returns true if the local directive file exists.
     fn update_from_local_directive_file(
-        &mut self,
-        file_type: DirectiveFileType,
+        &self,
+        r#type: Option<DirectiveFileType>,
         errmsg: &mut String,
     ) -> bool {
-        let statement_array = match self
-            .source
-            .get_local_directive_statements(self.manager, file_type)
-        {
-            Ok(Some(statement_array)) => statement_array,
-            Ok(None) => return false,
-            Err(error) => {
-                errmsg.push_str(&format!("Unable to load {}.  {}  ", file_type, error));
-                return false;
-            }
+        let Some(r#type) = r#type else {
+            return false;
         };
-        self.file_type_exists[file_type.get_index() as usize] = true;
-        for statement in statement_array {
+        let Some(directive_file) = r#type.get_local_file(Some(self.manager), Some(AXID_ID)) else {
+            return false;
+        };
+        if !directive_file.exists() {
+            return false;
+        }
+        self.file_type_exists.borrow_mut()[r#type.get_index() as usize] = true;
+        let result: Result<bool, LogFileError> = (|| {
+            let statement_list = unsafe {
+                autodoc_factory::get_instance_file(Some(self.manager), Some(&directive_file), false)
+            }?;
+            if statement_list.is_null() {
+                return Ok(false);
+            }
+            let statement_list = unsafe { &*statement_list };
+            let mut location = ReadOnlyStatementList::get_statement_location(statement_list);
             let mut directive_name = DirectiveName::new();
-            let axis_id = directive_name.set_key(&statement.left_side);
-            let key = directive_name.key.clone().unwrap();
-            if !self.directive_map.contains_key(&key) {
-                let directive = Directive::from_name(&directive_name);
-                if axis_id == Some(AxisID::Second) {
+            loop {
+                let statement = unsafe {
+                    ReadOnlyStatementList::next_statement(statement_list, location.as_mut())
+                };
+                if statement.is_null() {
                     break;
                 }
-                if directive.is_valid() && directive.get_type() == Some(DirectiveType::ComParam) {
-                    if self.other_section.is_none() {
-                        let other_section = DirectiveDescrSection {
-                            title: SECTION_OTHER_HEADER.to_string(),
-                            names: Vec::new(),
-                            contains_editable_directives: true,
-                        };
-                        self.section_array.push(other_section.clone());
-                        self.other_section = Some(other_section);
-                    }
-                    self.other_section.as_mut().unwrap().names.push(key.clone());
-                    let index = self.section_array.len() - 1;
-                    self.section_array[index].names.push(key.clone());
-                    self.directive_map.insert(key.clone(), directive);
-                } else {
-                    self.dropped_directives.push(statement.left_side);
+                let statement = unsafe { &*statement };
+                if statement.get_type() != statement::Type::NameValuePair {
                     continue;
                 }
+                let left_side = statement.get_left_side();
+                let axis_id = directive_name.set_key_string(left_side.as_deref());
+                let mut directive = self
+                    .directive_map
+                    .borrow()
+                    .get_directive_string(directive_name.get_key().as_deref());
+                if directive.is_none() {
+                    // Handle undefined directives.
+                    let undefined = Arc::new(Directive::new_directive_name(&directive_name));
+                    // Ignoring B axis values and directives.
+                    if axis_id == Some(AxisID::Second) {
+                        break;
+                    }
+                    // Only comparam directives are used generically by batchruntomo, so
+                    // undefined ones may be useful.
+                    if undefined.is_valid()
+                        && undefined.get_type() == Some(DirectiveType::COM_PARAM)
+                    {
+                        // If otherSection hasn't been created, create it and add it to
+                        // sectionArray.
+                        let other_section = self
+                            .other_section
+                            .borrow_mut()
+                            .get_or_insert_with(|| {
+                                let other_section =
+                                    Rc::new(DirectiveDescrSection::new(Some(SECTION_OTHER_HEADER)));
+                                self.section_array.borrow_mut().push(other_section.clone());
+                                other_section
+                            })
+                            .clone();
+                        let key = undefined.get_key();
+                        other_section.add_string(key.as_deref());
+                        self.directive_map
+                            .borrow_mut()
+                            .put(key.as_deref().unwrap_or("null"), undefined.clone());
+                        directive = Some(undefined);
+                    } else {
+                        // Save directives that don't go into the editor.
+                        self.dropped_directives
+                            .borrow_mut()
+                            .push(left_side.clone().unwrap_or_else(|| "null".to_string()));
+                    }
+                }
+                // Upstream bug fixed in translation (DirectiveEditorBuilder.java:243):
+                // for a dropped directive Java goes on to `directive.getValueType()`
+                // with `directive` null, and the NullPointerException aborts building
+                // the editor.  A dropped directive has no value to set; the next
+                // statement is read.
+                let Some(directive) = directive else {
+                    continue;
+                };
+                directive.set_in_directive_file(Some(r#type), true);
+                // Set the value from the file. This value will be overridden by
+                // subsequent templates, and then from the coms or from the non-generic
+                // code in the manager.
+                let value_type = directive.get_value_type();
+                let value = statement.get_right_side();
+                if value_type != Some(DirectiveValueType::Boolean) {
+                    // A blank value is an override.
+                    directive.set_value_string(value.as_deref());
+                } else if value.is_some() {
+                    // A boolean value cannot be empty.
+                    directive.set_value_string(value.as_deref());
+                }
             }
-            let directive = self.directive_map.get_mut(&key).unwrap();
-            directive.set_in_directive_file(file_type, true);
-            if directive.value_type != DirectiveValueType::Boolean || statement.right_side.is_some()
-            {
-                directive.value = Some(match statement.right_side {
-                    Some(value) => DirectiveStoredValue::String(value),
-                    None => DirectiveStoredValue::Boolean(true),
-                });
+            Ok(true)
+        })();
+        match result {
+            Ok(retval) => retval,
+            // `catch (final LockException e) {}`
+            Err(LogFileError::Lock(_)) => false,
+            // `catch (final LogFileException e)` and `catch (final IOException e)`.
+            Err(e) => {
+                if matches!(e, LogFileError::Io(_)) {
+                    // `e.printStackTrace()`; see etomo/util/stack_trace.rs.
+                    eprintln!("{}", e);
+                }
+                errmsg.push_str(&format!(
+                    "Unable to load {}.  {}  ",
+                    directive_file
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default(),
+                    e.get_message()
+                ));
+                false
             }
         }
-        true
     }
 
-    /// Java `getCommandMap(DirectiveName, ComFile, Map, StringBuffer, boolean)`.
+    /// Java private `getCommandMap(DirectiveName, ComFile, Map, StringBuffer, boolean)`.
+    /// Uses the directiveName as a guide and decides whether to open a com file or
+    /// create a new commandMap.  If neither of these things are necessary, returns the
+    /// existing commandMap.
     fn get_command_map(
-        &mut self,
+        &self,
         directive_name: &DirectiveName,
         com_file: &mut ComFile,
-        mut command_map: Option<HashMap<String, Option<String>>>,
+        mut command_map: Option<CommandMap>,
         errmsg: &mut String,
         origcoms: bool,
-    ) -> Option<HashMap<String, Option<String>>> {
-        if !com_file.equals_com_file_name(directive_name.com_file_name.as_deref()) {
-            com_file.set_com_file_name(directive_name.com_file_name.as_deref());
+    ) -> Option<CommandMap> {
+        // Get a new comfile and origcoms comfile each time the comfile name changes in
+        // the sorted list of comparam directives.
+        let com_file_name = directive_name.get_com_file_name();
+        if !com_file.equals_com_file_name(com_file_name.as_deref()) {
+            com_file.set_com_file_name(com_file_name.as_deref());
         }
-        if !com_file.equals_program_name(directive_name.program_name.as_deref()) {
-            com_file.program_name = directive_name.program_name.clone();
-            command_map = self.source.get_command_map(
-                self.manager,
-                com_file,
-                directive_name.program_name.as_deref(),
-                errmsg,
-            );
+        // Get a new program from the comfile and origcoms comfile each time the program
+        // name or comfile name changes in the sorted list of comparam directives.
+        let program_name = directive_name.get_program_name();
+        if !com_file.equals_program_name(program_name.as_deref()) {
+            command_map = com_file.get_command_map(program_name.as_deref(), errmsg);
+            // Handled special case setupset directives.
             if origcoms
                 && com_file.equals_com_file_name(Some(SPECIAL_CASE_PROGRAM_NAME))
                 && com_file.equals_program_name(Some(SPECIAL_CASE_PROGRAM_NAME))
@@ -510,297 +395,166 @@ impl DirectiveEditorBuilder {
         command_map
     }
 
-    /// Java `setSpecialCaseDefaultValues(Map)`.
-    fn set_special_case_default_values(
-        &mut self,
-        command_map: Option<&HashMap<String, Option<String>>>,
-    ) {
+    /// Java private `setSpecialCaseDefaultValues(Map)`.  Handles cases where a setupset
+    /// directive has a default value that is stored in a .com file.
+    fn set_special_case_default_values(&self, command_map: Option<&CommandMap>) {
         let mut from_directive_name = DirectiveName::new();
         let mut to_directive_name = DirectiveName::new();
-        from_directive_name.set_key("comparam.ctfplotter.ctfplotter.ExpectedDefocus");
-        to_directive_name.set_key("setupset.copyarg.defocus");
+        let from_prefix = "comparam.";
+        let to_prefix = "setupset.copyarg.";
+        from_directive_name.set_key_string(Some(&format!(
+            "{from_prefix}{SPECIAL_CASE_PROGRAM_NAME}.{SPECIAL_CASE_PROGRAM_NAME}.ExpectedDefocus"
+        )));
+        to_directive_name.set_key_string(Some(&format!("{to_prefix}defocus")));
         self.set_default_directive_value(command_map, &from_directive_name, &to_directive_name);
-        from_directive_name.set_key("comparam.ctfplotter.ctfplotter.Voltage");
-        to_directive_name.set_key("setupset.copyarg.voltage");
+        from_directive_name.set_key_string(Some(&format!(
+            "{from_prefix}{SPECIAL_CASE_PROGRAM_NAME}.{SPECIAL_CASE_PROGRAM_NAME}.Voltage"
+        )));
+        to_directive_name.set_key_string(Some(&format!("{to_prefix}voltage")));
         self.set_default_directive_value(command_map, &from_directive_name, &to_directive_name);
-        from_directive_name.set_key("comparam.ctfplotter.ctfplotter.SphericalAberration");
-        to_directive_name.set_key("setupset.copyarg.Cs");
+        from_directive_name.set_key_string(Some(&format!(
+            "{from_prefix}{SPECIAL_CASE_PROGRAM_NAME}.{SPECIAL_CASE_PROGRAM_NAME}.SphericalAberration"
+        )));
+        to_directive_name.set_key_string(Some(&format!("{to_prefix}Cs")));
         self.set_default_directive_value(command_map, &from_directive_name, &to_directive_name);
     }
 
-    /// Java `setDefaultDirectiveValue(Map, DirectiveName, DirectiveName)`.
+    /// Java private `setDefaultDirectiveValue(Map, DirectiveName, DirectiveName)`.
+    /// Using fromDirectiveName as a key, gets a value from commandMap.  Using
+    /// toDirectiveName as a key, gets a directive from directiveMap.  Places the value
+    /// in the default value of the directive.
     fn set_default_directive_value(
-        &mut self,
-        command_map: Option<&HashMap<String, Option<String>>>,
+        &self,
+        command_map: Option<&CommandMap>,
         from_directive_name: &DirectiveName,
         to_directive_name: &DirectiveName,
     ) {
         let Some(command_map) = command_map else {
             return;
         };
-        let Some(parameter_name) = from_directive_name.parameter_name.as_deref() else {
-            return;
-        };
-        if let Some(value) = command_map.get(parameter_name) {
-            let directive = self
+        // Pull out the default value from the command map, using the "from" directive
+        // name.
+        let parameter_name = from_directive_name.get_parameter_name();
+        if let Some(value) = parameter_name
+            .as_deref()
+            .and_then(|parameter_name| command_map.get(parameter_name))
+        {
+            // Upstream bug fixed in translation (DirectiveEditorBuilder.java:325): Java
+            // dereferences the "to" directive unchecked; a directives.csv without it
+            // would throw NullPointerException.  Nothing is set then.
+            let Some(to_directive) = self
                 .directive_map
-                .get_mut(to_directive_name.key.as_deref().unwrap())
-                .unwrap();
-            directive.default_value = Some(match value {
-                Some(value) => DirectiveStoredValue::String(value.clone()),
-                None => DirectiveStoredValue::Boolean(true),
-            });
+                .borrow()
+                .get_directive_string(to_directive_name.get_key().as_deref())
+            else {
+                return;
+            };
+            // Set the command map value in the "to" directive
+            match value {
+                Some(value) => to_directive.set_default_value_string(Some(value)),
+                // no value - treat as a boolean
+                None => to_directive.set_default_value_boolean(true),
+            }
         }
     }
 
-    /// Java `setDirectiveValue(Map, DirectiveName, boolean)`.
+    /// Java private `setDirectiveValue(Map, DirectiveName, boolean)`.  Using
+    /// directiveName as the key, gets a value from commandMap and gets a directive from
+    /// directiveMap.  Places the value in the directive.
     fn set_directive_value(
-        &mut self,
-        command_map: &HashMap<String, Option<String>>,
+        &self,
+        command_map: Option<&CommandMap>,
         directive_name: &DirectiveName,
         is_default_value: bool,
     ) {
-        let Some(parameter_name) = directive_name.parameter_name.as_deref() else {
+        let Some(command_map) = command_map else {
             return;
         };
-        if let Some(value) = command_map.get(parameter_name) {
-            let directive = self
+        // Pull out the value or default value from the program command.
+        let parameter_name = directive_name.get_parameter_name();
+        if let Some(value) = parameter_name
+            .as_deref()
+            .and_then(|parameter_name| command_map.get(parameter_name))
+        {
+            // The key comes from the map's own comparam key set, so the directive is
+            // there.
+            let Some(directive) = self
                 .directive_map
-                .get_mut(directive_name.key.as_deref().unwrap())
-                .unwrap();
-            let value = match value {
-                Some(value) => DirectiveStoredValue::String(value.clone()),
-                None => DirectiveStoredValue::Boolean(true),
+                .borrow()
+                .get_directive_string(directive_name.get_key().as_deref())
+            else {
+                return;
             };
-            if is_default_value {
-                directive.default_value = Some(value);
-            } else {
-                directive.value = Some(value);
+            // Set value in the directive
+            match value {
+                Some(value) => {
+                    if !is_default_value {
+                        directive.set_value_string(Some(value));
+                    } else {
+                        directive.set_default_value_string(Some(value));
+                    }
+                }
+                None => {
+                    // no value - treat as a boolean
+                    if !is_default_value {
+                        directive.set_value_boolean(true);
+                    } else {
+                        directive.set_default_value_boolean(true);
+                    }
+                }
             }
         }
     }
 
     /// Java `getSectionArray()`.
-    pub fn get_section_array(&self) -> Vec<DirectiveDescrSection> {
-        self.section_array.clone()
+    pub fn get_section_array(&self) -> Vec<Rc<DirectiveDescrSection>> {
+        self.section_array.borrow().clone()
     }
 
     /// Java `getFileTypeExists()`.
-    pub fn get_file_type_exists(&self) -> [bool; NUM as usize] {
-        self.file_type_exists
+    pub fn get_file_type_exists(&self) -> Vec<bool> {
+        self.file_type_exists.borrow().clone()
     }
 
     /// Java `getDroppedDirectives()`.
     pub fn get_dropped_directives(&self) -> Vec<String> {
-        self.dropped_directives.clone()
+        self.dropped_directives.borrow().clone()
     }
 
-    /// Java `getDefaultSaveLocation()`.
-    pub fn get_default_save_location(&self) -> Option<PathBuf> {
-        if self.directive_file_type == DirectiveFileType::User {
-            if let Some(directory) = self.source.get_user_template_dir() {
-                if !directory.exists() {
-                    eprintln!("Creating user template directory:{}", directory.display());
-                    let _ = std::fs::create_dir_all(&directory);
+    /// Java `getDefaultSaveLocation()`.  If the type is USER, will attempt to create the
+    /// user directory if necessary.
+    pub fn get_default_save_location(&self) -> PathBuf {
+        let mut dir: Option<PathBuf> = None;
+        if self.r#type == Some(DirectiveFileType::User) {
+            dir = etomo_director::INSTANCE.with_user_configuration(|user_config| {
+                if user_config.is_user_template_dir_set() {
+                    user_config.get_user_template_dir().map(PathBuf::from)
+                } else {
+                    config_tool::get_default_user_template_dir()
                 }
-                return Some(directory);
+            });
+            if let Some(dir) = &dir
+                && !dir.exists()
+            {
+                eprintln!(
+                    "Creating user template directory:{}",
+                    java_io_file_get_absolute_path(&dir.to_string_lossy())
+                );
+                let _ = std::fs::create_dir_all(dir);
             }
         }
-        self.manager.get_property_user_dir().map(PathBuf::from)
+        if let Some(dir) = dir {
+            return dir;
+        }
+        PathBuf::from(
+            self.manager
+                .get_property_user_dir()
+                .unwrap_or_else(|| "null".to_string()),
+        )
     }
 
     /// Java `getDirectiveMap()`.
-    pub fn get_directive_map(&self) -> BTreeMap<String, Directive> {
-        self.directive_map.clone()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::base_manager::{BaseManager, BaseManagerBase};
-    use crate::imod::etomo::r#type::interface_type::InterfaceType;
-
-    struct Manager(BaseManagerBase);
-    impl BaseManager for Manager {
-        fn base(&self) -> &BaseManagerBase {
-            &self.0
-        }
-        fn this(&'static self) -> &'static dyn BaseManager {
-            self
-        }
-        fn get_interface_type(&self) -> Option<InterfaceType> {
-            None
-        }
-        fn create_main_panel(&self) {}
-        fn get_base_meta_data(
-            &self,
-        ) -> Option<&dyn crate::imod::etomo::r#type::base_meta_data::BaseMetaData> {
-            None
-        }
-        fn get_main_panel(
-            &self,
-        ) -> Option<std::rc::Rc<dyn crate::imod::etomo::ui::swing::main_panel::MainPanelVirtual>>
-        {
-            None
-        }
-        fn get_process_manager(
-            &self,
-        ) -> Option<&'static crate::imod::etomo::process::base_process_manager::BaseProcessManager>
-        {
-            None
-        }
-        fn get_storables_with_offset(
-            &self,
-            _offset: i32,
-        ) -> Option<Vec<Option<&'static dyn crate::imod::etomo::storage::storable::Storable>>>
-        {
-            None
-        }
-        fn get_name(&self) -> Option<String> {
-            None
-        }
-    }
-
-    struct Source;
-    impl DirectiveEditorBuilderSource for Source {
-        fn get_directive_descr_elements(
-            &self,
-            _manager: &'static dyn BaseManager,
-        ) -> Option<Vec<DirectiveDescrElement>> {
-            Some(vec![
-                DirectiveDescrElement::Section("Main".to_string()),
-                DirectiveDescrElement::Directive(DirectiveDescr {
-                    name: "comparam.test.test.Value".to_string(),
-                    directive_type: DirectiveType::ComParam,
-                    value_type: DirectiveValueType::Other,
-                    batch: false,
-                    template: true,
-                }),
-                DirectiveDescrElement::Section("Empty".to_string()),
-            ])
-        }
-        fn get_local_directive_statements(
-            &self,
-            _manager: &'static dyn BaseManager,
-            file_type: DirectiveFileType,
-        ) -> Result<Option<Vec<DirectiveStatement>>, String> {
-            if file_type == DirectiveFileType::Scope {
-                Ok(Some(vec![DirectiveStatement {
-                    left_side: "comparam.test.test.Value".to_string(),
-                    right_side: Some("local".to_string()),
-                }]))
-            } else {
-                Ok(None)
-            }
-        }
-        fn update_directive_map(
-            &self,
-            _manager: &'static dyn BaseManager,
-            _directive_map: &mut BTreeMap<String, Directive>,
-            _errmsg: &mut String,
-        ) {
-        }
-        fn get_command_map(
-            &self,
-            _manager: &'static dyn BaseManager,
-            com_file: &ComFile,
-            _program_name: Option<&str>,
-            _errmsg: &mut String,
-        ) -> Option<HashMap<String, Option<String>>> {
-            (com_file.directory.is_none())
-                .then(|| HashMap::from([("Value".to_string(), Some("com".to_string()))]))
-        }
-        fn get_user_template_dir(&self) -> Option<PathBuf> {
-            None
-        }
-    }
-
-    #[test]
-    fn build_leaves_the_final_empty_section_as_the_java_loop_does() {
-        static MANAGER: std::sync::LazyLock<Manager> =
-            std::sync::LazyLock::new(|| Manager(BaseManagerBase::initial()));
-        static SOURCE: Source = Source;
-        let mut builder = DirectiveEditorBuilder::new(&*MANAGER, DirectiveFileType::Scope, &SOURCE);
-        assert_eq!(builder.build(AxisType::SingleAxis, None), "");
-        assert_eq!(builder.section_array.len(), 2);
-        assert_eq!(builder.section_array[0].names, ["comparam.test.test.Value"]);
-        assert_eq!(
-            builder.directive_map["comparam.test.test.Value"]
-                .value
-                .as_ref(),
-            Some(&DirectiveStoredValue::String("com".to_string()))
-        );
-        assert!(builder.file_type_exists[DirectiveFileType::Scope.get_index() as usize]);
-    }
-
-    #[test]
-    fn local_undefined_comparam_is_added_to_other_directives_but_b_axis_stops_reading() {
-        static MANAGER: std::sync::LazyLock<Manager> =
-            std::sync::LazyLock::new(|| Manager(BaseManagerBase::initial()));
-        struct LocalSource;
-        impl DirectiveEditorBuilderSource for LocalSource {
-            fn get_directive_descr_elements(
-                &self,
-                _manager: &'static dyn BaseManager,
-            ) -> Option<Vec<DirectiveDescrElement>> {
-                Some(Vec::new())
-            }
-            fn get_local_directive_statements(
-                &self,
-                _manager: &'static dyn BaseManager,
-                file_type: DirectiveFileType,
-            ) -> Result<Option<Vec<DirectiveStatement>>, String> {
-                Ok((file_type == DirectiveFileType::Scope).then(|| {
-                    vec![
-                        DirectiveStatement {
-                            left_side: "comparam.item.item.Value".to_string(),
-                            right_side: Some("x".to_string()),
-                        },
-                        DirectiveStatement {
-                            left_side: "comparam.itemb.itemb.Value".to_string(),
-                            right_side: Some("b".to_string()),
-                        },
-                        DirectiveStatement {
-                            left_side: "comparam.later.later.Value".to_string(),
-                            right_side: Some("later".to_string()),
-                        },
-                    ]
-                }))
-            }
-            fn update_directive_map(
-                &self,
-                _manager: &'static dyn BaseManager,
-                _directive_map: &mut BTreeMap<String, Directive>,
-                _errmsg: &mut String,
-            ) {
-            }
-            fn get_command_map(
-                &self,
-                _manager: &'static dyn BaseManager,
-                _com_file: &ComFile,
-                _program_name: Option<&str>,
-                _errmsg: &mut String,
-            ) -> Option<HashMap<String, Option<String>>> {
-                None
-            }
-            fn get_user_template_dir(&self) -> Option<PathBuf> {
-                None
-            }
-        }
-        static SOURCE: LocalSource = LocalSource;
-        let mut builder = DirectiveEditorBuilder::new(&*MANAGER, DirectiveFileType::Scope, &SOURCE);
-        builder.build(AxisType::SingleAxis, None);
-        assert!(
-            builder
-                .directive_map
-                .contains_key("comparam.item.item.Value")
-        );
-        assert!(
-            !builder
-                .directive_map
-                .contains_key("comparam.later.later.Value")
-        );
-        assert_eq!(builder.section_array[0].title, SECTION_OTHER_HEADER);
+    pub fn get_directive_map(&self) -> std::cell::Ref<'_, DirectiveMap> {
+        self.directive_map.borrow()
     }
 }

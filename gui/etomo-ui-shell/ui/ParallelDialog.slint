@@ -22,6 +22,8 @@ import {
     RadioButton,
     MultiLineButton,
     LabeledTextField,
+    EtomoBridge,
+    BridgedButton,
 } from "../../etomo-ui-common/ui/widgets.slint";
 import { FileTextField, InlineSpinner, InlineTextField } from "ShellWidgets.slint";
 
@@ -98,10 +100,16 @@ export component ParallelDialog inherits Rectangle {
             Rectangle { height: 5px; }
 
             // `pnlChunkSetupOutputFile`: X_AXIS -- lChunkSetupOutputFile, glue.
+            // `lChunkSetupOutputFile = new Label(CHUNK_SETUP_OUTPUT_FILE_LABEL,
+            // CHUNK_SETUP_OUTPUT_FILE_LABEL)` (named "l.output-file"); its text
+            // becomes "Output File: <file>" after chunksetup.  Wired, the text is
+            // the label's.
             HorizontalLayout {
                 alignment: start;
                 Text {
-                    text: "Output File: ";
+                    text: EtomoBridge.wired
+                        ? EtomoBridge.text-value("l", "Output File: ", "Output File: ", EtomoBridge.generation)
+                        : "Output File: ";
                     vertical-alignment: center;
                     color: EtomoStyle.text;
                     font-size: EtomoStyle.font-size-pt * 1px;
@@ -114,17 +122,26 @@ export component ParallelDialog inherits Rectangle {
 
         // `pnlRunProcess`: BoxLayout.Y_AXIS, no border.
         VerticalLayout {
-            spacing: EtomoStyle.gap;
+            spacing: EtomoStyle.row-gap;
             alignment: start;
 
             // `pnlProcessName`: X_AXIS -- ltfProcessName (text preferred width
             // 125), `btnChunkComscript` (a SimpleButton carrying
-            // ScaledImage.OPEN_FILE, named PROCESS_NAME_LABEL), glue.  The
-            // labelled field plus folder button is exactly the FileTextField
-            // shape, so it is drawn with that component.
+            // ScaledImage.OPEN_FILE, named PROCESS_NAME_LABEL: "bn.process-name"),
+            // glue.
             HorizontalLayout {
                 alignment: start;
-                FileTextField { label: "Process name: "; text: ""; width: 320px; }
+                spacing: EtomoStyle.gap;
+                InlineTextField { label: "Process name: "; text: ""; field-width: 125px; }
+                Rectangle {
+                    width: EtomoStyle.field-height;
+                    height: EtomoStyle.field-height;
+                    background: EtomoStyle.panel;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                    Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+                    BridgedButton { kind: "bn"; label: "Process name: "; }
+                }
             }
             Rectangle { height: 5px; }
 

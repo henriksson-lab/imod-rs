@@ -17,6 +17,7 @@ use std::rc::{Rc, Weak};
 use super::beveled_border::BeveledBorder;
 use super::cleanup_panel::CleanupPanel;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::multi_line_button::MultiLineButton;
 use super::process_dialog::{ProcessDialog, ProcessDialogVirtual};
@@ -125,10 +126,8 @@ impl CleanUpDialog {
         instance.base.btn_execute.set_text(Some("Done"));
 
         // Mouse adapter for context menu
-        // Swing mouse: rootPanel.addMouseListener(new GenericMouseAdapter(this)).
-        // Mouse events are not modelled; the adapter's only effect is to call
-        // popUpContextMenu on a right-button press, which a driver calls
-        // directly.
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(&instance) as Weak<dyn ContextMenu>;
+        root_panel.add_mouse_listener(GenericMouseAdapter::new(context_menu));
         instance.set_tool_tip_text();
         instance
     }

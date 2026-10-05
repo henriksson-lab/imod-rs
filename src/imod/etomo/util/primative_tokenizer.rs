@@ -23,8 +23,7 @@
 //! The file factories resolve an autodoc directory through
 //! `Utilities.getExistingDir(BaseManager, ...)` - which reads the environment of a
 //! freshly forked `env`, see `etomo/util/environment_variable.rs` - and then open the
-//! file as a `LogFile.Handle`.  `BaseManager` has no module; every caller that reaches
-//! here passes a null one, so the parameter is typed `Option<Infallible>`.
+//! file as a `LogFile.Handle`.
 //!
 //! Java's `FileReader` is a lazy character stream and `closeFile` closes it partway
 //! through when the tokenizer hits EOF.  `JavaIoStreamTokenizer` below owns the whole

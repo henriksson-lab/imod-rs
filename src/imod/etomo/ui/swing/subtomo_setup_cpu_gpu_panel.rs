@@ -28,8 +28,6 @@ use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::comscript::subtomo_setup_param;
 use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent};
-// TODO(unit): needs etomo/ProcessingMethodMediator.java - the mediator type and
-// its addGpuListener (as assumed by cpu_gpu_panel.rs).
 use crate::imod::etomo::processing_method_mediator::ProcessingMethodMediator;
 use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
 use crate::imod::etomo::storage::autodoc::autodoc_factory;

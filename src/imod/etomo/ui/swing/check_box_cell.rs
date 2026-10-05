@@ -912,3 +912,178 @@ impl SwingComponent for CheckBoxCell {
         self.check_box.clone()
     }
 }
+
+/// The `etomo.ui.Field` interface the Java class implements.
+impl Field for CheckBoxCell {
+    fn is_debug(&self) -> bool {
+        CheckBoxCell::is_debug(self)
+    }
+    fn get_name(&self) -> Option<String> {
+        CheckBoxCell::get_name(self)
+    }
+    fn is_boolean(&self) -> bool {
+        CheckBoxCell::is_boolean(self)
+    }
+    fn is_text(&self) -> bool {
+        CheckBoxCell::is_text(self)
+    }
+    fn get_quoted_label(&self) -> Option<String> {
+        CheckBoxCell::get_quoted_label(self)
+    }
+    fn is_enabled(&self) -> bool {
+        CheckBoxCell::is_enabled(self)
+    }
+    fn clear(&self) {
+        CheckBoxCell::clear(self)
+    }
+    fn set_value_field(&self, from: Option<&dyn Field>) {
+        CheckBoxCell::set_value_field(self, from)
+    }
+    fn set_value_string(&self, text: Option<&str>) {
+        CheckBoxCell::set_value_string(self, text)
+    }
+    fn set_value_boolean(&self, bool_: bool) {
+        CheckBoxCell::set_value_boolean(self, bool_)
+    }
+    fn is_empty(&self) -> bool {
+        CheckBoxCell::is_empty(self)
+    }
+    fn is_selected(&self) -> bool {
+        CheckBoxCell::is_selected(self)
+    }
+    fn is_required(&self) -> bool {
+        CheckBoxCell::is_required(self)
+    }
+    fn get_text_void(&self) -> Option<String> {
+        CheckBoxCell::get_text_void(self)
+    }
+    fn get_text_boolean_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        CheckBoxCell::get_text_boolean_field_displayer(self, do_validation, field_displayer1.as_deref())
+    }
+    fn get_text_boolean_field_displayer_field_displayer(
+        &self,
+        do_validation: bool,
+        field_displayer1: Option<Rc<dyn FieldDisplayer>>,
+        field_displayer2: Option<Rc<dyn FieldDisplayer>>,
+    ) -> Result<Option<String>, FieldValidationFailedException> {
+        CheckBoxCell::get_text_boolean_field_displayer_field_displayer(
+            self,
+            do_validation,
+            field_displayer1.as_deref(),
+            field_displayer2.as_deref(),
+        )
+    }
+    fn get_directive_def(&self) -> Option<DirectiveDef> {
+        CheckBoxCell::get_directive_def(self)
+    }
+    fn use_default_value(&self) {
+        CheckBoxCell::use_default_value(self)
+    }
+    fn equals_default_value_void(&self) -> bool {
+        CheckBoxCell::equals_default_value_void(self)
+    }
+    fn equals_default_value_string(&self, value: Option<&str>) -> bool {
+        CheckBoxCell::equals_default_value_string(self, value)
+    }
+    fn backup(&self) {
+        CheckBoxCell::backup(self)
+    }
+    fn restore_from_backup(&self) {
+        CheckBoxCell::restore_from_backup(self)
+    }
+    fn checkpoint(&self) {
+        CheckBoxCell::checkpoint(self)
+    }
+    fn set_checkpoint(&self, input: Option<&dyn FieldSettingInterface>) {
+        CheckBoxCell::set_checkpoint(self, input)
+    }
+    fn get_checkpoint(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        CheckBoxCell::get_checkpoint(self)
+            .map(|setting| Rc::new(setting) as Rc<dyn FieldSettingInterface>)
+    }
+    fn is_different_from_checkpoint(&self, always_check: bool) -> bool {
+        CheckBoxCell::is_different_from_checkpoint(self, always_check)
+    }
+    fn is_field_highlight_set(&self) -> bool {
+        CheckBoxCell::is_field_highlight_set(self)
+    }
+    fn clear_field_highlight(&self) {
+        CheckBoxCell::clear_field_highlight(self)
+    }
+    fn set_field_highlight_field_setting_interface(&self, input: Option<&dyn FieldSettingInterface>) {
+        CheckBoxCell::set_field_highlight_field_setting_interface(self, input)
+    }
+    fn set_field_highlight_string(&self, input: Option<&str>) {
+        CheckBoxCell::set_field_highlight_string(self, input)
+    }
+    fn set_field_highlight_boolean(&self, input: bool) {
+        CheckBoxCell::set_field_highlight_boolean(self, input)
+    }
+    fn get_field_highlight(&self) -> Option<Rc<dyn FieldSettingInterface>> {
+        CheckBoxCell::get_field_highlight(self)
+            .map(|setting| Box::new(setting) as Box<dyn FieldSettingInterface>)
+            .map(Rc::from)
+    }
+    fn equals_field_highlight_void(&self) -> bool {
+        CheckBoxCell::equals_field_highlight_void(self)
+    }
+    fn equals_field_highlight_string(&self, value: Option<&str>) -> bool {
+        CheckBoxCell::equals_field_highlight_string(self, value)
+    }
+    fn set_tool_tip_text(&self, tooltip: Option<&str>) {
+        CheckBoxCell::set_tool_tip_text(self, tooltip)
+    }
+    fn set_tooltip(&self, field: Option<&dyn Field>) {
+        CheckBoxCell::set_tooltip(self, field)
+    }
+    fn get_tooltip(&self) -> Option<String> {
+        CheckBoxCell::get_tooltip(self)
+    }
+    fn equals_selected_string_value(&self, value: Option<&str>) -> bool {
+        CheckBoxCell::equals_selected_string_value(self, value)
+    }
+    fn set_directive_def(&self, directive_def: Option<DirectiveDef>) {
+        CheckBoxCell::set_directive_def(self, directive_def)
+    }
+    fn get_description(&self) -> String {
+        CheckBoxCell::get_description(self)
+            .unwrap_or_else(|| "null".to_owned())
+    }
+    fn set_unformatted_tooltip(&self, text: Option<&str>) -> Option<String> {
+        CheckBoxCell::set_unformatted_tooltip(self, text)
+    }
+    fn has_unformatted_tooltip(&self) -> bool {
+        CheckBoxCell::has_unformatted_tooltip(self)
+    }
+    fn use_unformatted_tooltip(&self, param_descr: Option<&str>, directive_descr: Option<&str>) {
+        CheckBoxCell::use_unformatted_tooltip(self, param_descr, directive_descr)
+    }
+}
+
+impl crate::imod::etomo::ui::boolean_field_interface::BooleanFieldInterface for CheckBoxCell {}
+
+/// The `etomo.type.FieldSettings` interface the Java class implements.
+impl crate::imod::etomo::r#type::field_settings::FieldSettings for CheckBoxCell {
+    fn set_selected(&self, selected: bool) {
+        CheckBoxCell::set_selected_boolean(self, selected)
+    }
+    fn is_selected(&self) -> bool {
+        CheckBoxCell::is_selected(self)
+    }
+    fn is_editable(&self) -> bool {
+        CheckBoxCell::is_editable(self)
+    }
+    fn set_editable(&self, editable: bool) {
+        CheckBoxCell::set_editable(self, editable)
+    }
+    fn set_enabled(&self, enabled: bool) {
+        CheckBoxCell::set_enabled(self, enabled)
+    }
+    fn is_enabled(&self) -> bool {
+        CheckBoxCell::is_enabled(self)
+    }
+}

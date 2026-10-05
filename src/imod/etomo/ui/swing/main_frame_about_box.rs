@@ -4,22 +4,29 @@
 //! The Help > About dialog: the eTomo version, the IMOD build information and the
 //! PEET version, with an OK button.
 //!
-//! Java `class MainFrame_AboutBox extends JDialog`: the dialog is modelled by the
-//! state the translation reads - its content pane (the root of its component tree),
-//! title, modality and visibility - as `AbstractFrame` models its `JFrame`.  Layout
-//! (`BorderLayout`, `BoxLayout`, rigid areas, `setResizable`, `pack`) is not
-//! modelled.  Window events are not modelled by the Swing stand-in; a driver calls
-//! [`MainFrameAboutBox::process_window_event`] with the event id.
+//! Java `class MainFrame_AboutBox extends JDialog`: the dialog is the Swing
+//! stand-in's `jdk::JDialog` (content pane, title, visibility; the Slint window
+//! draws a showing one over the frame), with the modality the Java sets after
+//! construction kept here.  Layout (`BorderLayout`, `BoxLayout`, rigid areas,
+//! `setResizable`, `pack`) is not modelled.  The overridden `processWindowEvent`
+//! is reached through a window listener on `WINDOW_CLOSING`, which the stand-in
+//! delivers before its default close operation, as `Window.processWindowEvent`
+//! does from the override's `super` call.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
-use crate::imod::etomo::jdk::{ActionEvent, JComponent};
-// TODO(unit): needs etomo/logic/VersionControl.java - TIME_STAMP, getImodInfo(AxisID),
-// getPeetVersion().
+use crate::imod::etomo::jdk::{ActionEvent, JComponent, JDialog, WindowListener};
 use crate::imod::etomo::logic::version_control;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::imod_version;
+
+thread_local! {
+    /// The displayable About boxes.  The Java object is the `JDialog` itself,
+    /// which AWT's window list keeps until `dispose()`; here the wrapper holding
+    /// the dialog's listeners is kept the same way.
+    static DISPLAYABLE: RefCell<Vec<Rc<MainFrameAboutBox>>> = const { RefCell::new(Vec::new()) };
+}
 
 /// Java `public static final String rcsid`.
 pub const RCSID: &str = "$Id$";
@@ -29,14 +36,11 @@ pub const WINDOW_CLOSING: i32 = 201;
 
 /// Java package-private `class MainFrame_AboutBox extends JDialog`.
 pub struct MainFrameAboutBox {
-    /// `JDialog.getContentPane()` (the Java `pnlRoot`).
-    content_pane: Rc<JComponent>,
-    /// `Dialog.setTitle`.
-    title: RefCell<String>,
+    /// The `JDialog` itself (`super(parent)`); its content pane is the Java
+    /// `pnlRoot`.
+    dialog: Rc<JDialog>,
     /// `Dialog.setModal`.
     modal: Cell<bool>,
-    /// `Window.isVisible`.
-    visible: Cell<bool>,
     /// Java `pnlAbout`.
     pnl_about: Rc<JComponent>,
     /// Java `btnOK`.
@@ -48,16 +52,25 @@ impl MainFrameAboutBox {
     /// (`super(parent)`), which only positions the dialog.
     pub fn new(_parent: &Rc<JComponent>, axis_id: AxisID) -> Rc<MainFrameAboutBox> {
         let instance = Rc::new(MainFrameAboutBox {
-            content_pane: JComponent::new_panel(),
-            title: RefCell::new(String::new()),
+            // A JDialog is created invisible (and, with `super(parent)`, not modal).
+            dialog: JDialog::new("", false),
             modal: Cell::new(false),
-            // A JDialog is created invisible.
-            visible: Cell::new(false),
             pnl_about: JComponent::new_panel(),
             btn_ok: JComponent::new_button("OK"),
         });
-        instance.content_pane.set_visible(false);
-        let pnl_root = instance.content_pane.clone();
+        // `processWindowEvent` override, reached on WINDOW_CLOSING.
+        struct Closing(Weak<MainFrameAboutBox>);
+        impl WindowListener for Closing {
+            fn window_closing(&self) {
+                if let Some(about_box) = self.0.upgrade() {
+                    about_box.process_window_event(WINDOW_CLOSING);
+                }
+            }
+        }
+        instance
+            .dialog
+            .add_window_listener(Rc::new(Closing(Rc::downgrade(&instance))));
+        let pnl_root = instance.dialog.get_content_pane();
         let pnl_text = JComponent::new_panel();
         let pnl_button = JComponent::new_panel();
         // Swing layout: pnlRoot.setLayout(new BorderLayout()).
@@ -151,17 +164,17 @@ impl MainFrameAboutBox {
 
     /// Java `JDialog.getContentPane()`.
     pub fn get_content_pane(&self) -> Rc<JComponent> {
-        self.content_pane.clone()
+        self.dialog.get_content_pane()
     }
 
     /// Java `Dialog.setTitle(String)`.
     pub fn set_title(&self, title: &str) {
-        *self.title.borrow_mut() = title.to_owned();
+        self.dialog.set_title(title);
     }
 
     /// Java `Dialog.getTitle()`.
     pub fn get_title(&self) -> String {
-        self.title.borrow().clone()
+        self.dialog.get_title()
     }
 
     /// Java `Dialog.setModal(boolean)`.
@@ -174,23 +187,35 @@ impl MainFrameAboutBox {
         self.modal.get()
     }
 
-    /// Java `Dialog.setVisible(boolean)`.  The content pane mirrors the dialog's
-    /// visibility so that a search limited to showing components skips it.  (A
-    /// modal Swing dialog blocks here until it is closed; the stand-in does not
-    /// block - the driver closes it through the OK button or a window event.)
-    pub fn set_visible(&self, visible: bool) {
-        self.visible.set(visible);
-        self.content_pane.set_visible(visible);
+    /// Java `Dialog.setVisible(boolean)`.  (A modal Swing dialog blocks here until
+    /// it is closed; the stand-in returns, and nothing follows the call.)
+    pub fn set_visible(self: &Rc<Self>, visible: bool) {
+        if visible {
+            DISPLAYABLE.with(|displayable| {
+                let mut displayable = displayable.borrow_mut();
+                if !displayable
+                    .iter()
+                    .any(|about_box| Rc::ptr_eq(about_box, self))
+                {
+                    displayable.push(self.clone());
+                }
+            });
+        }
+        self.dialog.set_visible(visible);
     }
 
     /// Java `Window.isVisible()`.
     pub fn is_visible(&self) -> bool {
-        self.visible.get()
+        self.dialog.is_visible()
     }
 
     /// Java `Window.dispose()`.
     pub fn dispose(&self) {
-        self.visible.set(false);
-        self.content_pane.set_visible(false);
+        self.dialog.dispose();
+        DISPLAYABLE.with(|displayable| {
+            displayable
+                .borrow_mut()
+                .retain(|about_box| !std::ptr::eq(about_box.as_ref(), self))
+        });
     }
 }

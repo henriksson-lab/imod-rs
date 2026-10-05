@@ -10,86 +10,34 @@
 // Label strings come from `etomo/ui/SharedStrings.java` and
 // `etomo/storage/MatlabParam.java` where the Java reads them from there.
 //
-// Appearance only: no callbacks, no manager, no state.  Field values are the
-// static defaults `setDefaults` installs (PeetDialog.java:1157-1164).
+// Wired through `EtomoBridge` (`ui/swing/slint_bridge.rs`): every widget is
+// identified by the label the Java gives it, and the volume and iteration
+// tables are `BridgedTable`s read from the translated Swing tables (their
+// rows, header cells and field cells come from the component tree).
+// Unwired (the standalone preview), the widgets show the static defaults
+// `setDefaults` installs (PeetDialog.java:1157-1164) and the tables are empty.
 
-import { EtomoStyle, BeveledBorder, PanelHeader, LabeledTextField, LabeledSpinner,
-         CheckBox, RadioButton, MultiLineButton, SpacedPanel, TabbedPane }
+import { EtomoStyle, EtomoBridge, BeveledBorder, PanelHeader, LabeledTextField, LabeledSpinner,
+         CheckBox, RadioButton, MultiLineButton, SpacedPanel, BridgedTabbedPane, BridgedTable,
+         BridgedTextBox }
     from "../../etomo-ui-common/ui/widgets.slint";
 import { HeaderCell, FieldCell, ExpandButton, SingleLineButton, FileTextField,
          RadioTextField, ComboBox, PlainLabel }
     from "EtomoTables.slint";
 
-// `VolumeTable.display` (VolumeTable.java:470-511): ten grid columns.  Both
-// tails of every row are drawn - `tiltRangeMultiAxes` selects between the
-// "Tilt Range" Min/Max pair (VolumeTable.java:474-477, 488-493) and the
-// "Missing Wedge"/"Mask" cell plus its expand button
-// (VolumeTable.java:478-482, 494-497).  `VolumeRow.display`
-// (VolumeRow.java:417-425) branches the body rows the same way.
+// `VolumeTable.display` (VolumeTable.java:470-511): ten grid columns of
+// header cells and one `VolumeRow` per volume, read from the Swing table.
 component VolumeTable inherits BeveledBorder {
-    // `tiltRangeMultiAxes` follows the "2 or more" tilt-axes radio button, which
-    // is not the selected one by default (rbTiltRangeSingle.setSelected(true),
-    // MissingWedgeCompensationPanel.java:109).
-    in property <bool> tilt-range-multi-axes: false;
     title: "Volume Table";
     HorizontalLayout {
         spacing: EtomoStyle.gap;
         VerticalLayout {
-            spacing: EtomoStyle.gap;
-            GridLayout {
-                spacing: 1px;
-                Row {
-                    HeaderCell { colspan: 2; text: "Vol #"; }
-                    HeaderCell { text: "Volume"; }
-                    ExpandButton { }
-                    HeaderCell { text: "Model"; }
-                    ExpandButton { }
-                    HeaderCell { text: "Initial"; }
-                    ExpandButton { }
-                    // header1TiltRange (VolumeTable.java:61) or
-                    // header1TiltRangeMultiAxes + btnExpandTiltRangeMultiAxes
-                    // (VolumeTable.java:62, 139).
-                    if !root.tilt-range-multi-axes: HeaderCell { colspan: 2; text: "Tilt Range"; }
-                    if root.tilt-range-multi-axes: HeaderCell { text: "Missing Wedge"; }
-                    if root.tilt-range-multi-axes: ExpandButton { }
-                }
-                Row {
-                    HeaderCell { colspan: 2; text: ""; }
-                    HeaderCell { colspan: 2; text: ""; }
-                    HeaderCell { colspan: 2; text: ""; }
-                    HeaderCell { colspan: 2; text: "MOTL"; }
-                    // header2TiltRangeStart/End, or header2TiltRangeMultiAxes
-                    // spanning both columns (VolumeTable.java:63, 87-88).
-                    if !root.tilt-range-multi-axes: HeaderCell { text: "Min"; }
-                    if !root.tilt-range-multi-axes: HeaderCell { text: "Max"; }
-                    if root.tilt-range-multi-axes: HeaderCell { colspan: 2; text: "Mask"; }
-                }
-                // Two representative `VolumeRow` rows.
-                Row {
-                    HeaderCell { colspan: 2; text: "1"; }
-                    FieldCell { colspan: 2; text: "vol1.mrc"; }
-                    FieldCell { colspan: 2; text: "vol1.mod"; }
-                    FieldCell { colspan: 2; text: ""; }
-                    if !root.tilt-range-multi-axes: FieldCell { text: "-60.0"; }
-                    if !root.tilt-range-multi-axes: FieldCell { text: "60.0"; }
-                    // tiltRangeMultiAxes plus its fbTiltRangeMultiAxes file
-                    // button (VolumeRow.java:422-424), the same field-plus-button
-                    // pair the file columns use.
-                    if root.tilt-range-multi-axes: FieldCell { colspan: 2; text: "vol1_wedge.mrc"; }
-                }
-                Row {
-                    HeaderCell { colspan: 2; text: "2"; }
-                    FieldCell { colspan: 2; text: "vol2.mrc"; }
-                    FieldCell { colspan: 2; text: "vol2.mod"; }
-                    FieldCell { colspan: 2; text: ""; }
-                    if !root.tilt-range-multi-axes: FieldCell { text: "-60.0"; }
-                    if !root.tilt-range-multi-axes: FieldCell { text: "60.0"; }
-                    if root.tilt-range-multi-axes: FieldCell { colspan: 2; text: "vol2_wedge.mrc"; }
-                }
-            }
+            spacing: EtomoStyle.row-gap;
+            BridgedTable { table: "Volume Table"; }
             // pnlBottomButtons (VolumeTable.java:377-383).
             HorizontalLayout {
                 spacing: EtomoStyle.gap;
+                alignment: start;
                 CheckBox { text: "File names are templates"; }
                 SingleLineButton { text: "Open in 3dmod"; }
                 SingleLineButton { text: "Read tilt file"; }
@@ -108,71 +56,16 @@ component VolumeTable inherits BeveledBorder {
     }
 }
 
-// `IterationTable.display` (IterationTable.java:484-541): sixteen grid columns.
+// `IterationTable.display` (IterationTable.java:484-541): sixteen grid columns
+// of header cells and one `IterationRow` per iteration, read from the Swing
+// table.
 component IterationTable inherits BeveledBorder {
     title: "Iteration Table";
     HorizontalLayout {
         spacing: 3px;
         VerticalLayout {
-            spacing: EtomoStyle.gap;
-            GridLayout {
-                spacing: 1px;
-                Row {
-                    HeaderCell { colspan: 2; text: "Run #"; }
-                    HeaderCell { colspan: 6; text: "Angular Search Range"; }
-                    HeaderCell { text: "Search"; }
-                    HeaderCell { colspan: 2; text: "Low-pass"; }
-                    HeaderCell { colspan: 2; text: "High-pass"; }
-                    HeaderCell { text: "Ref"; }
-                    HeaderCell { colspan: 2; text: "Duplicate"; }
-                }
-                Row {
-                    HeaderCell { colspan: 2; text: ""; }
-                    HeaderCell { colspan: 2; text: "Phi"; }
-                    HeaderCell { colspan: 2; text: "Theta"; }
-                    HeaderCell { colspan: 2; text: "Psi"; }
-                    HeaderCell { text: "Distance"; }
-                    HeaderCell { colspan: 2; text: "Filter"; }
-                    HeaderCell { colspan: 2; text: "Filter"; }
-                    HeaderCell { text: "Threshold"; }
-                    HeaderCell { colspan: 2; text: "Tolerance"; }
-                }
-                Row {
-                    HeaderCell { colspan: 2; text: ""; }
-                    HeaderCell { text: "Max"; }
-                    HeaderCell { text: "Step"; }
-                    HeaderCell { text: "Max"; }
-                    HeaderCell { text: "Step"; }
-                    HeaderCell { text: "Max"; }
-                    HeaderCell { text: "Step"; }
-                    HeaderCell { text: ""; }
-                    HeaderCell { text: "Cutoff"; }
-                    HeaderCell { text: "Sigma"; }
-                    HeaderCell { text: "Cutoff"; }
-                    HeaderCell { text: "Sigma"; }
-                    HeaderCell { text: ""; }
-                    HeaderCell { text: "Shift"; }
-                    HeaderCell { text: "Angle"; }
-                }
-                // One representative `IterationRow`.
-                Row {
-                    HeaderCell { colspan: 2; text: "1"; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                    FieldCell { text: ""; }
-                }
-            }
+            spacing: EtomoStyle.row-gap;
+            BridgedTable { table: "Iteration Table"; }
             // pnlFlgRemoveDuplicates (IterationTable.java:451-457).
             HorizontalLayout {
                 spacing: 40px;
@@ -200,24 +93,28 @@ component IterationTable inherits BeveledBorder {
 // on its construction-time visibility, like the other hidden-at-construction
 // widgets in this crate.
 component FixPathsPanel inherits VerticalLayout {
-    PanelHeader { title: "Fix File Paths"; open: true; }
-    Rectangle {
-        background: EtomoStyle.panel;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        VerticalLayout {
-            padding: EtomoStyle.inset;
-            spacing: EtomoStyle.gap;
-            // lblwarning is painted ProcessControlPanel.colorNotStarted (red).
-            Text {
-                text: "Files cannot be found.  PEET may not run.";
-                color: #ff0000;
-                font-size: EtomoStyle.font-size-pt * 1px;
-            }
-            CheckBox { text: "Files may be in separate directories"; }
-            HorizontalLayout {
-                alignment: center;
-                MultiLineButton { text: "Fix Incorrect Paths"; width: 180px; }
+    ph-body-8 := PanelHeader { title: "Fix File Paths"; open: true; }
+    // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+    if ph-body-8.shown-open: VerticalLayout {
+        spacing: EtomoStyle.row-gap;
+        Rectangle {
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            VerticalLayout {
+                padding: EtomoStyle.inset;
+                spacing: EtomoStyle.row-gap;
+                // lblwarning is painted ProcessControlPanel.colorNotStarted (red).
+                Text {
+                    text: "Files cannot be found.  PEET may not run.";
+                    color: #ff0000;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                CheckBox { text: "Files may be in separate directories"; }
+                HorizontalLayout {
+                    alignment: center;
+                    MultiLineButton { text: "Fix Incorrect Paths"; width: 180px; }
+                }
             }
         }
     }
@@ -230,31 +127,31 @@ component ReferencePanel inherits BeveledBorder {
     // (ReferencePanel.java:302-308) shows exactly one of them.  updateDisplay
     // calls it at init with the volume table's check box clear
     // (ReferencePanel.java:349), so the spinner is the visible one.
-    in property <bool> file-names-are-templates: false;
+    property <bool> file-names-are-templates: EtomoBridge.wired
+        ? EtomoBridge.bool-value("cb", "File names are templates", false, EtomoBridge.generation)
+        : false;
     title: "Reference";
     // pnlParticle.
     HorizontalLayout {
-        alignment: start;
         spacing: EtomoStyle.gap;
         RadioTextField { label: "Particle "; selected: true; text: ""; }
         Rectangle { width: 10px; }
         // sVolume: Spinner.getLabeledInstance("In Volume: ") (ReferencePanel.java:56).
-        if !root.file-names-are-templates: LabeledSpinner { label: "In Volume: "; label-width: 70px; text: "1"; }
+        if !root.file-names-are-templates: LabeledSpinner { label: "In Volume: "; text: "1"; }
         // ltfVolume: the LabeledTextField carrying the same "In Volume: " label
         // (ReferencePanel.java:63-64).
-        if root.file-names-are-templates: LabeledTextField { label: "In Volume: "; label-width: 70px; text: ""; }
+        if root.file-names-are-templates: LabeledTextField { label: "In Volume: "; text: ""; }
     }
     HorizontalLayout {
-        alignment: start;
         spacing: EtomoStyle.gap;
         RadioButton { text: "User supplied file: "; }
-        FileTextField { label: ""; field-width: 225px; text: ""; }
+        FileTextField { label: ""; bridge-label: "User supplied file: "; field-width: 225px; text: ""; }
     }
     HorizontalLayout {
         alignment: start;
         spacing: EtomoStyle.gap;
         RadioButton { text: "Multiparticle reference with"; }
-        ComboBox { text: "50"; }
+        ComboBox { label: "Multiparticle reference with"; text: "50"; }
         PlainLabel { text: "particles"; }
     }
 }
@@ -267,24 +164,23 @@ component MissingWedgeCompensationPanel inherits VerticalLayout {
     // replaced by cbMissingWedgeCompensation
     // (MissingWedgeCompensationPanel.java:67-75).  One property gates the pair.
     in property <bool> show-deprecated-tilt-range: false;
-    spacing: EtomoStyle.gap;
+    spacing: EtomoStyle.row-gap;
     BeveledBorder {
         title: "Volume Size (Voxels)";
         HorizontalLayout {
             spacing: EtomoStyle.gap;
-            LabeledTextField { label: "X: "; label-width: 20px; text: ""; }
-            LabeledTextField { label: "Y: "; label-width: 20px; text: ""; }
-            LabeledTextField { label: "Z: "; label-width: 20px; text: ""; }
+            LabeledTextField { label: "X: "; text: ""; }
+            LabeledTextField { label: "Y: "; text: ""; }
+            LabeledTextField { label: "Z: "; text: ""; }
         }
     }
     BeveledBorder {
         title: "Missing Wedge Compensation";
         HorizontalLayout {
-            alignment: start;
             spacing: EtomoStyle.gap;
             CheckBox { text: "Enabled"; }
-            LabeledSpinner { label: "Edge shift: "; label-width: 80px; text: "1"; }
-            LabeledSpinner { label: "Weight groups: "; label-width: 100px; text: "8"; }
+            LabeledSpinner { label: "Edge shift: "; text: "1"; }
+            LabeledSpinner { label: "Weight groups: "; text: "8"; }
         }
         HorizontalLayout {
             alignment: start;
@@ -310,47 +206,42 @@ component MaskingPanel inherits BeveledBorder {
         spacing: EtomoStyle.gap;
         // pnlMaskType
         VerticalLayout {
-            spacing: EtomoStyle.gap;
+            spacing: EtomoStyle.row-gap;
             RadioButton { text: "None"; selected: true; }
             RadioButton { text: "Sphere"; }
             HorizontalLayout {
-                alignment: start;
                 spacing: EtomoStyle.gap;
                 RadioButton { text: "Cylinder"; }
                 Rectangle { width: 50px; }
-                LabeledTextField { label: "Height: "; label-width: 55px; text: ""; }
+                LabeledTextField { label: "Height: "; text: ""; width: 125px; }
             }
             HorizontalLayout {
-                alignment: start;
                 spacing: EtomoStyle.gap;
                 RadioButton { text: "User supplied binary file:"; }
-                FileTextField { label: ""; field-width: 190px; text: ""; }
+                FileTextField { label: ""; bridge-label: "User supplied binary file:"; field-width: 190px; text: ""; }
             }
         }
         // pnlSphereCylinder
         VerticalLayout {
-            spacing: EtomoStyle.gap;
+            spacing: EtomoStyle.row-gap;
             HorizontalLayout {
-                alignment: start;
                 spacing: EtomoStyle.gap;
-                LabeledTextField { label: "Inner radius: "; label-width: 90px; text: ""; }
+                LabeledTextField { label: "Inner radius: "; text: ""; width: 160px; }
                 Rectangle { width: 40px; }
-                LabeledTextField { label: "Outer radius: "; label-width: 90px; text: ""; }
+                LabeledTextField { label: "Outer radius: "; text: ""; width: 160px; }
             }
             HorizontalLayout {
-                alignment: start;
-                LabeledTextField { label: "Blur mask by: "; label-width: 90px; text: ""; }
+                LabeledTextField { label: "Blur mask by: "; text: ""; width: 160px; }
             }
             // pnlCylinderOrientation: BorderFactory.createEtchedBorder(), untitled.
             BeveledBorder {
                 title: "";
                 CheckBox { text: "Manual Cylinder Orientation"; }
                 HorizontalLayout {
-                    alignment: start;
                     spacing: EtomoStyle.gap;
-                    LabeledTextField { label: "Z Rotation: "; label-width: 80px; text: ""; }
+                    LabeledTextField { label: "Z Rotation: "; text: ""; width: 150px; }
                     Rectangle { width: 40px; }
-                    LabeledTextField { label: "Y Rotation: "; label-width: 80px; text: ""; }
+                    LabeledTextField { label: "Y Rotation: "; text: ""; width: 150px; }
                 }
             }
         }
@@ -376,7 +267,6 @@ component YAxisTypePanel inherits BeveledBorder {
 component SphericalSamplingForThetaAndPsiPanel inherits BeveledBorder {
     title: "Spherical Sampling for Theta and Psi";
     HorizontalLayout {
-        alignment: start;
         spacing: EtomoStyle.gap;
         Rectangle { width: 20px; }
         RadioButton { text: "None"; selected: true; }
@@ -387,7 +277,7 @@ component SphericalSamplingForThetaAndPsiPanel inherits BeveledBorder {
         Rectangle { width: 70px; }
         LabeledTextField {
             label: "Sample interval (degrees) : ";
-            label-width: 180px;
+            
             text: "";
             width: 250px;
         }
@@ -400,17 +290,18 @@ export component PeetSetupTab inherits BeveledBorder {
     title: "";
     // pnlProject
     HorizontalLayout {
-        alignment: start;
         spacing: EtomoStyle.gap;
-        LabeledTextField { label: "Directory: "; label-width: 70px; text: ""; width: 320px; }
+        LabeledTextField { label: "Directory: "; text: ""; width: 320px; }
         Rectangle { width: 10px; }
-        LabeledTextField { label: "Root name for output: "; label-width: 150px; text: ""; width: 400px; }
+        LabeledTextField { label: "Root name for output: "; text: ""; width: 400px; }
         Rectangle { width: 20px; }
     }
     // `setVisible(false)` at construction (FixPathsPanel.java:80-105); shown
     // only once a file cannot be found.
     in property <bool> show-fix-paths: false;
-    if root.show-fix-paths: FixPathsPanel { }
+    if root.show-fix-paths || (EtomoBridge.wired
+        && EtomoBridge.enabled-value("bn", "Fix Incorrect Paths", false, EtomoBridge.generation)):
+        FixPathsPanel { }
     VolumeTable { }
     // pnlReferenceAndMissingWedgeCompensation
     HorizontalLayout {
@@ -441,8 +332,7 @@ export component PeetSetupTab inherits BeveledBorder {
 export component PeetRunTab inherits BeveledBorder {
     title: "";
     HorizontalLayout {
-        alignment: start;
-        LabeledSpinner { label: "Particles per CPU (core): "; label-width: 170px; text: "20"; }
+        LabeledSpinner { label: "Particles per CPU (core): "; hgap: 28px; text: "20"; }
     }
     IterationTable { }
     SphericalSamplingForThetaAndPsiPanel { }
@@ -450,16 +340,15 @@ export component PeetRunTab inherits BeveledBorder {
     BeveledBorder {
         title: "Number of Particles to Average";
         HorizontalLayout {
-            alignment: start;
             spacing: EtomoStyle.gap;
             Rectangle { width: 20px; }
-            LabeledTextField { label: "Start: "; label-width: 45px; text: ""; width: 115px; }
+            LabeledTextField { label: "Start: "; text: ""; width: 115px; }
             Rectangle { width: 10px; }
-            LabeledTextField { label: "Incr.: "; label-width: 45px; text: ""; width: 115px; }
+            LabeledTextField { label: "Incr.: "; text: ""; width: 115px; }
             Rectangle { width: 10px; }
-            LabeledTextField { label: "End: "; label-width: 45px; text: ""; width: 115px; }
+            LabeledTextField { label: "End: "; text: ""; width: 115px; }
             Rectangle { width: 20px; }
-            LabeledTextField { label: " Additional numbers: "; label-width: 145px; text: ""; width: 265px; }
+            LabeledTextField { label: " Additional numbers: "; text: ""; width: 265px; }
         }
     }
     // pnlEqualNumber
@@ -490,21 +379,18 @@ export component PeetMoreOptionsTab inherits SpacedPanel {
         title: "Particle Selection";
         Rectangle { height: 10px; }
         HorizontalLayout {
-            alignment: start;
             Rectangle { width: 5px; }
-            LabeledTextField { label: "Exclude particles "; label-width: 130px; text: ""; width: 400px; }
+            LabeledTextField { label: "Exclude particles "; text: ""; width: 400px; }
         }
         Rectangle { height: 10px; }
         HorizontalLayout {
-            alignment: start;
             Rectangle { width: 5px; }
-            LabeledTextField { label: "Include particles "; label-width: 130px; text: ""; width: 400px; }
+            LabeledTextField { label: "Include particles "; text: ""; width: 400px; }
         }
         Rectangle { height: 10px; }
         HorizontalLayout {
-            alignment: start;
             Rectangle { width: 5px; }
-            LabeledTextField { label: "Average only members of classes "; label-width: 220px; text: ""; width: 490px; }
+            LabeledTextField { label: "Average only members of classes "; text: ""; width: 490px; }
         }
         Rectangle { height: 10px; }
         // pnlParticleSelectionFlags: GridLayout(1, 2, 20, 0).
@@ -534,11 +420,10 @@ export component PeetMoreOptionsTab inherits SpacedPanel {
         }
         Rectangle { height: 10px; }
         HorizontalLayout {
-            alignment: start;
             Rectangle { width: 5px; }
             LabeledTextField {
                 label: "Per iteration c<N> axial search order ";
-                label-width: 250px;
+                
                 text: "";
                 width: 520px;
             }
@@ -565,21 +450,37 @@ export component PeetMoreOptionsTab inherits SpacedPanel {
                     spacing: EtomoStyle.gap;
                     CheckBox { text: "c<N> symmetric averaging with N"; }
                     PlainLabel { text: "="; }
-                    LabeledSpinner { label: ""; label-width: 0px; text: "2"; }
+                    // spCNSymmetricAveraging: an unlabeled spinner named by the
+                    // check box's text.
+                    HorizontalLayout {
+                        BridgedTextBox { kind: "sp"; label: "c<N> symmetric averaging with N"; width: 50px; text: "2"; }
+                        VerticalLayout {
+                            Rectangle {
+                                width: 14px; height: EtomoStyle.field-height / 2;
+                                background: EtomoStyle.panel; border-width: 1px; border-color: EtomoStyle.border;
+                                Text { text: "^"; font-size: 8px; }
+                                TouchArea { clicked => { EtomoBridge.toggled("sp", "c<N> symmetric averaging with N", true); } }
+                            }
+                            Rectangle {
+                                width: 14px; height: EtomoStyle.field-height / 2;
+                                background: EtomoStyle.panel; border-width: 1px; border-color: EtomoStyle.border;
+                                Text { text: "v"; font-size: 8px; }
+                                TouchArea { clicked => { EtomoBridge.toggled("sp", "c<N> symmetric averaging with N", false); } }
+                            }
+                        }
+                    }
                 }
                 CheckBox { text: "Masking during c<N> averaging"; checked: true; }
             }
         }
         Rectangle { height: 10px; }
         HorizontalLayout {
-            alignment: start;
             Rectangle { width: 5px; }
-            LabeledTextField { label: "User commands "; label-width: 120px; text: ""; width: 520px; }
+            LabeledTextField { label: "User commands "; text: ""; width: 520px; }
         }
         Rectangle { height: 10px; }
         HorizontalLayout {
-            alignment: start;
-            LabeledSpinner { label: "Debug level: "; label-width: 90px; text: "3"; }
+            LabeledSpinner { label: "Debug level: "; hgap: 59px; text: "3"; }
         }
         Rectangle { height: 5px; }
     }
@@ -588,20 +489,18 @@ export component PeetMoreOptionsTab inherits SpacedPanel {
 // `PeetDialog`'s root panel: `new BeveledBorder("PEET")` around the tab pane
 // (PeetDialog.java:210-217).
 //
-// Swing shows one tab body at a time (`changeTab`, PeetDialog.java:1184-1200).
-// Slint has no tab container in this crate's vocabulary and this is an
-// appearance-only mirror, so all three bodies are laid out in sequence below
-// the strip rather than only the selected one.  Each body is also exported on
-// its own for viewing in isolation.
+// Swing shows one tab body at a time (`changeTab`, PeetDialog.java:1184-1200):
+// the selected tab (`BridgedTabbedPane.shown-current`, read from the Swing
+// tabbed pane) chooses the body that is drawn.
 export component PeetDialog inherits BeveledBorder {
     title: "PEET";
-    TabbedPane {
+    tabs := BridgedTabbedPane {
         tabs: ["Setup", "Run", "More Options"];
         current: 0;
     }
-    PeetSetupTab { }
-    PeetRunTab { }
-    PeetMoreOptionsTab { }
+    if tabs.shown-current == 0: PeetSetupTab { }
+    if tabs.shown-current == 1: PeetRunTab { }
+    if tabs.shown-current == 2: PeetMoreOptionsTab { }
 }
 
 export component PeetDialogWindow inherits Window {

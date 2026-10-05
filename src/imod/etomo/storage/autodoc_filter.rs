@@ -61,3 +61,14 @@ impl Default for AutodocFilter {
         AutodocFilter::new()
     }
 }
+
+/// Java `extends javax.swing.filechooser.FileFilter`.
+impl crate::imod::etomo::jdk::FileFilter for AutodocFilter {
+    fn accept(&self, file: &std::path::Path) -> bool {
+        AutodocFilter::accept(self, file)
+    }
+
+    fn get_description(&self) -> Option<String> {
+        Some(AutodocFilter::get_description(self))
+    }
+}

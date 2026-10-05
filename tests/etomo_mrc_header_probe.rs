@@ -137,7 +137,7 @@ fn jvm_verified_param_string_and_constants() {
     // The n'ton table hands back the same object for the same absolute path.
     let again =
         MRCHeader::get_instance(Some("/tmp/imod-rs-mhprobe-all.mrc"), Some(AxisID::Only)).unwrap();
-    assert!(std::rc::Rc::ptr_eq(&header, &again));
+    assert!(std::sync::Arc::ptr_eq(&header, &again));
     assert!(MRCHeader::get_instance(None, Some(AxisID::Only)).is_none());
 
     // Silence the unused-import warning for the module path itself.

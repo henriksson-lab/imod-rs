@@ -22,9 +22,7 @@
 //! Keywords:  Version, Pip, KeyValueDelimiter
 //!
 //! The constructor is the package's file boundary: both `PrimativeTokenizer` factories
-//! it calls open the autodoc as a `LogFile.Handle`.  `BaseManager` has no module; every
-//! caller that reaches here passes a null one, so the parameter is typed
-//! `Option<Infallible>`.
+//! it calls open the autodoc as a `LogFile.Handle`.
 #![allow(dead_code)]
 
 use crate::imod::etomo::base_manager::BaseManager;

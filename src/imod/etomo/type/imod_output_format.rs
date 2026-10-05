@@ -69,10 +69,15 @@ impl ImodOutputFormat {
         None
     }
 
-    // TODO(unit): needs etomo/type/ImageOutputFormat.java - Java
-    // `getInstance(ImageOutputFormat)` returns HDF when the argument is identically
-    // `ImageOutputFormat.HDF` and MRC otherwise, and `ImageOutputFormat.java` has no
-    // module.
+    /// Java `getInstance(ImageOutputFormat)`.
+    pub fn get_instance_image_output_format(
+        image_output_format: Option<super::image_output_format::ImageOutputFormat>,
+    ) -> ImodOutputFormat {
+        if image_output_format == Some(super::image_output_format::ImageOutputFormat::Hdf) {
+            return Self::Hdf;
+        }
+        Self::Mrc
+    }
 
     /// Java `equals(String)`.  The source's `this.value.equals(value)` is false for a
     /// null argument; a Rust `&str` cannot be null.

@@ -1,249 +1,145 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/AnisotropicDiffusionDialog.java`.
 //!
-//! Swing construction, file choosing, and the concrete `ParallelManager` are
-//! presentation/application boundaries.  The dialog's field ownership,
-//! parameter transfer, validation order, and action dispatch are kept here.
-#![allow(dead_code)]
+//! The "Nonlinear Anisotropic Diffusion" dialog: pick a volume, extract a test
+//! volume (trimvol), run nad_eed_3d on it with different K values (processchunks)
+//! or different iterations, and filter the full volume (`FilterFullVolumePanel`).
+//! An event dispatch thread object (`Rc`, `&self` methods), created by
+//! [`AnisotropicDiffusionDialog::get_instance`].
 
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 
+use super::abstract_parallel_dialog::AbstractParallelDialog;
+use super::beveled_border::BeveledBorder;
+use super::button_component::ButtonComponent;
+use super::check_box::CheckBox;
+use super::context_menu::ContextMenu;
+use super::context_popup::{self, ContextPopup};
+use super::deferred_3dmod_button::Deferred3dmodButton;
+use super::etched_border::EtchedBorder;
+use super::file_chooser::{self, FileChooser};
+use super::file_text_field::FileTextField;
+use super::file_text_field_interface::FileTextFieldInterface;
+use super::filter_full_volume_panel::{self, FilterFullVolumePanel};
+use super::filter_full_volume_parent::FilterFullVolumeParent;
+use super::generic_mouse_adapter::GenericMouseAdapter;
+use super::labeled_text_field::LabeledTextField;
+use super::multi_line_button::MultiLineButton;
 use super::process_interface::ProcessInterface;
-use super::{
-    check_box::CheckBox,
-    filter_full_volume_panel::{self, FilterFullVolumePanel},
-    labeled_text_field::LabeledTextField,
-    multi_line_button::MultiLineButton,
-    spinner::Spinner,
-    tilt_panel::{Deferred3dmodButton, MouseEvent},
-};
-use crate::imod::etomo::r#type::{
-    axis_id::AxisID, dialog_type::DialogType, processing_method::ProcessingMethod,
-};
+use super::rubberband_panel::RubberbandPanel;
+use super::run_3dmod_button::Run3dmodButton;
+use super::run_3dmod_button_container::Run3dmodButtonContainer;
+use super::spaced_panel::{self, SpacedPanel};
+use super::spinner::Spinner;
+use super::ui_harness;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::anisotropic_diffusion_param::{self, AnisotropicDiffusionParam};
+use crate::imod::etomo::comscript::chunksetup_param::ChunksetupParam;
+use crate::imod::etomo::comscript::parallel_param::ParallelParam;
+use crate::imod::etomo::comscript::processchunks_param::ProcesschunksParam;
+use crate::imod::etomo::comscript::trimvol_param::TrimvolParam;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent, MouseEvent, MouseListener};
+use crate::imod::etomo::logic::dataset_tool;
+use crate::imod::etomo::parallel_manager::ParallelManager;
+use crate::imod::etomo::process::imod_manager;
+use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
+use crate::imod::etomo::processing_method_mediator::ProcessingMethodMediator;
+use crate::imod::etomo::storage::tomogram_file_filter::TomogramFileFilter;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
+use crate::imod::etomo::r#type::const_etomo_number::Number;
+use crate::imod::etomo::r#type::data_file_type::DataFileType;
+use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::file_type;
+use crate::imod::etomo::r#type::parallel_meta_data::ParallelMetaData;
+use crate::imod::etomo::r#type::process_name::ProcessName;
+use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::ui::field::Field;
 use crate::imod::etomo::ui::field_type::FieldType;
 use crate::imod::etomo::ui::queue_table_event::QueueTableEvent;
 use crate::imod::etomo::ui::queue_table_listener::QueueTableListener;
+use crate::imod::etomo::util::utilities;
 
+/// Java `CLEANUP_LABEL = FilterFullVolumePanel.CLEANUP_LABEL`.
 pub const CLEANUP_LABEL: &str = filter_full_volume_panel::CLEANUP_LABEL;
+/// Java `FILTER_FULL_VOLUME_LABEL = FilterFullVolumePanel.FILTER_FULL_VOLUME_LABEL`.
 pub const FILTER_FULL_VOLUME_LABEL: &str = filter_full_volume_panel::FILTER_FULL_VOLUME_LABEL;
+/// Java `MEMORY_PER_CHUNK_DEFAULT = FilterFullVolumePanel.MEMORY_PER_CHUNK_DEFAULT`.
 pub const MEMORY_PER_CHUNK_DEFAULT: i32 = filter_full_volume_panel::MEMORY_PER_CHUNK_DEFAULT;
+/// Java `MEMORY_PER_CHUNK_LABEL = FilterFullVolumePanel.MEMORY_PER_CHUNK_LABEL`.
 pub const MEMORY_PER_CHUNK_LABEL: &str = filter_full_volume_panel::MEMORY_PER_CHUNK_LABEL;
+/// Java `TEST_VOLUME_NAME`, deprecated 7/13/2020 (replaced with testVolumeName).
 pub const TEST_VOLUME_NAME: &str = "test.input";
-pub const K_VALUE_LIST_LABEL: &str = "List of K values: ";
+/// Java private static final `K_VALUE_LIST_LABEL`.
+const K_VALUE_LIST_LABEL: &str = "List of K values: ";
+/// Java `ITERATION_LIST_LABEL`.
 pub const ITERATION_LIST_LABEL: &str = "List of iterations: ";
-pub const K_VALUE_LABEL: &str = "K value: ";
-pub const ITERATION_LABEL: &str = "Iterations: ";
-pub const DIALOG_TYPE: DialogType = DialogType::AnisotropicDiffusion;
+/// Java private static final `K_VALUE_LABEL`.
+const K_VALUE_LABEL: &str = "K value: ";
+/// Java private static final `ITERATION_LABEL`.
+const ITERATION_LABEL: &str = "Iterations: ";
+/// Java private static final `DIALOG_TYPE`.
+const DIALOG_TYPE: DialogType = DialogType::AnisotropicDiffusion;
 
-/// Java `FileTextField` source-owned state at the unported file chooser boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FileTextField {
-    pub prompt: String,
-    pub file: Option<PathBuf>,
-    pub button_enabled: bool,
-    pub action_listener_count: usize,
-}
-impl FileTextField {
-    pub fn get_partial_path_instance(prompt: &str) -> Self {
-        Self {
-            prompt: prompt.into(),
-            button_enabled: true,
-            ..Self::default()
-        }
-    }
-    pub fn get_file_name(&self) -> String {
-        self.file
-            .as_ref()
-            .and_then(|f| f.file_name())
-            .map(|x| x.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    }
-    pub fn get_file_absolute_path(&self) -> String {
-        self.file
-            .as_ref()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    }
-    pub fn set_text(&mut self, value: &str) {
-        self.file = (!value.is_empty()).then(|| PathBuf::from(value));
-    }
-    pub fn set_file(&mut self, value: Option<&Path>) {
-        self.file = value.map(Path::to_path_buf);
-    }
-    pub fn is_empty(&self) -> bool {
-        self.file.is_none()
-    }
-    pub fn set_button_enabled(&mut self, value: bool) {
-        self.button_enabled = value;
-    }
-    pub fn add_action_listener(&mut self) {
-        self.action_listener_count += 1;
-    }
-}
+/// Java `public final class AnisotropicDiffusionDialog implements ContextMenu,
+/// AbstractParallelDialog, Run3dmodButtonContainer, FilterFullVolumeParent,
+/// ProcessInterface`.
+pub struct AnisotropicDiffusionDialog {
+    /// Java `this`.
+    this: Weak<AnisotropicDiffusionDialog>,
+    /// Java private final `rootPanel = SpacedPanel.getInstance()`.
+    root_panel: Rc<SpacedPanel>,
+    /// Java private final `btnViewFullVolume`.
+    btn_view_full_volume: Rc<Run3dmodButton>,
+    /// Java private final `ftfVolume`.
+    ftf_volume: Rc<FileTextField>,
+    /// Java private final `btnExtractTestVolume`.
+    btn_extract_test_volume: Rc<MultiLineButton>,
+    /// Java private final `btnViewTestVolume`.
+    btn_view_test_volume: Rc<Run3dmodButton>,
+    /// Java private final `cbLoadWithFlipping`.
+    cb_load_with_flipping: Rc<CheckBox>,
+    /// Java private final `ltfTestKValueList`.
+    ltf_test_k_value_list: Rc<LabeledTextField>,
+    /// Java private final `spTestIteration`.
+    sp_test_iteration: Rc<Spinner>,
+    /// Java private final `btnRunVaryingK`.
+    btn_run_varying_k: Rc<Run3dmodButton>,
+    /// Java private final `btnViewVaryingK`.
+    btn_view_varying_k: Rc<Run3dmodButton>,
+    /// Java private final `ltfTestKValue`.
+    ltf_test_k_value: Rc<LabeledTextField>,
+    /// Java private final `ltfTestIterationList`.
+    ltf_test_iteration_list: Rc<LabeledTextField>,
+    /// Java private final `btnRunVaryingIteration`.
+    btn_run_varying_iteration: Rc<Run3dmodButton>,
+    /// Java private final `btnViewVaryingIteration`.
+    btn_view_varying_iteration: Rc<Run3dmodButton>,
+    /// Java private final `filterFullVolumePanel`.
+    filter_full_volume_panel: Rc<FilterFullVolumePanel>,
 
-/// Exact source-visible layout order; component painting remains a GUI boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct AnisotropicDiffusionDialogLayout {
-    pub root_axis: &'static str,
-    pub root_border: String,
-    pub root_component_order: Vec<&'static str>,
-    pub first_column_order: Vec<&'static str>,
-    pub second_column_order: Vec<&'static str>,
-    pub listener_count: usize,
-    pub tooltip_initialized: bool,
+    /// Java private final `pnlTestVolumeRubberband`.
+    pnl_test_volume_rubberband: RefCell<Option<Rc<RubberbandPanel>>>,
+    /// Java private final `manager`.
+    manager: &'static ParallelManager,
+    /// Java private final `mediator`.
+    mediator: Option<Rc<ProcessingMethodMediator>>,
+    /// Java private final `testVolumeName`.
+    test_volume_name: Option<String>,
+
+    /// Java private `subdirName`, initially null.
+    subdir_name: RefCell<Option<String>>,
+    /// Java private `debug`, initially false.
+    debug: Cell<bool>,
 }
 
-pub trait AnisotropicDiffusionDialogMetaData: filter_full_volume_panel::ParallelMetaData {
-    fn set_root_name(&mut self, value: String);
-    fn set_volume(&mut self, value: String);
-    fn volume(&self) -> String;
-    fn set_load_with_flipping(&mut self, value: bool);
-    fn load_with_flipping(&self) -> bool;
-    fn set_test_k_value_list(&mut self, value: String);
-    fn test_k_value_list(&self) -> String;
-    fn set_test_iteration(&mut self, value: i32);
-    fn test_iteration(&self) -> i32;
-    fn set_test_k_value(&mut self, value: String);
-    fn test_k_value(&self) -> String;
-    fn set_test_iteration_list(&mut self, value: String);
-    fn test_iteration_list(&self) -> String;
-}
-pub trait AnisotropicDiffusionDialogRubberband {
-    fn get_parameters_meta_data<M: AnisotropicDiffusionDialogMetaData>(&self, meta: &mut M);
-    fn set_parameters_meta_data<M: AnisotropicDiffusionDialogMetaData>(&mut self, meta: &M);
-    fn get_parameters_trimvol<T: AnisotropicDiffusionDialogTrimvolParam>(
-        &self,
-        param: &mut T,
-        validate: bool,
-    ) -> bool;
-}
-pub trait AnisotropicDiffusionDialogTrimvolParam {
-    fn set_flipped_volume(&mut self, value: bool);
-    fn set_swap_yz(&mut self, value: bool);
-    fn set_rotate_x(&mut self, value: bool);
-    fn set_convert_to_bytes(&mut self, value: bool);
-    fn set_input_file_name(&mut self, value: String);
-    fn set_output_file_name(&mut self, value: String);
-    fn set_format_of_output_file(&mut self, value: String);
-}
-pub trait AnisotropicDiffusionDialogParam:
-    filter_full_volume_panel::AnisotropicDiffusionParam
-{
-    fn set_subdir_name(&mut self, value: Option<String>);
-    fn set_k_value_list(&mut self, value: String) -> Option<String>;
-    fn set_iteration_list(&mut self, value: String) -> bool;
-    fn set_format(&mut self, value: String);
-    fn set_input_file_name(&mut self, value: String);
-}
-pub trait AnisotropicDiffusionDialogChunksetupParam:
-    filter_full_volume_panel::ChunksetupParam
-{
-    fn set_command_file(&mut self, value: String);
-    fn set_subdir_name(&mut self, value: Option<String>);
-    fn set_input_file(&mut self, value: String);
-    fn set_output_file(&mut self, value: String);
-}
-/// Java `ProcesschunksParam.setSubdirName` used by overloaded
-/// `getParameters(ParallelParam)`.
-pub trait AnisotropicDiffusionDialogParallelParam {
-    fn set_subdir_name(&mut self, value: Option<String>);
-}
-/// Concrete `ParallelManager`, dataset validation, chooser, and UIHarness calls.
-pub trait AnisotropicDiffusionDialogManager:
-    filter_full_volume_panel::FilterFullVolumePanelManager
-{
-    fn make_subdir(&mut self, name: &str) -> bool;
-    fn delete_subdir(&mut self, name: &str) -> bool;
-    fn property_user_dir(&self) -> PathBuf;
-    fn image_output_format(&self) -> String;
-    fn open_message_dialog(&mut self, message: &str, title: &str);
-    fn trim_volume(&mut self);
-    fn anisotropic_diffusion_varying_k(&mut self, subdir: &str, method: ProcessingMethod);
-    fn anisotropic_diffusion_varying_iteration(&mut self, subdir: &str);
-    fn imod(&mut self, key: &str, file: PathBuf, options: Option<()>, flip: bool);
-    fn imod_varying_k_value(&mut self, subdir: &str, test: &str, flip: bool);
-    fn imod_varying_iteration(&mut self, subdir: &str, test: &str, flip: bool);
-    fn set_new_param_file(&mut self, file: &Path);
-    fn validate_dataset_name(&mut self, file: &Path) -> bool;
-}
-
-pub struct AnisotropicDiffusionDialog<R> {
-    pub root_panel: AnisotropicDiffusionDialogLayout,
-    pub btn_view_full_volume: MultiLineButton,
-    pub ftf_volume: FileTextField,
-    pub btn_extract_test_volume: MultiLineButton,
-    pub btn_view_test_volume: MultiLineButton,
-    pub cb_load_with_flipping: CheckBox,
-    pub ltf_test_k_value_list: LabeledTextField,
-    pub sp_test_iteration: Spinner,
-    pub btn_run_varying_k: MultiLineButton,
-    pub btn_view_varying_k: MultiLineButton,
-    pub ltf_test_k_value: LabeledTextField,
-    pub ltf_test_iteration_list: LabeledTextField,
-    pub btn_run_varying_iteration: MultiLineButton,
-    pub btn_view_varying_iteration: MultiLineButton,
-    pub filter_full_volume_panel: FilterFullVolumePanel,
-    pub pnl_test_volume_rubberband: R,
-    pub test_volume_name: String,
-    pub subdir_name: Option<String>,
-    pub debug: bool,
-    pub mediator_registered: bool,
-}
-impl<R> AnisotropicDiffusionDialog<R> {
-    pub fn new<M: AnisotropicDiffusionDialogManager>(
-        manager: &M,
-        rubberband: R,
-        test_volume_name: String,
-    ) -> Self {
-        let mut dialog = Self {
-            root_panel: AnisotropicDiffusionDialogLayout::default(),
-            btn_view_full_volume: MultiLineButton::new_with_label(Some("View Full Volume")),
-            ftf_volume: FileTextField::get_partial_path_instance("Pick a volume"),
-            btn_extract_test_volume: MultiLineButton::new_with_label(Some("Extract Test Volume")),
-            btn_view_test_volume: MultiLineButton::new_with_label(Some("View Test Volume")),
-            cb_load_with_flipping: CheckBox::new_with_text("Load with flipping"),
-            ltf_test_k_value_list: LabeledTextField::new(
-                FieldType::FloatingPointArray,
-                K_VALUE_LIST_LABEL,
-            ),
-            sp_test_iteration: Spinner::get_labeled_instance(ITERATION_LABEL, 10, 1, 200, 1),
-            btn_run_varying_k: MultiLineButton::new_with_label(Some("Run with Different K Values")),
-            btn_view_varying_k: MultiLineButton::new_with_label(Some(
-                "View Different K Values Test Results",
-            )),
-            ltf_test_k_value: LabeledTextField::new(FieldType::FloatingPoint, K_VALUE_LABEL),
-            ltf_test_iteration_list: LabeledTextField::new(
-                FieldType::IntegerList,
-                ITERATION_LIST_LABEL,
-            ),
-            btn_run_varying_iteration: MultiLineButton::new_with_label(Some(
-                "Run with Different Iterations",
-            )),
-            btn_view_varying_iteration: MultiLineButton::new_with_label(Some(
-                "View Different Iteration Test Results",
-            )),
-            filter_full_volume_panel: FilterFullVolumePanel::get_instance(manager, DIALOG_TYPE),
-            pnl_test_volume_rubberband: rubberband,
-            test_volume_name,
-            subdir_name: None,
-            debug: false,
-            mediator_registered: false,
-        };
-        dialog.create_panel();
-        dialog.set_tool_tip_text();
-        dialog.mediator_registered = true;
-        dialog
-    }
-    pub fn get_instance<M: AnisotropicDiffusionDialogManager>(
-        manager: &M,
-        rubberband: R,
-        test_volume_name: String,
-    ) -> Self {
-        let mut value = Self::new(manager, rubberband, test_volume_name);
-        value.add_listeners();
-        value
-    }
-    pub fn set_tool_tip_text(&mut self) {
-        self.cb_load_with_flipping.set_tool_tip_text(Some("Load volumes into 3dmod with flipping of Y and Z; use this for a tomogram that has not been flipped or rotated in post-processing."));
+impl AnisotropicDiffusionDialog {
+    /// Java private `setToolTipText()`.
+    fn set_tool_tip_text(&self) {
+        self.cb_load_with_flipping.set_tool_tip_text(Some(
+            "Load volumes into 3dmod with flipping of Y and Z; use this for a tomogram that has not been flipped or rotated in post-processing.",
+        ));
         self.btn_view_full_volume
             .set_tool_tip_text(Some("View the full volume in 3dmod."));
         self.btn_extract_test_volume.set_tool_tip_text(Some(
@@ -251,208 +147,372 @@ impl<R> AnisotropicDiffusionDialog<R> {
         ));
         self.btn_view_test_volume
             .set_tool_tip_text(Some("View the test volume in 3dmod."));
-        self.ltf_test_k_value_list.set_tool_tip_text(Some("Set of K threshold values to try on the test volume with the given number of iterations."));
+        self.ltf_test_k_value_list.set_tool_tip_text(Some(
+            "Set of K threshold values to try on the test volume with the given number of iterations.",
+        ));
         self.sp_test_iteration
             .set_tool_tip_text(Some("Number of iterations to run for each K value."));
-        self.root_panel.tooltip_initialized = true;
+        self.btn_run_varying_k.set_tool_tip_text(Some(
+            "Compute a set of test volumes with the different K threshold values and a fixed number of iterations",
+        ));
+        self.btn_view_varying_k.set_tool_tip_text(Some(
+            "View the volumes computed with different K values in 3dmod.",
+        ));
+        self.ltf_test_k_value.set_tool_tip_text(Some(
+            "Single K threshold value to use with different numbers of iterations.",
+        ));
+        self.ltf_test_iteration_list.set_tool_tip_text(Some(
+            "List of number of iterations to try with the single K value. Comma-separated ranges of numbers are allowed.",
+        ));
+        self.btn_run_varying_iteration.set_tool_tip_text(Some(
+            "Compute a set of test volumes with the different numbers of iterations and a fixed K value",
+        ));
+        self.btn_view_varying_iteration.set_tool_tip_text(Some(
+            "View the volumes computed with different iteration numbers in 3dmod",
+        ));
     }
-    pub fn create_panel(&mut self) {
+
+    /// Java package-private `setDebug(boolean)`.
+    pub fn set_debug(&self, input: bool) {
+        self.debug.set(input);
+    }
+
+    /// Java private `AnisotropicDiffusionDialog(ParallelManager)`, field initializers
+    /// and the part of the body that does not need `this`.
+    fn new(manager: &'static ParallelManager) -> Rc<AnisotropicDiffusionDialog> {
+        Rc::new_cyclic(|this: &Weak<AnisotropicDiffusionDialog>| {
+            let container: Weak<dyn Run3dmodButtonContainer> = this.clone();
+            let root_panel = SpacedPanel::get_instance_void();
+            let btn_view_full_volume =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("View Full Volume"),
+                    Some(container.clone()),
+                );
+            let ftf_volume = FileTextField::get_partial_path_instance("Pick a volume");
+            let btn_extract_test_volume = MultiLineButton::new_string(Some("Extract Test Volume"));
+            let btn_view_test_volume =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("View Test Volume"),
+                    Some(container.clone()),
+                );
+            let cb_load_with_flipping = CheckBox::new_string(Some("Load with flipping"));
+            let ltf_test_k_value_list = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPointArray,
+                Some(K_VALUE_LIST_LABEL),
+            );
+            let sp_test_iteration =
+                Spinner::get_labeled_instance_string_int_int_int(Some(ITERATION_LABEL), 10, 1, 200);
+            let btn_run_varying_k =
+                Run3dmodButton::get_deferred_3dmod_instance_string_run_3dmod_button_container(
+                    Some("Run with Different K Values"),
+                    Some(container.clone()),
+                );
+            let btn_view_varying_k =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("View Different K Values Test Results"),
+                    Some(container.clone()),
+                );
+            let ltf_test_k_value = LabeledTextField::new_field_type_string(
+                FieldType::FloatingPoint,
+                Some(K_VALUE_LABEL),
+            );
+            let ltf_test_iteration_list = LabeledTextField::new_field_type_string(
+                FieldType::IntegerList,
+                Some(ITERATION_LIST_LABEL),
+            );
+            let btn_run_varying_iteration =
+                Run3dmodButton::get_deferred_3dmod_instance_string_run_3dmod_button_container(
+                    Some("Run with Different Iterations"),
+                    Some(container.clone()),
+                );
+            let btn_view_varying_iteration =
+                Run3dmodButton::get_3dmod_instance_string_run_3dmod_button_container(
+                    Some("View Different Iteration Test Results"),
+                    Some(container),
+                );
+            // Constructor body.
+            eprintln!(
+                "{}\nDialog: {}",
+                utilities::get_date_time_stamp(),
+                DialogType::AnisotropicDiffusion
+            );
+            let mediator = manager.get_processing_method_mediator(Some(AxisID::Only));
+            let parent: Weak<dyn FilterFullVolumeParent> = this.clone();
+            let filter_full_volume_panel =
+                FilterFullVolumePanel::get_instance(manager, DIALOG_TYPE, parent);
+            let test_volume_name = file_type::CLASS
+                .nad_test_input
+                .get_file_name(Some(manager), Some(AxisID::Only));
+            AnisotropicDiffusionDialog {
+                this: this.clone(),
+                root_panel,
+                btn_view_full_volume,
+                ftf_volume,
+                btn_extract_test_volume,
+                btn_view_test_volume,
+                cb_load_with_flipping,
+                ltf_test_k_value_list,
+                sp_test_iteration,
+                btn_run_varying_k,
+                btn_view_varying_k,
+                ltf_test_k_value,
+                ltf_test_iteration_list,
+                btn_run_varying_iteration,
+                btn_view_varying_iteration,
+                filter_full_volume_panel,
+                pnl_test_volume_rubberband: RefCell::new(None),
+                manager,
+                mediator,
+                test_volume_name,
+                subdir_name: RefCell::new(None),
+                debug: Cell::new(false),
+            }
+        })
+    }
+
+    /// The rest of the Java constructor body (the layout).
+    fn construct(&self) {
+        // root
+        self.root_panel.set_box_layout(spaced_panel::X_AXIS);
+        if *utilities::APRIL_FOOLS {
+            self.root_panel
+                .set_border(&BeveledBorder::new(Some("Anisotropic Delusion")).get_border());
+        } else {
+            self.root_panel
+                .set_border(&BeveledBorder::new(Some("Anisotropic Diffusion")).get_border());
+        }
+        // Swing layout: rootPanel.setComponentAlignmentX(Component.CENTER_ALIGNMENT).
+        // init
         self.ltf_test_k_value_list.set_required(true);
         self.ltf_test_iteration_list.set_required(true);
         self.ltf_test_k_value.set_required(true);
-        self.ltf_test_k_value_list.set_text_preferred_width(10);
-        self.ltf_test_iteration_list.set_text_preferred_width(10);
-        self.root_panel.root_axis = "X_AXIS";
-        self.root_panel.root_border = "Anisotropic Diffusion".into();
-        self.root_panel.root_component_order = vec!["first", "second"];
-        self.root_panel.first_column_order =
-            vec!["volume", "load-with-flipping", "extract-test-volume"];
-        self.root_panel.second_column_order =
-            vec!["varying-k", "varying-iterations", "filter-full-volume"];
-    }
-    pub fn pop_up_context_menu(&self, _mouse_event: MouseEvent) {}
-    pub fn set_debug(&mut self, input: bool) {
-        self.debug = input;
-    }
-    pub fn get_processing_method(&self) -> ProcessingMethod {
-        ProcessingMethod::PpCpu
-    }
-    pub fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
-        None
-    }
-    pub fn lock_processing_method(&mut self, _lock: bool) {}
-    pub fn add_listeners(&mut self) {
-        self.ftf_volume.add_action_listener();
-        for button in [
-            &mut self.btn_view_full_volume,
-            &mut self.btn_extract_test_volume,
-            &mut self.btn_view_test_volume,
-            &mut self.btn_run_varying_k,
-            &mut self.btn_view_varying_k,
-            &mut self.btn_run_varying_iteration,
-            &mut self.btn_view_varying_iteration,
-        ] {
-            button.add_action_listener();
+        // first column
+        let pnl_first = SpacedPanel::get_instance_void();
+        pnl_first.set_box_layout(spaced_panel::Y_AXIS);
+        // volume
+        pnl_first.add_container(&self.ftf_volume.get_container());
+        let pnl_load_with_flipping = SpacedPanel::get_instance_void();
+        pnl_load_with_flipping.set_box_layout(spaced_panel::X_AXIS);
+        pnl_load_with_flipping.add_check_box(&self.cb_load_with_flipping);
+        pnl_load_with_flipping.add_horizontal_glue();
+        pnl_first.add_spaced_panel(&pnl_load_with_flipping);
+        // extract
+        let pnl_extract = SpacedPanel::get_instance_void();
+        pnl_extract.set_box_layout(spaced_panel::Y_AXIS);
+        pnl_extract.set_border(&EtchedBorder::new(Some("Extract Test Volume")).get_border());
+        // Swing layout: pnlExtract.setComponentAlignmentX(Component.CENTER_ALIGNMENT).
+        let pnl_test_volume_rubberband = RubberbandPanel::get_instance_base_manager_string_string_string_string_string_string_string_string_string_run3dmod_button(
+            self.manager,
+            Some(imod_manager::VOLUME_KEY),
+            Some("Test Volume Range:"),
+            Some("Get Test Volume Range from 3dmod"),
+            Some("Minimum X coordinate on the left side for the test volume range."),
+            Some("Maximum X coordinate on the right side for the test volume range."),
+            Some("The lower Y coordinate for the test volume range."),
+            Some("The upper Y coordinate for the test volume range."),
+            Some("The starting slice for the test volume range."),
+            Some("The ending slice for the test volume range."),
+            Some(self.btn_view_full_volume.clone()),
+        );
+        pnl_extract.add_container(&pnl_test_volume_rubberband.get_container());
+        *self.pnl_test_volume_rubberband.borrow_mut() = Some(pnl_test_volume_rubberband);
+        let pnl_extract_buttons = SpacedPanel::get_instance_void();
+        pnl_extract_buttons.set_box_layout(spaced_panel::X_AXIS);
+        pnl_extract_buttons.add_horizontal_glue();
+        pnl_extract_buttons.add_multi_line_button(&self.btn_extract_test_volume);
+        pnl_extract_buttons.add_horizontal_glue();
+        pnl_extract_buttons.add_multi_line_button(&self.btn_view_test_volume);
+        pnl_extract_buttons.add_horizontal_glue();
+        pnl_extract.add_spaced_panel(&pnl_extract_buttons);
+        pnl_first.add_spaced_panel(&pnl_extract);
+        self.root_panel.add_spaced_panel(&pnl_first);
+        // second column
+        let pnl_second = SpacedPanel::get_instance_void();
+        pnl_second.set_box_layout(spaced_panel::Y_AXIS);
+        // varying K
+        let pnl_varying_k = SpacedPanel::get_instance_void();
+        pnl_varying_k.set_box_layout(spaced_panel::Y_AXIS);
+        pnl_varying_k
+            .set_border(&EtchedBorder::new(Some("Find a K Value for Test Volume")).get_border());
+        let pnl_varying_k_fields = SpacedPanel::get_instance_void();
+        pnl_varying_k_fields.set_box_layout(spaced_panel::X_AXIS);
+        // Swing layout: ltfTestKValueList.setTextPreferredWidth(
+        // UIParameters.getInstance().getListWidth()).
+        pnl_varying_k_fields.add_labeled_text_field(&self.ltf_test_k_value_list);
+        pnl_varying_k_fields.add_spinner(&self.sp_test_iteration);
+        pnl_varying_k.add_spaced_panel(&pnl_varying_k_fields);
+        let pnl_varying_k_buttons = SpacedPanel::get_instance_void();
+        pnl_varying_k_buttons.set_box_layout(spaced_panel::X_AXIS);
+        pnl_varying_k_buttons.add_horizontal_glue();
+        self.btn_run_varying_k
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(
+                self.btn_view_varying_k.clone() as Rc<dyn Deferred3dmodButton>
+            ));
+        pnl_varying_k_buttons.add_multi_line_button(&self.btn_run_varying_k);
+        pnl_varying_k_buttons.add_horizontal_glue();
+        pnl_varying_k_buttons.add_multi_line_button(&self.btn_view_varying_k);
+        pnl_varying_k_buttons.add_horizontal_glue();
+        pnl_varying_k.add_spaced_panel(&pnl_varying_k_buttons);
+        pnl_second.add_spaced_panel(&pnl_varying_k);
+        // varying iterations
+        let pnl_varying_iteration = SpacedPanel::get_instance_void();
+        pnl_varying_iteration.set_box_layout(spaced_panel::Y_AXIS);
+        pnl_varying_iteration.set_border(
+            &EtchedBorder::new(Some("Find an Iteration Number for Test Volume")).get_border(),
+        );
+        let pnl_varying_iteration_fields = SpacedPanel::get_instance_void();
+        pnl_varying_iteration_fields.set_box_layout(spaced_panel::X_AXIS);
+        pnl_varying_iteration_fields.add_labeled_text_field(&self.ltf_test_k_value);
+        // Swing layout: ltfTestIterationList.setTextPreferredWidth(...getListWidth()).
+        pnl_varying_iteration_fields.add_labeled_text_field(&self.ltf_test_iteration_list);
+        pnl_varying_iteration.add_spaced_panel(&pnl_varying_iteration_fields);
+        let pnl_varying_iteration_buttons = SpacedPanel::get_instance_void();
+        pnl_varying_iteration_buttons.set_box_layout(spaced_panel::X_AXIS);
+        pnl_varying_iteration_buttons.add_horizontal_glue();
+        self.btn_run_varying_iteration
+            .set_deferred_3dmod_button_deferred_3dmod_button(Some(
+                self.btn_view_varying_iteration.clone() as Rc<dyn Deferred3dmodButton>,
+            ));
+        pnl_varying_iteration_buttons.add_multi_line_button(&self.btn_run_varying_iteration);
+        pnl_varying_iteration_buttons.add_horizontal_glue();
+        pnl_varying_iteration_buttons.add_multi_line_button(&self.btn_view_varying_iteration);
+        pnl_varying_iteration_buttons.add_horizontal_glue();
+        pnl_varying_iteration.add_spaced_panel(&pnl_varying_iteration_buttons);
+        pnl_second.add_spaced_panel(&pnl_varying_iteration);
+        pnl_second.add_component(&self.filter_full_volume_panel.get_component());
+        self.root_panel.add_spaced_panel(&pnl_second);
+        self.set_tool_tip_text();
+        if let (Some(mediator), Some(this)) = (&self.mediator, self.this.upgrade()) {
+            let origin: Rc<dyn ProcessInterface> = this;
+            mediator.register_process_interface(origin.clone());
+            mediator.set_method_process_interface_processing_method(
+                &origin,
+                self.get_processing_method(),
+            );
         }
-        self.root_panel.listener_count = 8;
     }
-    pub fn get_dialog_type(&self) -> DialogType {
-        DIALOG_TYPE
+
+    /// Java static `getInstance(ParallelManager, AxisID)`.
+    pub fn get_instance(
+        manager: &'static ParallelManager,
+        _axis_id: AxisID,
+    ) -> Rc<AnisotropicDiffusionDialog> {
+        let instance = AnisotropicDiffusionDialog::new(manager);
+        instance.construct();
+        instance.add_listeners();
+        instance
     }
-    /// Java overloaded `getParameters(ParallelParam)`.
-    pub fn get_parameters_parallel<P: AnisotropicDiffusionDialogParallelParam>(
-        &self,
-        param: &mut P,
-    ) {
-        param.set_subdir_name(self.subdir_name.clone());
+
+    /// Java private `addListeners()`.
+    fn add_listeners(&self) {
+        // new VolumeActionListener(this)
+        let adaptee = self.this.clone();
+        self.ftf_volume
+            .add_action_listener(Rc::new(move |_event: &ActionEvent| {
+                if let Some(adaptee) = adaptee.upgrade() {
+                    adaptee.open_volume();
+                }
+            }));
+        // new ADDActionListener(this)
+        let adaptee = self.this.clone();
+        let listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            if let Some(adaptee) = adaptee.upgrade() {
+                adaptee.action(event.get_action_command().unwrap_or(""), None, None);
+            }
+        });
+        self.btn_view_full_volume
+            .add_action_listener(listener.clone());
+        self.btn_extract_test_volume
+            .add_action_listener(listener.clone());
+        self.btn_view_test_volume
+            .add_action_listener(listener.clone());
+        self.btn_run_varying_k.add_action_listener(listener.clone());
+        self.btn_view_varying_k
+            .add_action_listener(listener.clone());
+        self.btn_run_varying_iteration
+            .add_action_listener(listener.clone());
+        self.btn_view_varying_iteration
+            .add_action_listener(listener);
+        let context_menu: Weak<dyn ContextMenu> = self.this.clone();
+        let mouse_adapter: Rc<dyn MouseListener> = GenericMouseAdapter::new(context_menu);
+        self.root_panel
+            .get_container()
+            .add_mouse_listener(mouse_adapter);
     }
-    pub fn get_container(&self) -> &AnisotropicDiffusionDialogLayout {
-        &self.root_panel
+
+    /// Java `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.root_panel.get_container()
     }
-    pub fn get_memory_per_chunk(&self) -> i32 {
+
+    /// The rubberband panel (assigned during construction).
+    fn rubberband(&self) -> Rc<RubberbandPanel> {
+        self.pnl_test_volume_rubberband
+            .borrow()
+            .clone()
+            .expect("pnlTestVolumeRubberband is assigned by the constructor")
+    }
+
+    /// Java `getInitialParameters(ParallelMetaData)`.
+    pub fn get_initial_parameters(&self, meta_data: &ParallelMetaData) {
+        meta_data.set_root_name(self.ftf_volume.get_file_name().as_deref());
+        meta_data.set_volume(self.ftf_volume.get_file_absolute_path().as_deref());
+    }
+
+    /// Java `getParameters(ParallelMetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &ParallelMetaData) {
+        meta_data.set_load_with_flipping(self.cb_load_with_flipping.is_selected());
+        self.rubberband()
+            .get_parameters_parallel_meta_data(meta_data);
+        meta_data.set_test_k_value_list(self.ltf_test_k_value_list.get_text_void().as_deref());
+        meta_data.set_test_iteration(Some(self.sp_test_iteration.get_value()));
+        meta_data.set_test_k_value(self.ltf_test_k_value.get_text_void().as_deref());
+        meta_data.set_test_iteration_list(self.ltf_test_iteration_list.get_text_void().as_deref());
+        self.filter_full_volume_panel
+            .get_parameters_meta_data(meta_data);
+    }
+
+    /// Java `getParametersForTrimvol(ParallelMetaData)`.
+    pub fn get_parameters_for_trimvol(&self, meta_data: &ParallelMetaData) {
+        self.rubberband().get_parameters_for_trimvol(meta_data);
+    }
+
+    /// Java `getMemoryPerChunk()`.
+    pub fn get_memory_per_chunk(&self) -> Number {
         self.filter_full_volume_panel.get_memory_per_chunk()
     }
-    pub fn init_subdir<M: AnisotropicDiffusionDialogManager>(&mut self, manager: &mut M) -> bool {
-        if self.ftf_volume.is_empty() {
-            manager.open_message_dialog(
-                "Please choose a volume before running this function.",
-                "Entry Error",
-            );
-            return false;
-        }
-        if self.subdir_name.is_none() {
-            let name = format!("naddir.{}", self.ftf_volume.get_file_name());
-            if !manager.make_subdir(&name) {
-                return false;
-            }
-            self.subdir_name = Some(name);
-        }
-        true
-    }
-    pub fn get_subdirectory<M: AnisotropicDiffusionDialogManager>(
-        &mut self,
-        manager: &mut M,
-    ) -> Option<String> {
-        self.init_subdir(manager)
-            .then(|| self.subdir_name.clone())
-            .flatten()
-    }
-    pub fn clean_up<M: AnisotropicDiffusionDialogManager>(&mut self, manager: &mut M) {
-        if self
-            .subdir_name
-            .as_deref()
-            .is_some_and(|name| manager.delete_subdir(name))
-        {
-            self.subdir_name = None;
-        }
-    }
-    pub fn get_volume(&self) -> String {
-        self.ftf_volume.get_file_absolute_path()
-    }
-    pub fn is_load_with_flipping(&self) -> bool {
-        self.cb_load_with_flipping.is_selected()
-    }
-    pub fn set_method(&mut self, _processing_method: ProcessingMethod) {}
-    pub fn is_use_gpu(&self) -> bool {
-        false
-    }
-    pub fn queue_table_event_action(&mut self, _event: QueueTableEvent) {}
-    pub fn set_use_queue_check_box(&mut self, _use_queue_checkbox: Option<CheckBox>) {}
-    pub fn add_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-    pub fn remove_queue_table_listener(&mut self, _listener: &mut dyn QueueTableListener) {}
-    pub fn update_gpu(&mut self, _disable_gpu: bool) {}
-}
 
-impl<R> QueueTableListener for AnisotropicDiffusionDialog<R> {
-    fn queue_table_event_action(&mut self, event: QueueTableEvent) {
-        Self::queue_table_event_action(self, event);
-    }
-}
-
-impl<R> ProcessInterface for AnisotropicDiffusionDialog<R> {
-    type QueueCheckBox = CheckBox;
-    fn update_gpu(&mut self, disable_gpu: bool) {
-        Self::update_gpu(self, disable_gpu);
-    }
-    fn get_processing_method(&self) -> ProcessingMethod {
-        Self::get_processing_method(self)
-    }
-    fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
-        Self::get_secondary_processing_method(self)
-    }
-    fn lock_processing_method(&mut self, lock: bool) {
-        Self::lock_processing_method(self, lock);
-    }
-    fn set_method(&mut self, method: ProcessingMethod) {
-        Self::set_method(self, method);
-    }
-    fn is_use_gpu(&self) -> bool {
-        Self::is_use_gpu(self)
-    }
-    fn set_use_queue_check_box(&mut self, check_box: Option<CheckBox>) {
-        Self::set_use_queue_check_box(self, check_box);
-    }
-    fn add_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
-        Self::add_queue_table_listener(self, listener);
-    }
-    fn remove_queue_table_listener(&mut self, listener: &mut dyn QueueTableListener) {
-        Self::remove_queue_table_listener(self, listener);
-    }
-}
-impl<R: AnisotropicDiffusionDialogRubberband> AnisotropicDiffusionDialog<R> {
-    pub fn get_initial_parameters<M: AnisotropicDiffusionDialogMetaData>(&self, meta: &mut M) {
-        meta.set_root_name(self.ftf_volume.get_file_name());
-        meta.set_volume(self.ftf_volume.get_file_absolute_path());
-    }
-    pub fn get_parameters_meta_data<M: AnisotropicDiffusionDialogMetaData>(&self, meta: &mut M) {
-        meta.set_load_with_flipping(self.cb_load_with_flipping.is_selected());
-        self.pnl_test_volume_rubberband
-            .get_parameters_meta_data(meta);
-        meta.set_test_k_value_list(self.ltf_test_k_value_list.get_text());
-        meta.set_test_iteration(self.sp_test_iteration.get_value());
-        meta.set_test_k_value(self.ltf_test_k_value.get_text());
-        meta.set_test_iteration_list(self.ltf_test_iteration_list.get_text());
-        self.filter_full_volume_panel.get_parameters_meta_data(meta);
-    }
-    /// Java `getParametersForTrimvol(ParallelMetaData)`.
-    pub fn get_parameters_for_trimvol_meta_data<M: AnisotropicDiffusionDialogMetaData>(
-        &self,
-        meta: &mut M,
-    ) {
-        self.pnl_test_volume_rubberband
-            .get_parameters_meta_data(meta);
-    }
-    pub fn set_parameters<
-        M: AnisotropicDiffusionDialogMetaData + AnisotropicDiffusionDialogManager,
-    >(
-        &mut self,
-        manager: &mut M,
-        meta: &M,
-    ) {
+    /// Java `setParameters(ParallelMetaData)`.
+    pub fn set_parameters(&self, meta_data: &ParallelMetaData) {
         self.ftf_volume.set_button_enabled(false);
-        self.ftf_volume.set_text(&meta.volume());
+        self.ftf_volume
+            .set_text_string(meta_data.get_volume().as_deref());
         self.cb_load_with_flipping
-            .set_selected(meta.load_with_flipping());
-        self.pnl_test_volume_rubberband
-            .set_parameters_meta_data(meta);
+            .set_selected_boolean(meta_data.is_load_with_flipping());
+        self.rubberband()
+            .set_parameters_parallel_meta_data(meta_data);
         self.ltf_test_k_value_list
-            .set_text(&meta.test_k_value_list());
-        self.sp_test_iteration.set_value(meta.test_iteration());
-        self.ltf_test_k_value.set_text(&meta.test_k_value());
+            .set_text_string(meta_data.get_test_k_value_list().as_deref());
+        self.sp_test_iteration
+            .set_value_const_etomo_number(&meta_data.get_test_iteration());
+        self.ltf_test_k_value
+            .set_text_string(meta_data.get_test_k_value().as_deref());
         self.ltf_test_iteration_list
-            .set_text(&meta.test_iteration_list());
-        self.filter_full_volume_panel.set_parameters_meta_data(meta);
-        self.init_subdir(manager);
+            .set_text_string(meta_data.get_test_iteration_list().as_deref());
+        self.filter_full_volume_panel.set_parameters(meta_data);
+        self.init_subdir();
     }
-    pub fn get_parameters_for_trimvol<T: AnisotropicDiffusionDialogTrimvolParam>(
+
+    /// Java `getParameters(TrimvolParam, boolean)`.  Get the parameter values from
+    /// the panel.
+    pub fn get_parameters_trimvol_param(
         &self,
-        param: &mut T,
-        validate: bool,
-        format: String,
+        param: &mut TrimvolParam,
+        do_validation: bool,
     ) -> bool {
         if !self
-            .pnl_test_volume_rubberband
-            .get_parameters_trimvol(param, validate)
+            .rubberband()
+            .get_parameters_trimvol_param_boolean(param, do_validation)
         {
             return false;
         }
@@ -460,173 +520,186 @@ impl<R: AnisotropicDiffusionDialogRubberband> AnisotropicDiffusionDialog<R> {
         param.set_swap_yz(false);
         param.set_rotate_x(false);
         param.set_convert_to_bytes(false);
-        param.set_input_file_name(self.ftf_volume.get_file_name());
-        param.set_output_file_name(
-            self.subdir_name
-                .as_ref()
-                .map(|d| {
-                    Path::new(d)
-                        .join(&self.test_volume_name)
-                        .to_string_lossy()
-                        .into_owned()
-                })
-                .unwrap_or_default(),
-        );
-        param.set_format_of_output_file(format);
+        param.set_input_file_name(self.ftf_volume.get_file_name().as_deref().unwrap_or("null"));
+        param.set_output_file_name(&utilities::java_io_file_new(
+            self.subdir_name.borrow().as_deref().unwrap_or("null"),
+            self.test_volume_name.as_deref().unwrap_or("null"),
+        ));
+        param.set_format_of_output_file(Some(
+            self.manager
+                .get_meta_data()
+                .base()
+                .get_image_output_format(),
+        ));
         true
     }
-    pub fn get_parameters_for_varying_k<
-        M: AnisotropicDiffusionDialogManager,
-        P: AnisotropicDiffusionDialogParam,
-    >(
+
+    /// Java `getParametersForVaryingK(AnisotropicDiffusionParam, boolean)`.
+    pub fn get_parameters_for_varying_k(
         &self,
-        manager: &mut M,
-        param: &mut P,
-        validate: bool,
+        param: &mut AnisotropicDiffusionParam,
+        do_validation: bool,
     ) -> bool {
-        let value = match self.ltf_test_k_value_list.get_text_validated(validate) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
-        if let Some(error) = param.set_k_value_list(value) {
-            manager.open_message_dialog(&format!("{K_VALUE_LIST_LABEL}{error}"), "Entry Error");
-            return false;
-        }
-        let Some(subdir) = self.subdir_name.as_ref() else {
-            return false;
-        };
-        if !manager
-            .property_user_dir()
-            .join(subdir)
-            .join(&self.test_volume_name)
-            .exists()
-        {
-            manager.open_message_dialog(
-                "Test volume has not been created.  Please extract test volume.",
-                "Entry Error",
+        if self.debug.get() {
+            println!(
+                "getParametersForVaryingK:ltfTestKValueList.getText()={}",
+                self.ltf_test_k_value_list
+                    .get_text_void()
+                    .unwrap_or_else(|| "null".to_owned())
             );
+        }
+        let Ok(text) = self.ltf_test_k_value_list.get_text_boolean(do_validation) else {
+            return false;
+        };
+        let error_message = param.set_k_value_list(text.as_deref());
+        if let Some(error_message) = error_message {
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string(
+                    Some(self.manager),
+                    &format!("{K_VALUE_LIST_LABEL}{error_message}"),
+                    "Entry Error",
+                )
+            });
             return false;
         }
-        param.set_iteration(self.sp_test_iteration.get_value());
-        param.set_subdir_name(Some(subdir.clone()));
-        param.set_input_file_name(self.test_volume_name.clone());
-        true
-    }
-    pub fn get_parameters_anisotropic_diffusion<P: AnisotropicDiffusionDialogParam>(
-        &self,
-        param: &mut P,
-        validate: bool,
-    ) -> bool {
-        param.set_subdir_name(self.subdir_name.clone());
-        self.filter_full_volume_panel
-            .get_parameters_anisotropic_diffusion(param, validate)
-    }
-    pub fn get_parameters_chunksetup<P: AnisotropicDiffusionDialogChunksetupParam>(
-        &self,
-        param: &mut P,
-        output: String,
-    ) {
-        self.filter_full_volume_panel
-            .get_parameters_chunksetup(param);
-        param.set_command_file("nad_eed_3d.com".into());
-        param.set_subdir_name(self.subdir_name.clone());
-        param.set_input_file(self.ftf_volume.get_file_name());
-        param.set_output_file(output);
-    }
-    pub fn get_parameters_for_varying_iteration<P: AnisotropicDiffusionDialogParam>(
-        &self,
-        param: &mut P,
-        validate: bool,
-        format: String,
-    ) -> bool {
-        let k = match self.ltf_test_k_value.get_text_validated(validate) {
-            Ok(v) => v,
-            Err(_) => return false,
+        param.set_iteration(Some(self.sp_test_iteration.get_value()));
+        // Must use an absolute file when testing file existance. Changing the
+        // working directory by changing the user.dir property doesn't work for
+        // relative file paths. The path looks correct, but File.exists() returns an
+        // incorrect result.
+        let subdir = match self.manager.get_property_user_dir() {
+            Some(property_user_dir) => utilities::java_io_file_new(
+                &property_user_dir,
+                self.subdir_name.borrow().as_deref().unwrap_or("null"),
+            ),
+            None => self
+                .subdir_name
+                .borrow()
+                .clone()
+                .unwrap_or_else(|| "null".to_owned()),
         };
-        let iterations = match self.ltf_test_iteration_list.get_text_validated(validate) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
-        param.set_k_value(k);
-        if !param.set_iteration_list(iterations) {
+        if !Path::new(&utilities::java_io_file_new(
+            &subdir,
+            self.test_volume_name.as_deref().unwrap_or("null"),
+        ))
+        .exists()
+        {
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string(
+                    Some(self.manager),
+                    "Test volume has not been created.  Please extract test volume.",
+                    "Entry Error",
+                )
+            });
             return false;
         }
-        param.set_format(format);
-        param.set_subdir_name(self.subdir_name.clone());
-        param.set_input_file_name(self.test_volume_name.clone());
+        param.set_subdir_name(self.subdir_name.borrow().as_deref());
+        param.set_input_file_name(self.test_volume_name.as_deref());
         true
     }
-    pub fn action<M: AnisotropicDiffusionDialogManager>(&mut self, manager: &mut M, command: &str) {
-        if self.btn_extract_test_volume.get_action_command() == Some(command) {
-            if self.init_subdir(manager) {
-                manager.trim_volume();
-            }
-        } else if self.btn_run_varying_k.get_action_command() == Some(command) {
-            if self.init_subdir(manager) {
-                manager.anisotropic_diffusion_varying_k(
-                    self.subdir_name.as_deref().unwrap(),
-                    self.get_processing_method(),
-                );
-            }
-        } else if self.btn_run_varying_iteration.get_action_command() == Some(command) {
-            if self.init_subdir(manager) {
-                manager
-                    .anisotropic_diffusion_varying_iteration(self.subdir_name.as_deref().unwrap());
-            }
-        } else if self.btn_view_full_volume.get_action_command() == Some(command) {
-            if let Some(file) = self.ftf_volume.file.clone() {
-                manager.imod(
-                    "Volume",
-                    file,
-                    None,
-                    self.cb_load_with_flipping.is_selected(),
-                );
-            }
-        } else if self.btn_view_test_volume.get_action_command() == Some(command) {
-            if let Some(subdir) = &self.subdir_name {
-                manager.imod(
-                    "TestVolume",
-                    Path::new(subdir).join(&self.test_volume_name),
-                    None,
-                    self.cb_load_with_flipping.is_selected(),
-                );
-            }
-        } else if self.btn_view_varying_k.get_action_command() == Some(command) {
-            if let Some(subdir) = &self.subdir_name {
-                manager.imod_varying_k_value(
-                    subdir,
-                    &self.test_volume_name,
-                    self.cb_load_with_flipping.is_selected(),
-                );
-            }
-        } else if self.btn_view_varying_iteration.get_action_command() == Some(command) {
-            if let Some(subdir) = &self.subdir_name {
-                manager.imod_varying_iteration(
-                    subdir,
-                    &self.test_volume_name,
-                    self.cb_load_with_flipping.is_selected(),
-                );
-            }
-        }
+
+    /// Java `getParameters(AnisotropicDiffusionParam, boolean)`.
+    pub fn get_parameters_anisotropic_diffusion_param(
+        &self,
+        param: &mut AnisotropicDiffusionParam,
+        do_validation: bool,
+    ) -> bool {
+        param.set_subdir_name(self.subdir_name.borrow().as_deref());
+        self.filter_full_volume_panel
+            .get_parameters_anisotropic_diffusion_param(param, do_validation)
     }
-    pub fn open_volume<M: AnisotropicDiffusionDialogManager>(
-        &mut self,
-        manager: &mut M,
-        volume: Option<PathBuf>,
-    ) {
-        let Some(volume) = volume else {
+
+    /// Java `getParameters(ChunksetupParam)`.
+    pub fn get_parameters_chunksetup_param(&self, param: &mut ChunksetupParam) {
+        self.filter_full_volume_panel
+            .get_parameters_chunksetup_param(param);
+        param.set_command_file(Some(
+            &anisotropic_diffusion_param::get_filter_full_file_name(),
+        ));
+        param.set_subdir_name(self.subdir_name.borrow().as_deref());
+        param.set_input_file(self.ftf_volume.get_file_name().as_deref());
+        // was: ftfVolume.getFileName() + ".nad";
+        // ftfVolume.getFileName() is the root name that is set in metaData.
+        param.set_output_file(
+            file_type::CLASS
+                .anisotropic_diffusion_output
+                .get_file_name(Some(self.manager), Some(AxisID::Only))
+                .as_deref(),
+        );
+    }
+
+    /// Java `getParametersForVaryingIteration(AnisotropicDiffusionParam, boolean)`.
+    pub fn get_parameters_for_varying_iteration(
+        &self,
+        param: &mut AnisotropicDiffusionParam,
+        do_validation: bool,
+    ) -> bool {
+        let Ok(k_value) = self.ltf_test_k_value.get_text_boolean(do_validation) else {
+            return false;
+        };
+        param.set_k_value(k_value.as_deref());
+        let Ok(iteration_list) = self.ltf_test_iteration_list.get_text_boolean(do_validation)
+        else {
+            return false;
+        };
+        if !param.set_iteration_list(iteration_list.as_deref()) {
+            return false;
+        }
+        param.set_format(
+            self.manager
+                .get_base_meta_data()
+                .map(|meta_data| meta_data.base().get_image_output_format()),
+        );
+        param.set_subdir_name(self.subdir_name.borrow().as_deref());
+        param.set_input_file_name(self.test_volume_name.as_deref());
+        true
+    }
+
+    /// Java `getSubdirectory()`.
+    pub fn get_subdirectory(&self) -> Option<String> {
+        if !self.init_subdir() {
+            return None;
+        }
+        self.subdir_name.borrow().clone()
+    }
+
+    /// Java private `openVolume()`.
+    fn open_volume(&self) {
+        let chooser = FileChooser::new_base_manager(Some(self.manager));
+        // Swing layout: chooser.setPreferredSize(
+        // UIParameters.getInstance().getFileChooserDimension()).
+        chooser.set_file_selection_mode(file_chooser::FILES_ONLY);
+        chooser.set_file_filter(Some(
+            TomogramFileFilter::get_all_image_filename_style_instance(self.manager),
+        ));
+        let return_val = chooser.show_open_dialog(Some(&self.root_panel.get_container()));
+        if return_val != file_chooser::APPROVE_OPTION {
+            return;
+        }
+        let volume: Option<PathBuf> = chooser.get_selected_file();
+        let Some(volume) = volume.filter(|volume| !volume.is_dir() && volume.exists()) else {
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string(
+                    Some(self.manager),
+                    "Please choose a volume",
+                    "Entry Error",
+                )
+            });
             return;
         };
-        if volume.is_dir() || !volume.exists() {
-            manager.open_message_dialog("Please choose a volume", "Entry Error");
+        if !dataset_tool::validate_dataset_name_input_file_component(
+            self.manager,
+            None,
+            AxisID::Only,
+            Some(&volume),
+            DataFileType::Parallel,
+            None,
+        ) {
             return;
         }
-        if !manager.validate_dataset_name(&volume) {
-            return;
-        }
-        self.ftf_volume.set_file(Some(&volume));
-        manager.set_new_param_file(&volume);
-        if !self.init_subdir(manager) {
+        self.ftf_volume.set_file(Some(volume.clone()));
+        self.manager.set_new_param_file_file(&volume);
+        if !self.init_subdir() {
             self.ftf_volume.set_file(None);
             return;
         }
@@ -634,131 +707,242 @@ impl<R: AnisotropicDiffusionDialogRubberband> AnisotropicDiffusionDialog<R> {
     }
 }
 
-/// Java private nested `ADDActionListener` adapter.
-pub struct AddActionListener;
-impl AddActionListener {
-    pub fn action_performed<
-        M: AnisotropicDiffusionDialogManager,
-        R: AnisotropicDiffusionDialogRubberband,
-    >(
-        dialog: &mut AnisotropicDiffusionDialog<R>,
-        manager: &mut M,
-        command: &str,
-    ) {
-        dialog.action(manager, command);
-    }
-}
-/// Java private nested `VolumeActionListener` adapter.
-pub struct VolumeActionListener;
-impl VolumeActionListener {
-    pub fn action_performed<
-        M: AnisotropicDiffusionDialogManager,
-        R: AnisotropicDiffusionDialogRubberband,
-    >(
-        dialog: &mut AnisotropicDiffusionDialog<R>,
-        manager: &mut M,
-        volume: Option<PathBuf>,
-    ) {
-        dialog.open_volume(manager, volume);
+impl ContextMenu for AnisotropicDiffusionDialog {
+    /// Java `popUpContextMenu(MouseEvent)`.  Right mouse button context menu.
+    fn pop_up_context_menu(&self, mouse_event: &MouseEvent) {
+        let man_pagelabel = [
+            "Anisotropic Diffusion".to_owned(),
+            "3dmod".to_owned(),
+            "Processchunks".to_owned(),
+            "Chunksetup".to_owned(),
+        ];
+        let man_page = [
+            format!("{}.html", ProcessName::ANISOTROPIC_DIFFUSION),
+            "3dmod.html".to_owned(),
+            "processchunks.html".to_owned(),
+            "chunksetup.html".to_owned(),
+        ];
+        let log_file_label = ["Anisotropic Diffusion".to_owned()];
+        let log_file = [format!("{}.log", ProcessName::ANISOTROPIC_DIFFUSION)];
+        // ContextPopup contextPopup =
+        let _ = ContextPopup::new_component_mouse_event_string_string_string_array_string_array_string_array_string_array_base_manager_axis_id_string(
+            &self.root_panel.get_container(),
+            mouse_event,
+            Some("ANISOTROPIC DIFFUSION"),
+            Some(context_popup::TOMO_GUIDE),
+            &man_pagelabel,
+            &man_page,
+            &log_file_label,
+            &log_file,
+            self.manager,
+            AxisID::Only,
+            self.subdir_name.borrow().as_deref(),
+        );
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[derive(Default)]
-    struct Rubberband;
-    impl AnisotropicDiffusionDialogRubberband for Rubberband {
-        fn get_parameters_meta_data<M: AnisotropicDiffusionDialogMetaData>(&self, _: &mut M) {}
-        fn set_parameters_meta_data<M: AnisotropicDiffusionDialogMetaData>(&mut self, _: &M) {}
-        fn get_parameters_trimvol<T: AnisotropicDiffusionDialogTrimvolParam>(
-            &self,
-            _: &mut T,
-            _: bool,
-        ) -> bool {
-            true
+impl Run3dmodButtonContainer for AnisotropicDiffusionDialog {
+    /// Java `action(String, Deferred3dmodButton, Run3dmodMenuOptions)`.
+    fn action(
+        &self,
+        command: &str,
+        deferred_3dmod_button: Option<Rc<dyn Deferred3dmodButton>>,
+        run_3dmod_menu_options: Option<Run3dmodMenuOptions>,
+    ) {
+        let command = Some(command);
+        if command == self.btn_extract_test_volume.get_action_command().as_deref() {
+            if !self.init_subdir() {
+                return;
+            }
+            self.manager.trim_volume(None);
+        } else if command == self.btn_run_varying_k.get_action_command().as_deref() {
+            if !self.init_subdir() {
+                return;
+            }
+            let processing_method = self.mediator.as_ref().map(|mediator| {
+                mediator.get_run_method_for_process_interface(self.get_processing_method())
+            });
+            let subdir_name = self.subdir_name.borrow().clone();
+            self.manager.anisotropic_diffusion_varying_k(
+                subdir_name.as_deref(),
+                None,
+                deferred_3dmod_button,
+                run_3dmod_menu_options,
+                Some(DIALOG_TYPE),
+                processing_method,
+            );
+        } else if command
+            == self
+                .btn_run_varying_iteration
+                .get_action_command()
+                .as_deref()
+        {
+            if !self.init_subdir() {
+                return;
+            }
+            let subdir_name = self.subdir_name.borrow().clone();
+            self.manager.anisotropic_diffusion_varying_iteration(
+                subdir_name.as_deref(),
+                None,
+                deferred_3dmod_button,
+                run_3dmod_menu_options,
+                Some(DIALOG_TYPE),
+            );
+        } else if command == self.btn_view_full_volume.get_action_command().as_deref() {
+            self.manager.imod_string_file_run3dmod_menu_options_boolean(
+                imod_manager::VOLUME_KEY,
+                self.ftf_volume.get_file().as_deref(),
+                run_3dmod_menu_options,
+                self.cb_load_with_flipping.is_selected(),
+            );
+        } else if command == self.btn_view_test_volume.get_action_command().as_deref() {
+            let file = utilities::java_io_file_new(
+                self.subdir_name.borrow().as_deref().unwrap_or("null"),
+                self.test_volume_name.as_deref().unwrap_or("null"),
+            );
+            self.manager.imod_string_file_run3dmod_menu_options_boolean(
+                imod_manager::TEST_VOLUME_KEY,
+                Some(Path::new(&file)),
+                run_3dmod_menu_options,
+                self.cb_load_with_flipping.is_selected(),
+            );
+        } else if command == self.btn_view_varying_k.get_action_command().as_deref() {
+            let subdir_name = self.subdir_name.borrow().clone();
+            self.manager.imod_varying_k_value(
+                imod_manager::VARYING_K_TEST_KEY,
+                run_3dmod_menu_options,
+                subdir_name.as_deref(),
+                self.test_volume_name.as_deref(),
+                self.cb_load_with_flipping.is_selected(),
+            );
+        } else if command
+            == self
+                .btn_view_varying_iteration
+                .get_action_command()
+                .as_deref()
+        {
+            let subdir_name = self.subdir_name.borrow().clone();
+            self.manager.imod_varying_iteration(
+                imod_manager::VARYING_ITERATION_TEST_KEY,
+                run_3dmod_menu_options,
+                subdir_name.as_deref(),
+                self.test_volume_name.as_deref(),
+                self.cb_load_with_flipping.is_selected(),
+            );
         }
     }
-    #[derive(Default)]
-    struct Manager {
-        made: Vec<String>,
-        messages: Vec<String>,
-    }
-    impl filter_full_volume_panel::FilterFullVolumePanelManager for Manager {
-        fn chunksetup(
-            &mut self,
-            _: Option<&Deferred3dmodButton>,
-            _: Option<crate::imod::etomo::process::imod_process::Run3dmodMenuOptions>,
-            _: DialogType,
-            _: ProcessingMethod,
-        ) {
-        }
-        fn imod_anisotropic_diffusion_output(
-            &mut self,
-            _: Option<crate::imod::etomo::process::imod_process::Run3dmodMenuOptions>,
-            _: bool,
-        ) {
-        }
-        fn anisotropic_diffusion_suffix(&self) -> String {
-            String::new()
+}
+
+impl FilterFullVolumeParent for AnisotropicDiffusionDialog {
+    /// Java `cleanUp()`.
+    fn clean_up(&self) {
+        let subdir_name = self.subdir_name.borrow().clone();
+        if let Some(subdir_name) = subdir_name
+            && self.manager.delete_subdir(&subdir_name)
+        {
+            *self.subdir_name.borrow_mut() = None;
         }
     }
-    impl AnisotropicDiffusionDialogManager for Manager {
-        fn make_subdir(&mut self, n: &str) -> bool {
-            self.made.push(n.into());
-            true
+
+    /// Java `getVolume()`.
+    fn get_volume(&self) -> Option<String> {
+        self.ftf_volume.get_file_absolute_path()
+    }
+
+    /// Java `initSubdir()`.  Initialized subdirName if is not already initialized.
+    /// Returns false if ftfVolume is empty (subdirName is dependent on ftfVolume).
+    // TODO 2206 (the source's own marker)
+    fn init_subdir(&self) -> bool {
+        if self.ftf_volume.is_empty() {
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string(
+                    Some(self.manager),
+                    "Please choose a volume before running this function.",
+                    "Entry Error",
+                )
+            });
+            return false;
         }
-        fn delete_subdir(&mut self, _: &str) -> bool {
-            true
+        if self.subdir_name.borrow().is_none() {
+            let subdir_name = format!(
+                "naddir.{}",
+                self.ftf_volume
+                    .get_file_name()
+                    .unwrap_or_else(|| "null".to_owned())
+            );
+            *self.subdir_name.borrow_mut() = Some(subdir_name.clone());
+            if !self.manager.make_subdir(&subdir_name) {
+                return false;
+            }
         }
-        fn property_user_dir(&self) -> PathBuf {
-            PathBuf::from("/")
-        }
-        fn image_output_format(&self) -> String {
-            "mrc".into()
-        }
-        fn open_message_dialog(&mut self, m: &str, _: &str) {
-            self.messages.push(m.into())
-        }
-        fn trim_volume(&mut self) {}
-        fn anisotropic_diffusion_varying_k(&mut self, _: &str, _: ProcessingMethod) {}
-        fn anisotropic_diffusion_varying_iteration(&mut self, _: &str) {}
-        fn imod(&mut self, _: &str, _: PathBuf, _: Option<()>, _: bool) {}
-        fn imod_varying_k_value(&mut self, _: &str, _: &str, _: bool) {}
-        fn imod_varying_iteration(&mut self, _: &str, _: &str, _: bool) {}
-        fn set_new_param_file(&mut self, _: &Path) {}
-        fn validate_dataset_name(&mut self, _: &Path) -> bool {
-            true
+        true
+    }
+
+    /// Java `isLoadWithFlipping()`.
+    fn is_load_with_flipping(&self) -> bool {
+        self.cb_load_with_flipping.is_selected()
+    }
+}
+
+impl AbstractParallelDialog for AnisotropicDiffusionDialog {
+    /// Java `getParameters(ParallelParam)`.  (Java casts the param to
+    /// `ProcesschunksParam`; every caller passes one.)
+    fn get_parameters(&self, param: &mut dyn ParallelParam) {
+        if let Some(processchunks_param) =
+            (param as &mut dyn std::any::Any).downcast_mut::<ProcesschunksParam>()
+        {
+            processchunks_param.set_subdir_name(self.subdir_name.borrow().as_deref());
         }
     }
-    #[test]
-    fn constructor_retains_source_layout_and_listeners() {
-        let manager = Manager::default();
-        let dialog =
-            AnisotropicDiffusionDialog::get_instance(&manager, Rubberband, TEST_VOLUME_NAME.into());
-        assert_eq!(dialog.root_panel.root_component_order, ["first", "second"]);
-        assert_eq!(dialog.root_panel.listener_count, 8);
-        assert!(dialog.ltf_test_k_value.required);
+
+    /// Java `getDialogType()`.
+    fn get_dialog_type(&self) -> DialogType {
+        DialogType::AnisotropicDiffusion
     }
-    #[test]
-    fn empty_volume_prevents_subdirectory_creation() {
-        let mut manager = Manager::default();
-        let mut dialog =
-            AnisotropicDiffusionDialog::get_instance(&manager, Rubberband, TEST_VOLUME_NAME.into());
-        assert!(!dialog.init_subdir(&mut manager));
-        assert_eq!(manager.messages.len(), 1);
+}
+
+impl QueueTableListener for AnisotropicDiffusionDialog {
+    /// Java `queueTableEventAction(QueueTableEvent)`: empty.
+    fn queue_table_event_action(&self, _event: &QueueTableEvent) {}
+}
+
+impl ProcessInterface for AnisotropicDiffusionDialog {
+    /// Java `updateGpu(boolean)`: empty.
+    fn update_gpu(&self, _disable_gpu: bool) {}
+
+    /// Java `getProcessingMethod()`.  Dialogs don't need to know if QUEUE is in use
+    /// in the parallel panel.
+    fn get_processing_method(&self) -> ProcessingMethod {
+        ProcessingMethod::PpCpu
     }
-    #[test]
-    fn subdirectory_is_derived_once_from_volume_file_name() {
-        let mut manager = Manager::default();
-        let mut dialog =
-            AnisotropicDiffusionDialog::get_instance(&manager, Rubberband, TEST_VOLUME_NAME.into());
-        dialog.ftf_volume.set_text("sample.rec");
-        assert!(dialog.init_subdir(&mut manager));
-        assert_eq!(
-            dialog.get_subdirectory(&mut manager).as_deref(),
-            Some("naddir.sample.rec")
-        );
-        assert_eq!(manager.made, ["naddir.sample.rec"]);
+
+    /// Java `getSecondaryProcessingMethod()`.
+    fn get_secondary_processing_method(&self) -> Option<ProcessingMethod> {
+        None
     }
+
+    /// Java `lockProcessingMethod(boolean)`: empty.
+    fn lock_processing_method(&self, _lock: bool) {}
+
+    /// Java `setMethod(ProcessingMethod)`.
+    fn set_method(&self, processing_method: ProcessingMethod) {
+        if let (Some(mediator), Some(this)) = (&self.mediator, self.this.upgrade()) {
+            let origin: Rc<dyn ProcessInterface> = this;
+            mediator.set_method_process_interface_processing_method(&origin, processing_method);
+        }
+    }
+
+    /// Java `isUseGpu()`.
+    fn is_use_gpu(&self) -> bool {
+        false
+    }
+
+    /// Java `setUseQueueCheckBox(ButtonComponent)`: empty.
+    fn set_use_queue_check_box(&self, _use_queue_checkbox: Option<Rc<dyn ButtonComponent>>) {}
+
+    /// Java `addQueueTableListener(QueueTableListener)`: empty.
+    fn add_queue_table_listener(&self, _listener: Rc<dyn QueueTableListener>) {}
+
+    /// Java `removeQueueTableListener(QueueTableListener)`: empty.
+    fn remove_queue_table_listener(&self, _listener: &Rc<dyn QueueTableListener>) {}
 }

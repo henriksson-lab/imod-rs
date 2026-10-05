@@ -19,13 +19,10 @@
 //! Organization: Dept. of MCD Biology, University of Colorado
 //!
 //! **Shape.**  The package-private overloads take the `LogFileInterface` the public
-//! ones build; its only implementation is `LogFile.Handle`, so they take
-//! `Option<&Arc<Handle>>`.  The two string parameters are `&str`: every caller passes a
+//! ones build (a `LogFile.Handle`).  The two string parameters are `&str`: every caller passes a
 //! string, and the source treats null exactly as it treats an empty string (the
 //! `matches("\\s*")` tests), except that `array[PHASE_SHIFT_INDEX].equals(null)` and
 //! `.equals("")` are both false for a token of a split line.
-// TODO(unit): needs etomo/storage/LogFileInterface.java - the interface the
-// package-private overloads take; `LogFile.Handle` is its implementation.
 #![allow(dead_code)]
 
 use std::sync::{Arc, LazyLock};
@@ -36,6 +33,7 @@ use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::storage::log_file::{
     Handle, LogFile, LogFileError, ReaderId, UnlockedException, WriterId,
 };
+use crate::imod::etomo::storage::log_file_interface::LogFileInterface;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::java_lang_string_matches_whitespace;
 use crate::imod::etomo::util::dataset_files;
@@ -73,7 +71,7 @@ pub fn is_up_to_date(
                 Some(axis_id),
                 expected_defocus_in_nanometers,
                 phase_shift_in_degrees,
-                Some(&file),
+                Some(&file as &dyn LogFileInterface),
                 false,
             );
         }
@@ -93,7 +91,7 @@ pub(crate) fn is_up_to_date_file(
     _axis_id: Option<AxisID>,
     expected_defocus_in_nanometers: &str,
     phase_shift_in_degrees: &str,
-    file: Option<&Arc<Handle>>,
+    file: Option<&dyn LogFileInterface>,
     debug: bool,
 ) -> bool {
     if debug {
@@ -236,7 +234,7 @@ pub fn write_file(
                 Some(axis_id),
                 expected_defocus_in_nanometers,
                 phase_shift_in_degrees,
-                Some(&file),
+                Some(&file as &dyn LogFileInterface),
                 false,
             );
         }
@@ -256,7 +254,7 @@ pub(crate) fn write_file_file(
     _axis_id: Option<AxisID>,
     expected_defocus_in_nanometers: &str,
     phase_shift_in_degrees: &str,
-    file: Option<&Arc<Handle>>,
+    file: Option<&dyn LogFileInterface>,
     debug: bool,
 ) -> bool {
     if debug {

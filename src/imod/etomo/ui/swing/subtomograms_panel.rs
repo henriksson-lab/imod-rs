@@ -321,8 +321,11 @@ impl SubtomogramsPanel {
                     false,
                     Some(volume_modeled_file_extension),
                 );
-            // TODO(unit): needs etomo/storage/TomogramFileFilter.java -
-            // `bctfVolumeModeled.setFileFilter(TomogramFileFilter.getInstance(manager))`.
+            bctf_volume_modeled.set_file_filter(Some(
+                crate::imod::etomo::storage::tomogram_file_filter::TomogramFileFilter::get_instance(
+                    manager,
+                ),
+            ));
             bctf_volume_modeled.set_limit_displayed_file_path(40);
             // bctfVolumeModeled.setAltBrowsingDirectory(this): after the Rc exists
             // (see the module docs).
@@ -336,9 +339,12 @@ impl SubtomogramsPanel {
                     false,
                     Some(center_position_file_file_extension),
                 );
-            // TODO(unit): needs etomo/storage/ModelOrPointFileFilter.java -
-            // `bctfCenterPositionFile.setFileFilter(ModelOrPointFileFilter
-            // .getInstance(manager, true))`.
+            bctf_center_position_file.set_file_filter(Some(Rc::new(
+                crate::imod::etomo::storage::model_or_point_file_filter::ModelOrPointFileFilter::get_instance(
+                    Some(manager),
+                    true,
+                ),
+            )));
             bctf_center_position_file.set_limit_displayed_file_path(50);
             // bctfCenterPositionFile.setAltBrowsingDirectory(this): see above.
             let directory_for_output_file_extension = SelectFileExtension::new();
@@ -729,8 +735,12 @@ impl SubtomogramsPanel {
         // .getFileChooserDimension()).
         chooser.set_file_selection_mode(file_chooser::FILES_ONLY);
         chooser.set_multi_selection_enabled(true);
-        // TODO(unit): needs etomo/storage/ChunkFileFilter.java -
-        // `chooser.setFileFilter(ChunkFileFilter.getInstance(manager, true))`.
+        chooser.set_file_filter(Some(Rc::new(
+            crate::imod::etomo::storage::chunk_file_filter::ChunkFileFilter::get_instance(
+                base_manager,
+                true,
+            ),
+        )));
         let return_val = chooser.show_open_dialog(Some(&self.pnl_root));
         if return_val != file_chooser::APPROVE_OPTION {
             return;

@@ -13,8 +13,6 @@ use crate::imod::etomo::r#type::const_etomo_number::{
 };
 use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
 use crate::imod::etomo::r#type::parsed_element_type::ParsedElementType;
-// TODO(unit): needs etomo/util/FilePath.java - static isPath(String),
-// getFileName(String), getFileParent(String), getRelativePath(String, File).
 use crate::imod::etomo::util::file_path::FilePath;
 use crate::imod::etomo::util::utilities::{
     java_io_file_get_absolute_path, java_io_file_get_parent, java_io_file_new,

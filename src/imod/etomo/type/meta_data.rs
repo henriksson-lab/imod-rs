@@ -34,7 +34,7 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 
 use regex::Regex;
 
@@ -464,9 +464,9 @@ pub struct MetaData {
     /// Java `private final EtomoBoolean2 finalAlignedStackDialogSavedB = new EtomoBoolean2(DialogType.FINAL_ALIGNED_STACK.getStorableName() + "." + AxisID.SECOND.getExtension() + "." + "DialogSaved");`
     final_aligned_stack_dialog_saved_b: Mutex<EtomoBoolean2>,
     /// Java `private IntKeyList tomoGenTrialTomogramNameListA = IntKeyList.getStringInstance(DialogType.TOMOGRAM_GENERATION.getStorableName() + "." + AxisID.FIRST.getExtension() + "." + "TrialTomogramName");`
-    tomo_gen_trial_tomogram_name_list_a: Mutex<IntKeyList>,
+    tomo_gen_trial_tomogram_name_list_a: Mutex<Arc<Mutex<IntKeyList>>>,
     /// Java `private IntKeyList tomoGenTrialTomogramNameListB = IntKeyList.getStringInstance(DialogType.TOMOGRAM_GENERATION.getStorableName() + "." + AxisID.SECOND.getExtension() + "." + "TrialTomogramName");`
-    tomo_gen_trial_tomogram_name_list_b: Mutex<IntKeyList>,
+    tomo_gen_trial_tomogram_name_list_b: Mutex<Arc<Mutex<IntKeyList>>>,
     /// Java `private final EtomoBoolean2 trackUseRaptorA = new EtomoBoolean2(TRACK_KEY + "." + FIRST_AXIS_KEY + "." + USE_KEY + RAPTOR_KEY);`
     track_use_raptor_a: Mutex<EtomoBoolean2>,
     /// Java `private final EtomoBoolean2 trackRaptorUseRawStackA = new EtomoBoolean2(TRACK_KEY + "." + FIRST_AXIS_KEY + "." + RAPTOR_KEY + "." + USE_KEY + RAW_STACK_KEY);`
@@ -1222,20 +1222,20 @@ impl MetaData {
                 DialogType::FinalAlignedStack.get_storable_name(),
                 AxisID::Second.get_extension()
             ))),
-            tomo_gen_trial_tomogram_name_list_a: Mutex::new(
+            tomo_gen_trial_tomogram_name_list_a: Mutex::new(Arc::new(Mutex::new(
                 IntKeyList::get_string_instance_with_key(&format!(
                     "{}.{}.TrialTomogramName",
                     DialogType::TomogramGeneration.get_storable_name(),
                     AxisID::First.get_extension()
                 )),
-            ),
-            tomo_gen_trial_tomogram_name_list_b: Mutex::new(
+            ))),
+            tomo_gen_trial_tomogram_name_list_b: Mutex::new(Arc::new(Mutex::new(
                 IntKeyList::get_string_instance_with_key(&format!(
                     "{}.{}.TrialTomogramName",
                     DialogType::TomogramGeneration.get_storable_name(),
                     AxisID::Second.get_extension()
                 )),
-            ),
+            ))),
             track_use_raptor_a: Mutex::new(EtomoBoolean2::new_with_name(&format!(
                 "{}.{}.{}{}",
                 TRACK_KEY, FIRST_AXIS_KEY, USE_KEY, RAPTOR_KEY
@@ -4565,7 +4565,7 @@ impl MetaData {
     }
 
     /// Java `load(Properties)`.  Get the objects attributes from the properties object.
-    pub fn load(&self, props: &BTreeMap<String, String>) {
+    pub fn load(&self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
@@ -4585,7 +4585,7 @@ impl MetaData {
     }
 
     /// Java `load(Properties, String)`.  Bug# 2403.
-    pub fn load_with_prepend(&self, props: &BTreeMap<String, String>, parent_prepend: &str) {
+    pub fn load_with_prepend(&self, props: &mut BTreeMap<String, String>, parent_prepend: &str) {
         let base_prepend = self.create_prepend(parent_prepend);
         if self
             .base
@@ -4681,8 +4681,12 @@ impl MetaData {
         self.tomo_gen_trial_tomogram_name_list_a
             .lock()
             .unwrap()
+            .lock()
+            .unwrap()
             .reset();
         self.tomo_gen_trial_tomogram_name_list_b
+            .lock()
+            .unwrap()
             .lock()
             .unwrap()
             .reset();
@@ -5436,9 +5440,12 @@ impl MetaData {
             if props.get(&format!("{} Trimvol.Version", group)).is_none() {
                 // Handle backwards compatibility from TrimvolParam version 1.0 - the 1.0 version
                 // wasn't saved.
-                // TODO(unit): needs etomo/comscript/TrimvolParam.java -
-                // `TrimvolParam.convertIndexCoordsToImodCoords(postTrimvolScaleXMin,
-                // postTrimvolScaleXMax, postTrimvolScaleYMin, postTrimvolScaleYMax)`.
+                crate::imod::etomo::comscript::trimvol_param::TrimvolParam::convert_index_coords_to_imod_coords(
+                    &mut self.post_trimvol_scale_x_min.lock().unwrap(),
+                    &mut self.post_trimvol_scale_x_max.lock().unwrap(),
+                    &mut self.post_trimvol_scale_y_min.lock().unwrap(),
+                    &mut self.post_trimvol_scale_y_max.lock().unwrap(),
+                );
             }
         } else {
             self.post_trimvol_x_min
@@ -5860,8 +5867,12 @@ impl MetaData {
         self.tomo_gen_trial_tomogram_name_list_a
             .lock()
             .unwrap()
+            .lock()
+            .unwrap()
             .load(props, &prepend);
         self.tomo_gen_trial_tomogram_name_list_b
+            .lock()
+            .unwrap()
             .lock()
             .unwrap()
             .load(props, &prepend);
@@ -7597,8 +7608,12 @@ impl MetaData {
         self.tomo_gen_trial_tomogram_name_list_a
             .lock()
             .unwrap()
+            .lock()
+            .unwrap()
             .store(props, &prepend);
         self.tomo_gen_trial_tomogram_name_list_b
+            .lock()
+            .unwrap()
             .lock()
             .unwrap()
             .store(props, &prepend);
@@ -10008,18 +10023,13 @@ impl MetaData {
     }
 
     /// Java `getTomoGenTrialTomogramNameList`.
-    pub fn get_tomo_gen_trial_tomogram_name_list(&self, axis_id: AxisID) -> IntKeyList {
+    /// The list itself is returned (a shared handle, as the Java returns its
+    /// field): `TrialTiltPanel.addTrialTomogramName` adds to it directly.
+    pub fn get_tomo_gen_trial_tomogram_name_list(&self, axis_id: AxisID) -> Arc<Mutex<IntKeyList>> {
         if axis_id == AxisID::Second {
-            return self
-                .tomo_gen_trial_tomogram_name_list_b
-                .lock()
-                .unwrap()
-                .clone();
+            return Arc::clone(&self.tomo_gen_trial_tomogram_name_list_b.lock().unwrap());
         }
-        self.tomo_gen_trial_tomogram_name_list_a
-            .lock()
-            .unwrap()
-            .clone()
+        Arc::clone(&self.tomo_gen_trial_tomogram_name_list_a.lock().unwrap())
     }
 
     /// Java `getTrackLengthAndOverlap`.
@@ -10066,7 +10076,11 @@ impl MetaData {
     /// `else`, so a call for the second axis sets B *and then overwrites A* with the
     /// same list.  The A assignment is now the else branch, as in every other axis
     /// setter in this class.
-    pub fn set_tomo_gen_trial_tomogram_name_list(&self, axis_id: AxisID, input: IntKeyList) {
+    pub fn set_tomo_gen_trial_tomogram_name_list(
+        &self,
+        axis_id: AxisID,
+        input: Arc<Mutex<IntKeyList>>,
+    ) {
         if axis_id == AxisID::Second {
             *self.tomo_gen_trial_tomogram_name_list_b.lock().unwrap() = input;
         } else {
@@ -11484,8 +11498,12 @@ impl MetaData {
         if !(*self.com_scripts_created.lock().unwrap() == other) {
             return false;
         }
-        // TODO(unit): needs etomo/comscript/CombineParams.java -
-        // `if (!combineParams.equals(cmd.getConstCombineParams())) return false;`.
+        // `if (!combineParams.equals(cmd.getConstCombineParams())) return false;`:
+        // `CombineParams` does not override `Object.equals`, so this is identity, true
+        // only when `cmd` is this object (BUGS.md, kept native).
+        if !std::ptr::eq(&self.combine_params, &cmd.combine_params) {
+            return false;
+        }
         {
             let mine = self.squeezevol_param.lock().unwrap();
             let theirs = cmd.squeezevol_param.lock().unwrap();
@@ -11898,11 +11916,11 @@ impl storable::Storable for MetaData {
         MetaData::store_with_prepend(self, properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         MetaData::load(self, properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         MetaData::load_with_prepend(self, properties, prepend);
     }
 }
@@ -12108,7 +12126,7 @@ impl ConstMetaData for MetaData {
         MetaData::is_final_aligned_stack_dialog_saved(self, axis_id)
     }
 
-    fn get_tomo_gen_trial_tomogram_name_list(&self, axis_id: AxisID) -> IntKeyList {
+    fn get_tomo_gen_trial_tomogram_name_list(&self, axis_id: AxisID) -> Arc<Mutex<IntKeyList>> {
         MetaData::get_tomo_gen_trial_tomogram_name_list(self, axis_id)
     }
 
@@ -12935,7 +12953,7 @@ Setup.tiltalign.TargetPatchSizeXandY=600,600
         meta_data.set_post_trimvol_z_max(Some("80"));
         meta_data.set_track_advanced(true, AxisID::First);
         meta_data.set_tilt_parallel(AxisID::Only, PanelId::Tilt, true);
-        let props = store(&meta_data);
+        let mut props = store(&meta_data);
         assert_eq!(props.get("Setup.AxisType").unwrap(), "Single Axis");
         assert_eq!(props.get("Setup.PixelSize").unwrap(), "1.25");
         assert_eq!(props.get("Setup.FiducialDiameter").unwrap(), "8.0");
@@ -12949,7 +12967,7 @@ Setup.tiltalign.TargetPatchSizeXandY=600,600
         assert!(!props.contains_key("Setup"));
 
         let loaded = MetaData::new(None, None, false);
-        loaded.load(&props);
+        loaded.load(&mut props);
         assert_eq!(loaded.get_axis_type(), AxisType::SingleAxis);
         assert_eq!(loaded.get_pixel_size(), 1.25);
         assert_eq!(loaded.get_exclude_projections_a(), "45");
@@ -12970,9 +12988,9 @@ Setup.tiltalign.TargetPatchSizeXandY=600,600
 
     #[test]
     fn java_edf_load_store_matches_java_round_trip() {
-        let java = parse_edf(JAVA_EDF);
+        let mut java = parse_edf(JAVA_EDF);
         let meta_data = MetaData::new(None, None, false);
-        meta_data.load(&java);
+        meta_data.load(&mut java);
         assert_eq!(meta_data.get_dataset_name(), "ts8");
         assert_eq!(meta_data.get_meta_data_file_name(), "ts8.edf");
         assert_eq!(meta_data.get_axis_type(), AxisType::DualAxis);
@@ -13109,22 +13127,23 @@ Setup.tiltalign.TargetPatchSizeXandY=600,600
         // setTomoGenTrialTomogramNameList(SECOND) no longer overwrites A.
         let mut list_b = IntKeyList::get_string_instance_with_key("TrialTomogramName");
         list_b.add_string(Some("b1"));
-        md.set_tomo_gen_trial_tomogram_name_list(AxisID::Second, list_b);
+        md.set_tomo_gen_trial_tomogram_name_list(AxisID::Second, Arc::new(Mutex::new(list_b)));
         {
             use super::super::const_int_key_list::ConstIntKeyList;
             assert!(
                 md.get_tomo_gen_trial_tomogram_name_list(AxisID::First)
+                    .lock()
+                    .unwrap()
                     .is_empty()
             );
         }
-        // equals compares imageRotation and binning by value.
+        // equals ends with `combineParams.equals(...)`, which is Object.equals: two
+        // distinct MetaData objects are never equal (kept native, BUGS.md).
         let other = MetaData::new(None, None, true);
         md.set_pixel_size_double(1.0);
         md.set_fiducial_diameter_double(1.0);
         other.set_pixel_size_double(1.0);
         other.set_fiducial_diameter_double(1.0);
-        assert!(md.equals(&other));
-        other.set_binning(Some("2"));
         assert!(!md.equals(&other));
         // An unrecognised AxisType/DataSource/ViewType loads as the default instead of a
         // null the next store dereferences.
@@ -13132,7 +13151,7 @@ Setup.tiltalign.TargetPatchSizeXandY=600,600
         props.insert("Setup.AxisType".to_string(), "Triple".to_string());
         props.insert("Setup.DataSource".to_string(), "Tape".to_string());
         props.insert("Setup.PixelSize".to_string(), "abc".to_string());
-        md.load(&props);
+        md.load(&mut props);
         assert_eq!(md.get_axis_type(), AxisType::NotSet);
         assert_eq!(md.get_data_source(), DataSource::Ccd);
         assert!(!md.is_valid_from_screen(false));

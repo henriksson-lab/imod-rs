@@ -1,12 +1,14 @@
 //! Non-GUI translations of `IMOD/Etomo/src/etomo/logic` source units.
 pub mod busy_status_mediator;
 pub mod converter;
-#[cfg(any())] // approximation (built on the old DirectiveSectionPanel stand-ins), awaiting faithful rewrite
 pub mod directive_editor_builder;
+pub mod directive_tool;
 pub mod field_validator;
 pub mod popup_tool;
 pub mod seeding_method;
+pub mod serial_sections_startup_data;
 pub mod tracking_method;
+pub mod transforms_tool;
 pub mod validation_set;
 pub mod clustered_points_allowed;
 pub mod combine_tool;
@@ -23,3 +25,9 @@ pub mod processor_table_state;
 pub mod table_state;
 pub mod text_field_state;
 pub mod version_control;
+pub mod multiparticle_reference;
+pub mod peet_startup_data;
+pub mod batch_tool;
+pub mod comparison_strategy;
+pub mod numeric_comparison_strategy;
+pub mod strategy_does_not_apply_exception;

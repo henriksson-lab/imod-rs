@@ -248,9 +248,6 @@ impl Tilt3dFindPanel {
         initialize: bool,
     ) {
         // set center to center thickness and additional diameters
-        // TODO(unit): needs etomo/storage/TaAnglesLog.java - getInstance(String,
-        // ApplicationManager, AxisID), getCenterToCenterThickness(),
-        // getIncrementalShiftToCenter().
         let ta_angles_log = TaAnglesLog::get_instance(
             self.base.manager.get_property_user_dir().as_deref(),
             self.base.manager,
@@ -497,7 +494,13 @@ impl Run3dmodButtonContainer for Tilt3dFindPanel {
     }
 }
 
-impl ProcessDisplay for Tilt3dFindPanel {}
+impl ProcessDisplay for Tilt3dFindPanel {
+    /// Java cast `(TiltDisplay) display`: this panel is one (the process
+    /// series hands it back to `tilt3dFindAction` / the reprojection).
+    fn as_tilt_display(&self) -> Option<&dyn super::tilt_display::TiltDisplay> {
+        Some(self)
+    }
+}
 
 impl TiltDisplay for Tilt3dFindPanel {
     /// Java `getParameters(TiltParam, boolean)` (this class's override).

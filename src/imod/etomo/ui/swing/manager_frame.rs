@@ -9,7 +9,6 @@ use std::rc::{Rc, Weak};
 use super::abstract_frame::{
     AbstractFrame, AbstractFrameVirtual, WINDOW_CLOSING, WindowFocusListener,
 };
-use super::etomo_frame::FrameType;
 use super::etomo_menu::EtomoMenu;
 use super::ui_harness;
 use crate::imod::etomo::base_manager::BaseManager;
@@ -17,6 +16,7 @@ use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::jdk::{ActionEvent, JComponent};
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{DEFAULT_DELIMITER, SEPARATOR_CHAR};
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::frame_type::FrameType;
 use crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType;
 use crate::imod::etomo::util::utilities;
 

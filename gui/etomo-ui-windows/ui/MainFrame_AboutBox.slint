@@ -40,6 +40,10 @@ export component MainFrame_AboutBox inherits Rectangle {
     // PEET row.  An install without PEET is the common case.
     in property <bool> show-peet-version: false;
     in property <string> peet-version: "1.15.0";
+    // Rust-only wiring (`ui/swing/slint_bridge.rs`): the version label's text
+    // and a press on OK.
+    in property <string> version-text: "Version 5.2.17 8/14/2026 16:32";
+    callback ok-pressed();
 
     background: EtomoStyle.background;
     HorizontalLayout {
@@ -70,7 +74,7 @@ export component MainFrame_AboutBox inherits Rectangle {
                 // and `TIME_STAMP = "8/14/2026 16:32"`
                 // (`VersionControl.java:33`), both compiled-in constants.
                 Text {
-                    text: "Version 5.2.17 8/14/2026 16:32";
+                    text: root.version-text;
                     color: EtomoStyle.text;
                     font-size: EtomoStyle.font-size-pt * 1px;
                 }
@@ -136,7 +140,10 @@ export component MainFrame_AboutBox inherits Rectangle {
             HorizontalLayout {
                 alignment: center;
                 // `btnOK = new JButton("OK")` — `:112`, added at `:156`.
-                JButton { text: "OK"; }
+                JButton {
+                    text: "OK";
+                    TouchArea { clicked => { root.ok-pressed(); } }
+                }
             }
         }
         // `pnlRoot.add(Box.createRigidArea(FixedDim.x20_y0), BorderLayout.EAST)` — `:162`.

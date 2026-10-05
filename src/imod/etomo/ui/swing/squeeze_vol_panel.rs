@@ -22,6 +22,7 @@ use std::rc::{Rc, Weak};
 use super::beveled_border::BeveledBorder;
 use super::check_box::CheckBox;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::labeled_text_field::LabeledTextField;
@@ -296,11 +297,9 @@ impl SqueezeVolPanel {
     }
 
     /// Java private `addListeners()`.
-    fn add_listeners(&self) {
-        // Swing mouse: pnlRoot.addMouseListener(new GenericMouseAdapter(this)).
-        // Mouse events are not modelled; the adapter's only effect is to call
-        // popUpContextMenu on a right-button press, which a driver calls
-        // directly.
+    fn add_listeners(self: &Rc<Self>) {
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.pnl_root.add_mouse_listener(GenericMouseAdapter::new(context_menu));
         self.rb_input_file_trim_vol
             .add_action_listener(self.action_listener.clone());
         self.rb_input_file_flatten_warp

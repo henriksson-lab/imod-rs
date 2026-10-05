@@ -18,6 +18,7 @@ use super::fortran_input_string::FortranInputString;
 use super::param_utilities;
 use super::process_details::ProcessDetails;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{
     ConstEtomoNumber, java_lang_double_value_of, java_lang_string_matches_whitespace,
@@ -27,7 +28,6 @@ use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::script_parameter::ScriptParameter;
 use crate::imod::etomo::r#type::string_parameter::StringParameter;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::util::dataset_files;
 use crate::imod::etomo::util::utilities;
 
@@ -131,8 +131,14 @@ impl WarpVolParam {
         self.temporary_directory.set(input);
     }
 
-    // TODO(unit): needs etomo/type/ImageFileType.java - Java
-    // `setInputFile(ImageFileType)`: `inputFile.set(imageFileType.getFileName(manager))`.
+    /// Java `setInputFile(ImageFileType)`.
+    pub fn set_input_file(
+        &mut self,
+        image_file_type: &crate::imod::etomo::r#type::image_file_type::ImageFileType,
+    ) {
+        self.input_file
+            .set(image_file_type.get_file_name(self.manager).as_deref());
+    }
 
     /// Java `setOutputFile`.
     pub fn set_output_file(&mut self, input: Option<&str>) {
@@ -390,7 +396,10 @@ impl ProcessDetails for WarpVolParam {
     }
 
     /// Java `getHashtable`: stub, null.
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
@@ -400,7 +409,10 @@ impl ProcessDetails for WarpVolParam {
     }
 
     /// Java `getIntKeyList`: stub, null.
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -415,7 +427,10 @@ impl ProcessDetails for WarpVolParam {
     }
 
     /// Java `getIteratorElementList`: stub, null.
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 }

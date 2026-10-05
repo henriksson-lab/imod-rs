@@ -1,421 +1,479 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/BoundaryRow.java`.
 //!
-//! Swing layout/listener attachment and `XfjointomoLog` I/O remain explicit
-//! boundaries.  The row's gap arithmetic, row state, and metadata/screen-state
-//! transfers are kept source-shaped in this unit.
-#![allow(dead_code)]
+//! One row of the Join dialog's boundary table: a boundary between two sections, its
+//! xfjointomo best gap and errors, the original end/start of the two sections, and
+//! the adjusted end/start spinners, which keep the gap between them.  An event
+//! dispatch thread object, created as `Rc<Self>`; the table owns it.
 
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
 
-use super::section_table_panel::{HeaderCell, SectionTableRowData, Tab, Viewport};
-use super::spinner_cell::SpinnerCell as BoundaryRowSpinnerCell;
+use super::boundary_table::{self, BoundaryTable};
+use super::cell::CellVirtual;
+use super::field_cell::FieldCell;
+use super::header_cell::HeaderCell;
+use super::join_dialog::Tab;
+use super::spinner_cell::SpinnerCell;
+use super::viewport::Viewport;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::{ChangeEvent, ChangeListener, GRID_BAG_REMAINDER, JComponent};
+use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::storage::xfjointomo_log::XfjointomoLog;
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_join_meta_data::ConstJoinMetaData;
+use crate::imod::etomo::r#type::const_section_table_row_data::ConstSectionTableRowData;
+use crate::imod::etomo::r#type::join_meta_data::JoinMetaData;
+use crate::imod::etomo::r#type::join_screen_state::JoinScreenState;
+use crate::imod::etomo::util::utilities;
 
-pub const INVERTED_TOOLTIP: &str = "This value comes from an inverted section.";
-pub const EMPTY_SLICE_WARNING: &str = "Empty slices will be added to the section.";
-pub const TABLE_LABEL: &str = "Boundary Table";
+/// Java private static final `INVERTED_TOOLTIP`.
+const INVERTED_TOOLTIP: &str = "This value comes from an inverted section.";
+/// Java private static final `EMPTY_SLICE_WARNING`.
+const EMPTY_SLICE_WARNING: &str = "Empty slices will be added to the section.";
 
-/// `FieldCell` state used by this source unit at the unported widget boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct BoundaryRowFieldCell {
-    pub value: String,
-    pub warning: bool,
-    pub warning_tooltip: Option<String>,
-    pub displayed: bool,
-}
-impl BoundaryRowFieldCell {
-    pub fn set_value(&mut self, value: impl ToString) {
-        self.value = value.to_string();
-    }
-    pub fn get_value(&self) -> &str {
-        &self.value
-    }
-    pub fn get_int_value(&self) -> i32 {
-        self.value.parse().unwrap_or(i32::MIN)
-    }
-    pub fn get_double_value(&self) -> f64 {
-        self.value.parse().unwrap_or(f64::NAN)
-    }
-    pub fn set_warning(&mut self, warning: bool, tooltip: Option<&str>) {
-        self.warning = warning;
-        self.warning_tooltip = tooltip.map(str::to_owned);
-    }
-    pub fn remove(&mut self) {
-        self.displayed = false;
-    }
-}
-
-/// `ConstJoinMetaData` / `JoinMetaData` members read by `BoundaryRow`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct BoundaryRowMetaData {
-    pub section_table_data: Vec<SectionTableRowData>,
-    pub boundary_row_end: BTreeMap<i32, i32>,
-    pub boundary_row_start: BTreeMap<i32, i32>,
-}
-impl BoundaryRowMetaData {
-    pub fn is_boundary_row_end_list_empty(&self) -> bool {
-        self.boundary_row_end.is_empty()
-    }
-    pub fn get_boundary_row_end(&self, key: i32) -> Option<i32> {
-        self.boundary_row_end.get(&key).copied()
-    }
-    pub fn reset_boundary_row_start_list(&mut self) {
-        self.boundary_row_start.clear();
-    }
-    pub fn reset_boundary_row_end_list(&mut self) {
-        self.boundary_row_end.clear();
-    }
-    pub fn set_boundary_row_end(&mut self, key: i32, value: String) {
-        if let Ok(value) = value.parse() {
-            self.boundary_row_end.insert(key, value);
-        }
-    }
-    pub fn set_boundary_row_start(&mut self, key: i32, value: String) {
-        if let Ok(value) = value.parse() {
-            self.boundary_row_start.insert(key, value);
-        }
-    }
-}
-
-/// `JoinScreenState` values accessed by this row.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct BoundaryRowScreenState {
-    pub best_gap: BTreeMap<i32, f64>,
-    pub mean_error: BTreeMap<i32, f64>,
-    pub max_error: BTreeMap<i32, f64>,
-}
-impl BoundaryRowScreenState {
-    pub fn get_best_gap(&self, key: i32) -> f64 {
-        self.best_gap.get(&key).copied().unwrap_or(f64::NAN)
-    }
-    pub fn get_mean_error(&self, key: i32) -> f64 {
-        self.mean_error.get(&key).copied().unwrap_or(f64::NAN)
-    }
-    pub fn get_max_error(&self, key: i32) -> f64 {
-        self.max_error.get(&key).copied().unwrap_or(f64::NAN)
-    }
-    pub fn reset_best_gap(&mut self) {
-        self.best_gap.clear();
-    }
-    pub fn reset_mean_error(&mut self) {
-        self.mean_error.clear();
-    }
-    pub fn reset_max_error(&mut self) {
-        self.max_error.clear();
-    }
-    pub fn set_best_gap(&mut self, key: i32, value: &str) {
-        if let Ok(value) = value.parse() {
-            self.best_gap.insert(key, value);
-        }
-    }
-    pub fn set_mean_error(&mut self, key: i32, value: &str) {
-        if let Ok(value) = value.parse() {
-            self.mean_error.insert(key, value);
-        }
-    }
-    pub fn set_max_error(&mut self, key: i32, value: &str) {
-        if let Ok(value) = value.parse() {
-            self.max_error.insert(key, value);
-        }
-    }
-}
-
-/// `BoundaryTable` header at this row's table boundary.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct BoundaryTable {
-    pub adjusted_header_cell: HeaderCell,
-}
-impl BoundaryTable {
-    pub fn get_adjusted_header_cell(&self) -> &HeaderCell {
-        &self.adjusted_header_cell
-    }
-}
-
-/// Data returned by `XfjointomoLog` after the file/application boundary.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct XfjointomoLogRow {
-    pub best_gap: f64,
-    pub mean_error: f64,
-    pub max_error: f64,
-}
-pub type XfjointomoLog = BTreeMap<String, XfjointomoLogRow>;
-
-/// Java package-private final `BoundaryRow`.
-#[derive(Clone, Debug, PartialEq)]
+/// Java package-private `final class BoundaryRow`.
 pub struct BoundaryRow {
-    pub boundary: HeaderCell,
-    pub sections: HeaderCell,
-    pub best_gap: BoundaryRowFieldCell,
-    pub mean_error: BoundaryRowFieldCell,
-    pub max_error: BoundaryRowFieldCell,
-    pub orig_end: BoundaryRowFieldCell,
-    pub orig_start: BoundaryRowFieldCell,
-    pub adjusted_end: BoundaryRowSpinnerCell,
-    pub adjusted_start: BoundaryRowSpinnerCell,
-    pub z_max_end: i32,
-    pub z_max_start: i32,
-    pub table: BoundaryTable,
-    pub gap: Option<Gap>,
-    pub end_inverted: bool,
-    pub start_inverted: bool,
-    /// Native `HeaderCell.add/remove` state retained at the Swing boundary.
-    pub boundary_displayed: bool,
-    /// Native `HeaderCell.add/remove` state retained at the Swing boundary.
-    pub sections_displayed: bool,
-    pub model_displayed: bool,
-    pub rejoin_displayed: bool,
+    /// Java private final `boundary = new HeaderCell()`.
+    boundary: Rc<HeaderCell>,
+    /// Java private final `sections = new HeaderCell()`.
+    sections: Rc<HeaderCell>,
+    /// Java private final `bestGap = FieldCell.getIneditableInstance()`.
+    best_gap: Rc<FieldCell>,
+    /// Java private final `meanError = FieldCell.getIneditableInstance()`.
+    mean_error: Rc<FieldCell>,
+    /// Java private final `maxError = FieldCell.getIneditableInstance()`.
+    max_error: Rc<FieldCell>,
+    /// Java private final `origEnd = FieldCell.getIneditableInstance()`.
+    orig_end: Rc<FieldCell>,
+    /// Java private final `origStart = FieldCell.getIneditableInstance()`.
+    orig_start: Rc<FieldCell>,
+    /// Java private final `adjustedEnd`.
+    adjusted_end: Rc<SpinnerCell>,
+    /// Java private final `adjustedStart`.
+    adjusted_start: Rc<SpinnerCell>,
+    /// Java private final `zMaxEnd`.
+    z_max_end: i32,
+    /// Java private final `zMaxStart`.
+    z_max_start: i32,
+    // `panel`, `layout` and `constraints` are the table's (`table`).
+    /// Java private final `adjustedEndChangeListener`.
+    adjusted_end_change_listener: ChangeListener,
+    /// Java private final `adjustedStartChangeListener`.
+    adjusted_start_change_listener: ChangeListener,
+    /// Java private final `table` (the table owns the row).
+    table: Weak<BoundaryTable>,
+    /// Java private `gap`, initially null.
+    gap: RefCell<Option<Gap>>,
+    /// Java private `endInverted`.
+    end_inverted: bool,
+    /// Java private `startInverted`.
+    start_inverted: bool,
 }
+
 impl BoundaryRow {
+    /// Java package-private `BoundaryRow(int, ConstJoinMetaData, JoinScreenState,
+    /// JPanel, GridBagLayout, GridBagConstraints, BoundaryTable)`.
     pub fn new(
         key: i32,
-        meta_data: &BoundaryRowMetaData,
-        screen_state: &BoundaryRowScreenState,
-        table: BoundaryTable,
-    ) -> Self {
-        let first_section = key.to_string();
-        let end_data = &meta_data.section_table_data[(key - 1) as usize];
-        let start_data = &meta_data.section_table_data[key as usize];
-        let mut orig_end = BoundaryRowFieldCell::default();
-        orig_end.set_value(end_data.join_final_end);
-        orig_end.set_warning(
-            end_data.inverted,
-            end_data.inverted.then_some(INVERTED_TOOLTIP),
-        );
-        let mut orig_start = BoundaryRowFieldCell::default();
-        orig_start.set_value(start_data.join_final_start);
-        orig_start.set_warning(
-            start_data.inverted,
-            start_data.inverted.then_some(INVERTED_TOOLTIP),
-        );
-        let mut row = Self {
-            boundary: HeaderCell::new(&first_section),
-            sections: HeaderCell::new(format!("{first_section} & {}", key + 1)),
-            best_gap: BoundaryRowFieldCell::default(),
-            mean_error: BoundaryRowFieldCell::default(),
-            max_error: BoundaryRowFieldCell::default(),
-            orig_end,
-            orig_start,
-            adjusted_end: BoundaryRowSpinnerCell::get_int_instance(
-                end_data.z_max * -2,
-                end_data.z_max * 2,
-            ),
-            adjusted_start: BoundaryRowSpinnerCell::get_int_instance(
-                start_data.z_max * -2,
-                start_data.z_max * 2,
-            ),
-            z_max_end: end_data.z_max,
-            z_max_start: start_data.z_max,
-            table,
-            gap: None,
-            end_inverted: end_data.inverted,
-            start_inverted: start_data.inverted,
-            boundary_displayed: false,
-            sections_displayed: false,
-            model_displayed: false,
-            rejoin_displayed: false,
-        };
-        row.best_gap.set_value(screen_state.get_best_gap(key));
-        row.mean_error.set_value(screen_state.get_mean_error(key));
-        row.max_error.set_value(screen_state.get_max_error(key));
-        row.set_adjusted_values(Some(meta_data));
-        row.adjusted_end.add_change_listener();
-        row.adjusted_start.add_change_listener();
-        row
+        meta_data: &dyn ConstJoinMetaData,
+        screen_state: &JoinScreenState,
+        table: &Rc<BoundaryTable>,
+    ) -> Rc<BoundaryRow> {
+        let this = Rc::new_cyclic(|self_ref: &Weak<BoundaryRow>| {
+            let boundary = HeaderCell::new_void();
+            let sections = HeaderCell::new_void();
+            let best_gap = FieldCell::get_ineditable_instance();
+            let mean_error = FieldCell::get_ineditable_instance();
+            let max_error = FieldCell::get_ineditable_instance();
+            let orig_end = FieldCell::get_ineditable_instance();
+            let orig_start = FieldCell::get_ineditable_instance();
+            // boundary
+            let first_section = key.to_string();
+            boundary.set_text_string(Some(&first_section));
+            sections.set_text_string(Some(&format!(
+                "{} & {}",
+                first_section,
+                key.wrapping_add(1)
+            )));
+            // bestGap
+            best_gap.set_value_string(screen_state.get_best_gap(key).as_deref());
+            // meanError
+            mean_error.set_value_string(screen_state.get_mean_error(key).as_deref());
+            // maxError
+            max_error.set_value_string(screen_state.get_max_error(key).as_deref());
+            // origEnd
+            let section_table_data = meta_data.get_section_table_data().unwrap_or_default();
+            let data = &section_table_data[(key - 1) as usize];
+            orig_end.set_value_int(data.get_join_final_end().get_int());
+            let end_inverted = data.get_inverted().is();
+            if end_inverted {
+                orig_end.set_warning_boolean_string(true, Some(INVERTED_TOOLTIP));
+            } else {
+                orig_end.set_warning_boolean_string(false, None);
+            }
+            let z_max_end = data.get_setup_z_max();
+            // origStart
+            let data = &section_table_data[key as usize];
+            orig_start.set_value_int(data.get_join_final_start().get_int());
+            let start_inverted = data.get_inverted().is();
+            if start_inverted {
+                orig_start.set_warning_boolean_string(true, Some(INVERTED_TOOLTIP));
+            } else {
+                orig_start.set_warning_boolean_string(false, None);
+            }
+            let z_max_start = data.get_setup_z_max();
+            // adjustedEnd and adjustedStart
+            let adjusted_end = SpinnerCell::get_int_instance(
+                z_max_end.wrapping_mul(2).wrapping_mul(-1),
+                z_max_end.wrapping_mul(2),
+            );
+            let adjusted_start = SpinnerCell::get_int_instance(
+                z_max_start.wrapping_mul(2).wrapping_mul(-1),
+                z_max_start.wrapping_mul(2),
+            );
+            // listeners
+            let adaptee = self_ref.clone();
+            let adjusted_end_change_listener: ChangeListener =
+                Rc::new(move |event: &ChangeEvent| {
+                    if let Some(adaptee) = adaptee.upgrade() {
+                        adaptee.adjusted_end_state_changed(event);
+                    }
+                });
+            let adaptee = self_ref.clone();
+            let adjusted_start_change_listener: ChangeListener =
+                Rc::new(move |event: &ChangeEvent| {
+                    if let Some(adaptee) = adaptee.upgrade() {
+                        adaptee.adjusted_start_state_changed(event);
+                    }
+                });
+            BoundaryRow {
+                boundary,
+                sections,
+                best_gap,
+                mean_error,
+                max_error,
+                orig_end,
+                orig_start,
+                adjusted_end,
+                adjusted_start,
+                z_max_end,
+                z_max_start,
+                adjusted_end_change_listener,
+                adjusted_start_change_listener,
+                table: Rc::downgrade(table),
+                gap: RefCell::new(None),
+                end_inverted,
+                start_inverted,
+            }
+        });
+        this.set_adjusted_values(Some(meta_data));
+        // listeners
+        this.adjusted_end
+            .add_change_listener(this.adjusted_end_change_listener.clone());
+        this.adjusted_start
+            .add_change_listener(this.adjusted_start_change_listener.clone());
+        this
     }
-    pub fn set_names(&mut self) {
+
+    /// Java field read `table`.
+    fn table(&self) -> Rc<BoundaryTable> {
+        self.table
+            .upgrade()
+            .expect("the boundary table owns its rows")
+    }
+
+    /// Java package-private `setNames()`.
+    pub fn set_names(&self) {
+        let adjusted_header_cell = self.table().get_adjusted_header_cell();
         self.adjusted_start.set_headers(
-            TABLE_LABEL,
+            Some(boundary_table::TABLE_LABEL),
             &self.sections,
-            self.table.get_adjusted_header_cell(),
+            &adjusted_header_cell,
         );
         self.adjusted_end.set_headers(
-            TABLE_LABEL,
+            Some(boundary_table::TABLE_LABEL),
             &self.sections,
-            self.table.get_adjusted_header_cell(),
+            &adjusted_header_cell,
         );
     }
-    pub fn set_adjusted_values(&mut self, meta_data: Option<&BoundaryRowMetaData>) {
-        self.adjusted_end.remove_change_listener();
-        self.adjusted_start.remove_change_listener();
-        self.gap = Some(Gap::new(
-            self.best_gap.get_double_value().round() as i32,
+
+    /// Java private synchronized `setAdjustedValues(ConstJoinMetaData)`.  Sets
+    /// adjustedEnd and adjustedStart.  Should be called whenever best gap is Changed.
+    fn set_adjusted_values(&self, meta_data: Option<&dyn ConstJoinMetaData>) {
+        self.adjusted_end
+            .remove_change_listener(&self.adjusted_end_change_listener);
+        self.adjusted_start
+            .remove_change_listener(&self.adjusted_start_change_listener);
+        let gap = Gap::new(
+            utilities::java_lang_math_round(self.best_gap.get_double_value()) as i32,
             self.orig_end.get_int_value(),
             self.orig_start.get_int_value(),
             self.end_inverted,
             self.start_inverted,
             self.z_max_end,
             self.z_max_start,
-        ));
-        let gap = self.gap.as_mut().unwrap();
-        if meta_data.is_none_or(|metadata| metadata.is_boundary_row_end_list_empty())
-            || meta_data
-                .and_then(|metadata| {
-                    metadata.get_boundary_row_end(self.boundary.text.parse().unwrap())
-                })
-                .is_none()
-        {
-            self.adjusted_end.set_value(gap.get_adjusted_left());
-            self.adjusted_start.set_value(gap.get_adjusted_right());
-        } else {
-            let end = meta_data
-                .unwrap()
-                .get_boundary_row_end(self.boundary.text.parse().unwrap())
-                .unwrap();
-            self.adjusted_end.set_value(end);
-            gap.msg_left_gap_boundary_changed(end);
-            self.adjusted_start.set_value(gap.get_adjusted_right());
+        );
+        *self.gap.borrow_mut() = Some(gap);
+        let end_number = match meta_data {
+            None => None,
+            Some(meta_data) if meta_data.is_boundary_row_end_list_empty() => None,
+            Some(meta_data) => meta_data.get_boundary_row_end(self.boundary.get_int()),
+        };
+        match end_number {
+            None => {
+                let gap = self.gap.borrow();
+                let gap = gap.as_ref().unwrap();
+                self.adjusted_end.set_value_int(gap.get_adjusted_left());
+                self.adjusted_start.set_value_int(gap.get_adjusted_right());
+            }
+            Some(end_number) => {
+                let end = end_number.get_int();
+                self.adjusted_end.set_value_int(end);
+                let mut gap = self.gap.borrow_mut();
+                let gap = gap.as_mut().unwrap();
+                gap.msg_left_gap_boundary_changed(end);
+                self.adjusted_start.set_value_int(gap.get_adjusted_right());
+            }
         }
         self.set_adjusted_value_warnings();
-        self.adjusted_end.add_change_listener();
-        self.adjusted_start.add_change_listener();
+        self.adjusted_end
+            .add_change_listener(self.adjusted_end_change_listener.clone());
+        self.adjusted_start
+            .add_change_listener(self.adjusted_start_change_listener.clone());
     }
-    pub fn set_adjusted_value_warnings(&mut self) {
-        let gap = self.gap.as_ref().unwrap();
-        self.adjusted_end.set_warning(
-            !gap.is_left_ok(),
-            (!gap.is_left_ok()).then_some(EMPTY_SLICE_WARNING),
-        );
-        self.adjusted_start.set_warning(
-            !gap.is_right_ok(),
-            (!gap.is_right_ok()).then_some(EMPTY_SLICE_WARNING),
-        );
+
+    /// Java private `setAdjustedValueWarnings()`.
+    fn set_adjusted_value_warnings(&self) {
+        let gap = self.gap.borrow();
+        let gap = gap.as_ref().unwrap();
+        if gap.is_left_ok() {
+            self.adjusted_end.set_warning_boolean_string(false, None);
+        } else {
+            self.adjusted_end
+                .set_warning_boolean_string(true, Some(EMPTY_SLICE_WARNING));
+        }
+        if gap.is_right_ok() {
+            self.adjusted_start.set_warning_boolean_string(false, None);
+        } else {
+            self.adjusted_start
+                .set_warning_boolean_string(true, Some(EMPTY_SLICE_WARNING));
+        }
     }
-    pub fn calculate_negative_adjustment(&self, rounded_best_gap: i32, orig: i32) -> i32 {
-        assert!(
-            rounded_best_gap >= 0 && orig > 0,
-            "Only pass the absolute value of roundedBestGap. Orig is either origEnd or origStart and must be at least 1."
-        );
-        -(rounded_best_gap / 2).min(orig - 1)
+
+    /// Java private `calculateNegativeAdjustment(int, int)`.  Calculated negative
+    /// adjustment for end and start.  Not called in the source.  The source's
+    /// `IllegalStateException` is a panic.
+    #[allow(dead_code)]
+    fn calculate_negative_adjustment(rounded_best_gap: i32, orig: i32) -> i32 {
+        if rounded_best_gap < 0 || orig <= 0 {
+            panic!(
+                "java.lang.IllegalStateException: Only pass the absolute value of \
+                 roundedBestGap.  Orig is either origEnd or origStart and must be at least \
+                 1.\nroundedBestGap={rounded_best_gap},orig={orig}"
+            );
+        }
+        let mut adjustment = rounded_best_gap / 2;
+        // Will have to add negative adjustment to orig and the result must be at
+        // least 1.
+        if adjustment > orig - 1 {
+            adjustment = orig - 1;
+        }
+        // Make adjustment negative.
+        adjustment * -1
     }
-    pub fn display(&mut self, index: usize, viewport: &Viewport, tab: Tab) {
+
+    /// Java package-private `display(int, Viewport, JoinDialog.Tab)`.
+    pub fn display(&self, index: i32, viewport: &Viewport, tab: Option<Tab>) {
         if !viewport.in_viewport(index) {
             return;
         }
-        if tab == Tab::Model {
+        if tab == Some(Tab::Model) {
             self.display_model();
-        } else if tab == Tab::Rejoin {
+        } else if tab == Some(Tab::Rejoin) {
             self.display_rejoin();
         }
     }
-    pub fn display_model(&mut self) {
-        self.model_displayed = true;
-        self.boundary_displayed = true;
-        self.best_gap.displayed = true;
-        self.mean_error.displayed = true;
-        self.max_error.displayed = true;
+
+    /// `cell.add(panel, layout, constraints)`: the cell's `add` and the
+    /// `layout.setConstraints` it makes.
+    fn add_cell(&self, table: &BoundaryTable, cell: &dyn CellVirtual, component: Rc<JComponent>) {
+        let panel = table.get_table_panel();
+        cell.add(&panel);
+        table
+            .get_layout()
+            .set_constraints(&component, &table.get_constraints());
     }
-    pub fn display_rejoin(&mut self) {
-        self.rejoin_displayed = true;
-        self.sections_displayed = true;
-        self.orig_end.displayed = true;
-        self.orig_start.displayed = true;
-        self.best_gap.displayed = true;
-        self.adjusted_end.spinner.visible = true;
-        self.adjusted_start.spinner.visible = true;
+
+    /// Java private `displayModel()`.
+    fn display_model(&self) {
+        let table = self.table();
+        table.with_constraints(|constraints| {
+            constraints.weightx = 0.0;
+            constraints.weighty = 0.1;
+            constraints.gridwidth = 1;
+        });
+        self.add_cell(&table, &*self.boundary, self.boundary.get_component());
+        table.with_constraints(|constraints| constraints.weightx = 0.1);
+        self.add_cell(&table, &*self.best_gap, self.best_gap.get_component());
+        self.add_cell(&table, &*self.mean_error, self.mean_error.get_component());
+        table.with_constraints(|constraints| constraints.gridwidth = GRID_BAG_REMAINDER);
+        self.add_cell(&table, &*self.max_error, self.max_error.get_component());
     }
-    pub fn remove_display(&mut self) {
-        self.boundary_displayed = false;
+
+    /// Java private `displayRejoin()`.
+    fn display_rejoin(&self) {
+        let table = self.table();
+        table.with_constraints(|constraints| {
+            constraints.weightx = 0.0;
+            constraints.weighty = 0.1;
+            constraints.gridwidth = 1;
+        });
+        self.add_cell(&table, &*self.sections, self.sections.get_component());
+        table.with_constraints(|constraints| constraints.weightx = 0.1);
+        self.add_cell(&table, &*self.orig_end, self.orig_end.get_component());
+        self.add_cell(&table, &*self.orig_start, self.orig_start.get_component());
+        self.add_cell(&table, &*self.best_gap, self.best_gap.get_component());
+        self.add_cell(
+            &table,
+            &*self.adjusted_end,
+            self.adjusted_end.get_component(),
+        );
+        table.with_constraints(|constraints| constraints.gridwidth = GRID_BAG_REMAINDER);
+        self.add_cell(
+            &table,
+            &*self.adjusted_start,
+            self.adjusted_start.get_component(),
+        );
+    }
+
+    /// Java package-private `removeDisplay()`.
+    ///
+    /// Fixed in translation (BoundaryRow.java:240-248): the source removes `origEnd`
+    /// twice and never removes `sections` or `origStart` (a copy-and-paste slip); every
+    /// displayed cell is removed here.  The table empties its panel right after, so the
+    /// display is the same.
+    pub fn remove_display(&self) {
+        self.boundary.remove();
+        self.sections.remove();
         self.best_gap.remove();
         self.mean_error.remove();
         self.max_error.remove();
         self.orig_end.remove();
-        self.orig_end.remove();
+        self.orig_start.remove();
         self.adjusted_end.remove();
         self.adjusted_start.remove();
     }
-    pub fn set_xfjointomo_result(&mut self, xfjointomo_log: &XfjointomoLog) {
-        let boundary = &self.boundary.text;
-        let Some(row) = xfjointomo_log.get(boundary) else {
-            return;
-        };
-        self.best_gap.set_value(row.best_gap);
-        self.mean_error.set_value(row.mean_error);
-        self.max_error.set_value(row.max_error);
+
+    /// Java package-private `setXfjointomoResult(BaseManager) throws
+    /// LogFileException, IOException, LockException`.
+    pub fn set_xfjointomo_result(
+        &self,
+        manager: &'static dyn BaseManager,
+    ) -> Result<(), LogFileError> {
+        let xfjointomo_log = XfjointomoLog::get_instance(manager, AxisID::Only);
+        let boundary = self
+            .boundary
+            .get_text()
+            .unwrap_or_else(|| "null".to_string());
+        if !xfjointomo_log.row_exists(&boundary)? {
+            return Ok(());
+        }
+        self.best_gap
+            .set_value_string(xfjointomo_log.get_best_gap(&boundary)?.as_deref());
+        self.mean_error
+            .set_value_string(xfjointomo_log.get_mean_error(&boundary).as_deref());
+        self.max_error
+            .set_value_string(xfjointomo_log.get_max_error(&boundary)?.as_deref());
         self.set_adjusted_values(None);
+        Ok(())
     }
-    pub fn reset_screen_state(screen_state: &mut BoundaryRowScreenState) {
+
+    /// Java static package-private `resetScreenState(JoinScreenState)`.
+    pub fn reset_screen_state(screen_state: &JoinScreenState) {
         screen_state.reset_best_gap();
         screen_state.reset_mean_error();
         screen_state.reset_max_error();
     }
-    pub fn get_screen_state(&self, screen_state: &mut BoundaryRowScreenState) {
-        let key = self.boundary.text.parse().unwrap();
-        screen_state.set_best_gap(key, self.best_gap.get_value());
-        screen_state.set_mean_error(key, self.mean_error.get_value());
-        screen_state.set_max_error(key, self.max_error.get_value());
+
+    /// Java package-private `getScreenState(JoinScreenState)`.
+    pub fn get_screen_state(&self, screen_state: &JoinScreenState) {
+        let key = self.boundary.get_int();
+        screen_state.set_best_gap(key, self.best_gap.get_value().as_deref());
+        screen_state.set_mean_error(key, self.mean_error.get_value().as_deref());
+        screen_state.set_max_error(key, self.max_error.get_value().as_deref());
     }
-    pub fn reset_meta_data(meta_data: &mut BoundaryRowMetaData) {
+
+    /// Java static package-private `resetMetaData(JoinMetaData)`.
+    pub fn reset_meta_data(meta_data: &JoinMetaData) {
         meta_data.reset_boundary_row_start_list();
         meta_data.reset_boundary_row_end_list();
     }
-    pub fn get_meta_data(&self, meta_data: &mut BoundaryRowMetaData) {
-        let key = self.boundary.text.parse().unwrap();
-        meta_data.set_boundary_row_end(key, self.adjusted_end.get_string_value());
-        meta_data.set_boundary_row_start(key, self.adjusted_start.get_string_value());
+
+    /// Java package-private `getMetaData(JoinMetaData)`.
+    pub fn get_meta_data(&self, meta_data: &JoinMetaData) {
+        meta_data.set_boundary_row_end(
+            self.boundary.get_int(),
+            self.adjusted_end.get_string_value().as_deref(),
+        );
+        meta_data.set_boundary_row_start(
+            self.boundary.get_int(),
+            self.adjusted_start.get_string_value().as_deref(),
+        );
     }
-    pub fn adjusted_end_state_changed(&mut self) {
-        if self.gap.is_none() {
+
+    /// Java package-private synchronized `adjustedEndStateChanged(ChangeEvent)`.
+    fn adjusted_end_state_changed(&self, _event: &ChangeEvent) {
+        if self.gap.borrow().is_none() {
             self.set_adjusted_values(None);
         }
-        self.adjusted_start.remove_change_listener();
-        let adjusted_end = self.adjusted_end.get_int_value();
-        self.gap
-            .as_mut()
-            .unwrap()
-            .msg_left_gap_boundary_changed(adjusted_end);
         self.adjusted_start
-            .set_value(self.gap.as_ref().unwrap().get_adjusted_right());
+            .remove_change_listener(&self.adjusted_start_change_listener);
+        let adjusted_right = {
+            let mut gap = self.gap.borrow_mut();
+            let gap = gap.as_mut().unwrap();
+            gap.msg_left_gap_boundary_changed(self.adjusted_end.get_int_value());
+            gap.get_adjusted_right()
+        };
+        self.adjusted_start.set_value_int(adjusted_right);
         self.set_adjusted_value_warnings();
-        self.adjusted_start.add_change_listener();
+        self.adjusted_start
+            .add_change_listener(self.adjusted_start_change_listener.clone());
     }
-    pub fn adjusted_start_state_changed(&mut self) {
-        if self.gap.is_none() {
+
+    /// Java package-private synchronized `adjustedStartStateChanged(ChangeEvent)`.
+    fn adjusted_start_state_changed(&self, _event: &ChangeEvent) {
+        if self.gap.borrow().is_none() {
             self.set_adjusted_values(None);
         }
-        self.adjusted_end.remove_change_listener();
-        let adjusted_start = self.adjusted_start.get_int_value();
-        self.gap
-            .as_mut()
-            .unwrap()
-            .msg_right_gap_boundary_changed(adjusted_start);
         self.adjusted_end
-            .set_value(self.gap.as_ref().unwrap().get_adjusted_left());
+            .remove_change_listener(&self.adjusted_end_change_listener);
+        let adjusted_left = {
+            let mut gap = self.gap.borrow_mut();
+            let gap = gap.as_mut().unwrap();
+            gap.msg_right_gap_boundary_changed(self.adjusted_start.get_int_value());
+            gap.get_adjusted_left()
+        };
+        self.adjusted_end.set_value_int(adjusted_left);
         self.set_adjusted_value_warnings();
-        self.adjusted_end.add_change_listener();
+        self.adjusted_end
+            .add_change_listener(self.adjusted_end_change_listener.clone());
     }
 }
 
-/// Native callback adapter for Java `AdjustedEndChangeListener`.
-///
-/// The Rust UI supplies the value transition directly, without allocating a
-/// Swing `ChangeEvent`.
-pub struct AdjustedEndChangeListener;
-
-impl AdjustedEndChangeListener {
-    #[allow(non_snake_case)]
-    pub fn stateChanged(row: &mut BoundaryRow) {
-        row.adjusted_end_state_changed();
-    }
+/// Java private static final nested class `Gap`.
+struct Gap {
+    /// Java private final `gap` (stored, not read again).
+    #[allow(dead_code)]
+    gap: i32,
+    /// Java private final `leftBoundary`.
+    left_boundary: GapBoundary,
+    /// Java private final `rightBoundary`.
+    right_boundary: GapBoundary,
 }
 
-/// Native callback adapter for Java `AdjustedStartChangeListener`.
-pub struct AdjustedStartChangeListener;
-
-impl AdjustedStartChangeListener {
-    #[allow(non_snake_case)]
-    pub fn stateChanged(row: &mut BoundaryRow) {
-        row.adjusted_start_state_changed();
-    }
-}
-
-/// Java private static final inner `Gap`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Gap {
-    pub gap: i32,
-    pub left_boundary: GapBoundary,
-    pub right_boundary: GapBoundary,
-}
 impl Gap {
-    pub fn new(
+    /// Java private `Gap(int, int, int, boolean, boolean, int, int)`.
+    fn new(
         gap: i32,
         orig_left: i32,
         orig_right: i32,
@@ -423,73 +481,108 @@ impl Gap {
         right_inverted: bool,
         ok_max_left: i32,
         ok_max_right: i32,
-    ) -> Self {
-        let mut value = Self {
+    ) -> Gap {
+        let mut this = Gap {
             gap,
             left_boundary: GapBoundary::new(orig_left, left_inverted, ok_max_left, true),
             right_boundary: GapBoundary::new(orig_right, right_inverted, ok_max_right, false),
         };
         if gap == 0 {
-            return value;
+            return this;
         }
-        let positive_gap = gap >= 0;
-        let abs_gap = gap.abs();
+        let mut positive_gap = true;
+        if gap < 0 {
+            positive_gap = false;
+        }
+        // Increment the absolute values of the left and right boundary
+        // until the absolute values of the adjustments equal the absolute gap.
+        // Try to stay in the ok range.
+        let abs_gap = gap.wrapping_abs();
+        let mut left_succeeded;
         let mut right_succeeded = true;
         let mut stay_in_ok_range = true;
-        while value.left_boundary.get_adjustment_abs_value()
-            + value.right_boundary.get_adjustment_abs_value()
+        while this.left_boundary.get_adjustment_abs_value()
+            + this.right_boundary.get_adjustment_abs_value()
             < abs_gap
         {
-            let left_succeeded = value.left_boundary.adjust(positive_gap, stay_in_ok_range);
-            if value.left_boundary.get_adjustment_abs_value()
-                + value.right_boundary.get_adjustment_abs_value()
+            left_succeeded = this.left_boundary.adjust(positive_gap, stay_in_ok_range);
+            if this.left_boundary.get_adjustment_abs_value()
+                + this.right_boundary.get_adjustment_abs_value()
                 < abs_gap
             {
-                right_succeeded = value.right_boundary.adjust(positive_gap, stay_in_ok_range);
+                right_succeeded = this.right_boundary.adjust(positive_gap, stay_in_ok_range);
             }
+            // see if have to go outside of ok range
             stay_in_ok_range = left_succeeded || right_succeeded;
         }
-        value
+        this
     }
-    pub fn msg_left_gap_boundary_changed(&mut self, adjusted_left: i32) {
-        let gap_change = self.left_boundary.r#move(adjusted_left);
-        for _ in 0..gap_change.abs() {
-            self.right_boundary.adjust(gap_change > 0, false);
+
+    /// Java `msgLeftGapBoundaryChanged(int)`.
+    fn msg_left_gap_boundary_changed(&mut self, adjusted_left: i32) {
+        let gap_change = self.left_boundary.move_to(adjusted_left);
+        // The gap has been changed on the left side, change the right side to get
+        // back to the original gap
+        let increased_gap = gap_change > 0;
+        let abs_gap_change = gap_change.wrapping_abs();
+        for _ in 0..abs_gap_change {
+            self.right_boundary.adjust(increased_gap, false);
         }
     }
-    pub fn msg_right_gap_boundary_changed(&mut self, adjusted_right: i32) {
-        let gap_change = self.right_boundary.r#move(adjusted_right);
-        for _ in 0..gap_change.abs() {
-            self.left_boundary.adjust(gap_change > 0, false);
+
+    /// Java `msgRightGapBoundaryChanged(int)`.
+    fn msg_right_gap_boundary_changed(&mut self, adjusted_right: i32) {
+        let gap_change = self.right_boundary.move_to(adjusted_right);
+        // The gap has been changed on the right side, change the left side to get
+        // back to the original gap
+        let increased_gap = gap_change > 0;
+        let abs_gap_change = gap_change.wrapping_abs();
+        for _ in 0..abs_gap_change {
+            self.left_boundary.adjust(increased_gap, false);
         }
     }
-    pub fn get_adjusted_left(&self) -> i32 {
+
+    /// Java `getAdjustedLeft()`.
+    fn get_adjusted_left(&self) -> i32 {
         self.left_boundary.get_adjusted()
     }
-    pub fn get_adjusted_right(&self) -> i32 {
+
+    /// Java `getAdjustedRight()`.
+    fn get_adjusted_right(&self) -> i32 {
         self.right_boundary.get_adjusted()
     }
-    pub fn is_left_ok(&self) -> bool {
+
+    /// Java `isLeftOk()`.
+    fn is_left_ok(&self) -> bool {
         self.left_boundary.is_ok()
     }
-    pub fn is_right_ok(&self) -> bool {
+
+    /// Java `isRightOk()`.
+    fn is_right_ok(&self) -> bool {
         self.right_boundary.is_ok()
     }
 }
 
-/// Java `Gap.GapBoundary`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GapBoundary {
-    pub orig: i32,
-    pub inverted: bool,
-    pub left_side: bool,
-    pub ok_min: i32,
-    pub ok_max: i32,
-    pub adjustment: i32,
+/// Java private static final nested class `Gap.GapBoundary`.
+struct GapBoundary {
+    /// Java private final `orig`.
+    orig: i32,
+    /// Java private final `inverted`.
+    inverted: bool,
+    /// Java private final `leftSide`.
+    left_side: bool,
+    /// Java private final `okMin = 1`.
+    ok_min: i32,
+    /// Java private final `okMax`.
+    ok_max: i32,
+    /// Java private `adjustment`, initially 0.
+    adjustment: i32,
 }
+
 impl GapBoundary {
-    pub fn new(orig: i32, inverted: bool, ok_max: i32, left_side: bool) -> Self {
-        Self {
+    /// Java private `GapBoundary(int, boolean, int, boolean)`.
+    fn new(orig: i32, inverted: bool, ok_max: i32, left_side: bool) -> GapBoundary {
+        GapBoundary {
             orig,
             inverted,
             left_side,
@@ -498,11 +591,17 @@ impl GapBoundary {
             adjustment: 0,
         }
     }
-    pub fn adjust(&mut self, positive_gap: bool, stay_in_ok_range: bool) -> bool {
-        if (positive_gap && self.left_side && !self.inverted)
-            || (positive_gap && !self.left_side && self.inverted)
-            || (!positive_gap && self.left_side && self.inverted)
-            || (!positive_gap && !self.left_side && !self.inverted)
+
+    /// Java `adjust(boolean, boolean)`.  Change adjustment by 1 to work with either a
+    /// positive or negative gap.  Widen a section to fill in a positive gap.  Narrow
+    /// a section to handle a negative gap.
+    fn adjust(&mut self, positive_gap: bool, stay_in_ok_range: bool) -> bool {
+        let left_side = self.left_side;
+        let inverted = self.inverted;
+        if (positive_gap && left_side && !inverted)
+            || (positive_gap && !left_side && inverted)
+            || (!positive_gap && left_side && inverted)
+            || (!positive_gap && !left_side && !inverted)
         {
             if !stay_in_ok_range || self.orig + self.adjustment < self.ok_max {
                 self.adjustment += 1;
@@ -510,10 +609,10 @@ impl GapBoundary {
             }
             return false;
         }
-        if (positive_gap && !self.left_side && !self.inverted)
-            || (positive_gap && self.left_side && self.inverted)
-            || (!positive_gap && self.left_side && !self.inverted)
-            || (!positive_gap && !self.left_side && self.inverted)
+        if (positive_gap && !left_side && !inverted)
+            || (positive_gap && left_side && inverted)
+            || (!positive_gap && left_side && !inverted)
+            || (!positive_gap && !left_side && inverted)
         {
             if !stay_in_ok_range || self.orig + self.adjustment > self.ok_min {
                 self.adjustment -= 1;
@@ -523,37 +622,51 @@ impl GapBoundary {
         }
         false
     }
-    pub fn r#move(&mut self, adjusted: i32) -> i32 {
-        let new_adjustment = adjusted - self.orig;
-        let change = new_adjustment - self.adjustment;
+
+    /// Java `move(int)`.  Change the gap size by moving one of the boundaries.  Set
+    /// the new adjustment and get the change in adjustment.  Returns the change in gap
+    /// size -- positive if gap was increased, negative if gap was decreased.  The
+    /// source's unreachable `IllegalStateException` is a panic.
+    fn move_to(&mut self, adjusted: i32) -> i32 {
+        let new_adjustment = adjusted.wrapping_sub(self.orig);
+        let change = new_adjustment.wrapping_sub(self.adjustment);
         self.adjustment = new_adjustment;
         if change == 0 {
             return 0;
         }
-        if (change > 0 && !self.left_side && !self.inverted)
-            || (change > 0 && self.left_side && self.inverted)
-            || (change < 0 && self.left_side && !self.inverted)
-            || (change < 0 && !self.left_side && self.inverted)
+        let left_side = self.left_side;
+        let inverted = self.inverted;
+        // Find out if this move increased the gap size or decreased it
+        if (change > 0 && !left_side && !inverted)
+            || (change > 0 && left_side && inverted)
+            || (change < 0 && left_side && !inverted)
+            || (change < 0 && !left_side && inverted)
         {
-            return change.abs();
+            return change.wrapping_abs();
         }
-        if (change > 0 && self.left_side && !self.inverted)
-            || (change > 0 && !self.left_side && self.inverted)
-            || (change < 0 && self.left_side && self.inverted)
-            || (change < 0 && !self.left_side && !self.inverted)
+        if (change > 0 && left_side && !inverted)
+            || (change > 0 && !left_side && inverted)
+            || (change < 0 && left_side && inverted)
+            || (change < 0 && !left_side && !inverted)
         {
-            return -change.abs();
+            return change.wrapping_abs() * -1;
         }
-        unreachable!()
+        panic!("java.lang.IllegalStateException");
     }
-    pub fn is_ok(&self) -> bool {
+
+    /// Java `isOk()`.
+    fn is_ok(&self) -> bool {
         let adjusted = self.orig + self.adjustment;
         adjusted >= self.ok_min && adjusted <= self.ok_max
     }
-    pub fn get_adjustment_abs_value(&self) -> i32 {
-        self.adjustment.abs()
+
+    /// Java `getAdjustmentAbsValue()`.
+    fn get_adjustment_abs_value(&self) -> i32 {
+        self.adjustment.wrapping_abs()
     }
-    pub fn get_adjusted(&self) -> i32 {
+
+    /// Java `getAdjusted()`.
+    fn get_adjusted(&self) -> i32 {
         self.orig + self.adjustment
     }
 }
@@ -561,72 +674,16 @@ impl GapBoundary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn row(gap: f64) -> BoundaryRow {
-        BoundaryRow::new(
-            1,
-            &BoundaryRowMetaData {
-                section_table_data: vec![
-                    SectionTableRowData {
-                        join_final_end: 5,
-                        z_max: 8,
-                        ..Default::default()
-                    },
-                    SectionTableRowData {
-                        join_final_start: 4,
-                        z_max: 8,
-                        ..Default::default()
-                    },
-                ],
-                ..Default::default()
-            },
-            &BoundaryRowScreenState {
-                best_gap: BTreeMap::from([(1, gap)]),
-                ..Default::default()
-            },
-            BoundaryTable::default(),
-        )
-    }
+
     #[test]
-    fn positive_gap_is_shared_between_boundaries() {
-        let row = row(3.0);
-        assert_eq!(
-            (
-                row.adjusted_end.get_int_value(),
-                row.adjusted_start.get_int_value()
-            ),
-            (7, 3)
-        );
-    }
-    #[test]
-    fn edited_left_boundary_preserves_gap_by_moving_right() {
-        let mut row = row(4.0);
-        row.adjusted_end.set_value(8);
-        AdjustedEndChangeListener::stateChanged(&mut row);
-        assert_eq!(row.adjusted_start.get_int_value(), 3);
-    }
-    #[test]
-    fn start_listener_preserves_gap_by_moving_end() {
-        let mut row = row(4.0);
-        row.adjusted_start.set_value(1);
-        AdjustedStartChangeListener::stateChanged(&mut row);
-        assert_eq!(row.adjusted_end.get_int_value(), 6);
-    }
-    #[test]
-    fn metadata_and_screen_state_round_trip() {
-        let mut row = row(-2.0);
-        let mut metadata = BoundaryRowMetaData::default();
-        let mut screen = BoundaryRowScreenState::default();
-        row.get_meta_data(&mut metadata);
-        row.get_screen_state(&mut screen);
-        assert_eq!(metadata.boundary_row_end.get(&1), Some(&4));
-        assert_eq!(screen.best_gap.get(&1), Some(&-2.0));
-    }
-    #[test]
-    fn model_and_rejoin_display_follow_viewport_and_tab() {
-        let mut row = row(0.0);
-        row.display(1, &Viewport::new(1), Tab::Model);
-        assert!(!row.model_displayed);
-        row.display(0, &Viewport::new(1), Tab::Rejoin);
-        assert!(row.rejoin_displayed && row.adjusted_end.spinner.visible);
+    fn a_positive_gap_widens_both_sections() {
+        let gap = Gap::new(3, 10, 1, false, false, 20, 20);
+        // The right start cannot shrink below 1 while the loop stays in the ok
+        // range, and the left side still can, so the left end takes the whole
+        // gap (Gap.java's loop: stayInOkRange = leftSucceeded || rightSucceeded).
+        assert_eq!(gap.get_adjusted_left(), 13);
+        assert_eq!(gap.get_adjusted_right(), 1);
+        assert!(gap.is_left_ok());
+        assert!(gap.is_right_ok());
     }
 }

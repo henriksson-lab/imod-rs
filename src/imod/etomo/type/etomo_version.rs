@@ -670,7 +670,7 @@ impl StorableValue for EtomoVersion {
     }
 
     /// Java `load(Properties)`.
-    fn load(&mut self, props: &BTreeMap<String, String>) {
+    fn load(&mut self, props: &mut BTreeMap<String, String>) {
         let value = match &self.key {
             None => None,
             Some(key) => props.get(key).cloned(),
@@ -679,7 +679,7 @@ impl StorableValue for EtomoVersion {
     }
 
     /// Java `load(Properties, String)`.
-    fn load_with_prepend(&mut self, props: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, props: &mut BTreeMap<String, String>, prepend: &str) {
         let key = match &self.key {
             None => return,
             Some(key) => key.clone(),

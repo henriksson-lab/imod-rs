@@ -15,10 +15,11 @@
 //! `QObject::connect: No such signal ImodAssistant::errorOccurred(...)`), so
 //! `AssistantListener::assistantError` is never reached and every
 //! `emit error(...)` in `ImodAssistant` goes nowhere.  That is what the
-//! reference binary does, measured.  Fixed in translation (BUGS.md): the
-//! connection is evidently meant to reach the listener, so `imodqtassist`
-//! sets `ImodAssistant::error_connected` and the errors are printed as
-//! `WARNING: Qt Assistant generated error: ...`.
+//! reference binary does, measured, and what the translation does
+//! (`error_connected` stays false; BUGS.md, kept native since 2026-10-02):
+//! eTomo is written against that output, and a connected listener's extra
+//! `WARNING: Qt Assistant generated error: ...` line made it show two
+//! "Problem Displaying Help Topic" popups where Java shows one.
 //!
 //! Also fixed (BUGS.md): when the assistant exits during the page sends,
 //! `assistantExited` deletes the `QProcess` and native then writes through
@@ -66,8 +67,7 @@ impl AssistantListener {
 
     /// C++ `AssistantListener::assistantError` (`imodqtassist.cpp:180`).
     ///
-    /// Unreachable in the reference build (see the module comment); reached
-    /// here since the connection is fixed.
+    /// Unreachable in the reference build and here (see the module comment).
     pub fn assistant_error(&self, msg: &str) {
         let mut err = io::stderr();
         let _ = write!(err, "WARNING: Qt Assistant generated error: {msg}\n");
@@ -579,10 +579,12 @@ pub fn imodqtassist(argv: &[String]) -> i32 {
         ImodAssistant::new(&argv[ind], qhc, None, abs_path, keep_bar, prefix, pref_abs);
 
     // Get a listener for the errors and timer.  The `errorOccurred`
-    // connection fails in the reference (module comment); fixed in
-    // translation (BUGS.md): the listener is connected.
+    // connection fails in the reference (module comment), so the listener
+    // is not connected and `error` goes nowhere: kept native (BUGS.md), since
+    // eTomo reports the failure from the `m_title` line already and a second
+    // warning makes it show a second "Problem Displaying Help Topic" popup.
     let mut listener = AssistantListener::new();
-    imod_help.error_connected = true;
+    imod_help.error_connected = false;
 
     // If using threads, start a thread to read stdin
     let ass_thread = AssistantThread;

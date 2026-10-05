@@ -34,21 +34,10 @@ use crate::imod::etomo::storage::cpu_adoc;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::ui::swing::load_display::LoadDisplay;
 use crate::imod::etomo::util::event_queue::{EdtRef, invoke_later};
-// TODO(unit): needs etomo/process/FailureReason.java - the static instances UNKOWN,
-// COMPUTER_DOWN and LOGIN_FAILED with getReason() and getTooltip().
 use crate::imod::etomo::process::failure_reason::{self, FailureReason};
-// TODO(unit): needs etomo/process/IntermittentBackgroundProcess.java - the monitored
-// program: getCommand, isStopped, fail, getStdError, getStdOutput, clearStdError,
-// getFailureReason, setFailureReason, toString.
 use crate::imod::etomo::process::intermittent_background_process::IntermittentBackgroundProcess;
-// TODO(unit): needs etomo/process/IntermittentProcessMonitor.java - the interface this
-// class implements.
 use crate::imod::etomo::process::intermittent_process_monitor::IntermittentProcessMonitor;
-// TODO(unit): needs etomo/process/ProcessRestarter.java - INSTANCE.restart() and
-// INSTANCE.addProcess(IntermittentBackgroundProcess).
 use crate::imod::etomo::process::process_restarter;
-// TODO(unit): needs etomo/util/HashedArray.java - the synchronized keyed list of
-// program states.
 use crate::imod::etomo::util::hashed_array::HashedArray;
 
 /// Java `LoadMonitor`, the polymorphic face (see the module comment).

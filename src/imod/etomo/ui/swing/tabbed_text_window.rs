@@ -48,9 +48,26 @@ pub struct TabbedTextWindow {
     displayable: Cell<bool>,
 }
 
+thread_local! {
+    /// Every displayable frame, as `Window.getWindows()` lists them: AWT keeps
+    /// a frame until it is disposed.  The Slint bridge draws the visible ones.
+    static WINDOWS: RefCell<Vec<Rc<TabbedTextWindow>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The displayable frames, oldest first.
+pub fn get_windows() -> Vec<Rc<TabbedTextWindow>> {
+    WINDOWS.with(|windows| windows.borrow().clone())
+}
+
 impl TabbedTextWindow {
     /// Java package-private `TabbedTextWindow(String, AxisID)`.
     pub fn new(label: String, axis_id: AxisID) -> Rc<TabbedTextWindow> {
+        let window = Self::construct(label, axis_id);
+        WINDOWS.with(|windows| windows.borrow_mut().push(window.clone()));
+        window
+    }
+
+    fn construct(label: String, axis_id: AxisID) -> Rc<TabbedTextWindow> {
         Rc::new(TabbedTextWindow {
             axis_id,
             label,
@@ -88,6 +105,11 @@ impl TabbedTextWindow {
 
     /// Java `Window.dispose()`.
     pub fn dispose(&self) {
+        WINDOWS.with(|windows| {
+            windows
+                .borrow_mut()
+                .retain(|window| !std::ptr::eq(window.as_ref(), self))
+        });
         self.frame_visible.set(false);
         self.content_pane.set_visible(false);
         self.displayable.set(false);

@@ -135,7 +135,7 @@ impl ReconnectProcess {
             }
             eprintln!(",messages:");
             if let Some(messages) = self.messages.lock().unwrap().as_ref() {
-                eprint!("{}", messages.dump_state());
+                messages.dump_state();
             }
             eprintln!(",logFile:");
             if let Some(log_file) = self.log_file.lock().unwrap().as_ref() {
@@ -469,48 +469,33 @@ impl ReconnectProcess {
             }
         }
         let mut messages = match self.log_success_tag.lock().unwrap().clone() {
-            None => ProcessMessages::new(
-                false,
-                true,
-                Some("Reconstruction of".to_owned()),
-                Some("slices complete.".to_owned()),
-                false,
-                false,
-                false,
-                None,
-                None,
-                false,
-                false,
-                true,
-                true,
+            None => ProcessMessages::get_instance_success_tags(
+                Some(self.manager),
+                self.axis_id,
+                Some("Reconstruction of"),
+                Some("slices complete."),
             ),
-            Some(log_success_tag) => ProcessMessages::new(
-                false,
-                true,
-                Some(log_success_tag),
-                None,
-                false,
-                false,
-                false,
-                None,
-                None,
-                false,
-                false,
-                true,
-                true,
+            Some(log_success_tag) => ProcessMessages::get_instance_success_tag(
+                Some(self.manager),
+                self.axis_id,
+                Some(&log_success_tag),
             ),
         };
         // `messages.addProcessOutput(logFile)`.
         // Upstream bug fixed in translation (ReconnectProcess.java:300): a null
         // log file throws NullPointerException in addProcessOutput; here no
         // output is parsed.
-        if let Some(log_file) = self.log_file.lock().unwrap().clone()
-            && let Err(e) = messages.add_process_output_file(log_file.get_file())
-        {
-            eprintln!("{e}");
+        if let Some(log_file) = self.log_file.lock().unwrap().clone() {
+            match messages.add_process_output_log_file(log_file) {
+                Ok(()) => {}
+                // catch (final LockException e) {}
+                Err(LogFileError::Lock(_)) => {}
+                // catch (final LogFileException | IOException e)
+                Err(e) => eprintln!("{e}"),
+            }
         }
         let mut exit_value = 0;
-        if !messages.is_empty(MessageType::Error) || !messages.is_success() {
+        if !messages.is_empty(Some(MessageType::Error)) || !messages.is_success() {
             exit_value = 1;
         }
         *self.messages.lock().unwrap() = Some(messages);
@@ -560,15 +545,12 @@ impl ReconnectProcess {
         if self.logged
             && let Some(monitor) = &self.monitor
         {
-            let messages = monitor.get_process_messages()?;
-            let mut copy = ProcessMessages::get_instance();
-            copy.add_process_messages(&messages);
-            return Some(copy);
+            return monitor
+                .get_process_messages()
+                .map(|messages| messages.clone());
         }
         let messages = self.messages.lock().unwrap();
-        let messages = messages.as_ref()?;
-        let mut copy = ProcessMessages::get_instance();
-        copy.add_process_messages(messages);
+        let copy = messages.as_ref()?.clone();
         Some(copy)
     }
 

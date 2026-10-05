@@ -1,489 +1,474 @@
-//! `IMOD/Etomo/src/etomo/process/MessageParser.java` and its direct tag-parser closure
-//! (`Tag`, `EolTag`, `FlagTag`, `EnclosedTag`, `PrependTag`, `TagInterface`).
-#![allow(dead_code)]
+//! `IMOD/Etomo/src/etomo/process/MessageParser.java`.
+//!
+//! Parses process output, line by line, for messages and hands the messages found to
+//! `ProcessMessages`.  Java's parser holds its `ProcessMessages`; here the parser is a
+//! field of the `ProcessMessages`, which lends itself to each call that reads it.
 
-use std::collections::VecDeque;
-
+use super::enclosed_tag::EnclosedTag;
+use super::eol_tag::EolTag;
+use super::flag_tag::FlagTag;
 use super::message::Message;
+use super::prepend_tag::PrependTag;
 use super::process_messages::{END_FEED_TOKEN, ListType, MessageType, ProcessMessages};
+use super::tag::Tag;
+use super::tag_interface::{TagKind, TagList};
+use crate::imod::etomo::util::queue::Queue;
 
-#[derive(Clone, Debug)]
-enum TagKind {
-    Normal,
-    Enclosed { end: String, strip_end: bool },
-    Eol,
-    Flag { second: Option<String> },
-    Prepend,
-}
-#[derive(Clone, Debug)]
-struct Tag {
-    ty: MessageType,
-    text: String,
-    multi_line: bool,
-    strip: bool,
-    list: Option<ListType>,
-    takes_prepend: bool,
-    antitags: Vec<String>,
-    kind: TagKind,
-    line: Option<String>,
-    start: Option<usize>,
-    end: Option<usize>,
-    open: bool,
-    closed: bool,
-    prepend: Option<String>,
-}
-impl Tag {
-    fn normal(
-        ty: MessageType,
-        text: &str,
-        multi_line: bool,
-        strip: bool,
-        list: Option<ListType>,
-        takes_prepend: bool,
-    ) -> Self {
-        Self {
-            ty,
-            text: text.into(),
-            multi_line,
-            strip,
-            list,
-            takes_prepend,
-            antitags: vec![],
-            kind: TagKind::Normal,
-            line: None,
-            start: None,
-            end: None,
-            open: false,
-            closed: false,
-            prepend: None,
-        }
-    }
-    fn parse(&mut self, line: &str) -> bool {
-        self.line = Some(line.to_owned());
-        self.start = None;
-        self.end = None;
-        self.open = false;
-        self.closed = false;
-        if line.is_empty()
-            || self.text.is_empty()
-            || self.antitags.iter().any(|tag| line.contains(tag))
-        {
-            return false;
-        }
-        match &self.kind {
-            TagKind::Eol => {
-                if let Some(end) = line.find(&self.text) {
-                    self.end = Some(end);
-                    self.open = true;
-                    self.closed = !self.multi_line;
-                    return true;
-                }
-            }
-            TagKind::Flag { second } => {
-                if let Some(pos) = line.find(&self.text) {
-                    if second
-                        .as_ref()
-                        .is_none_or(|tag| line[pos + self.text.len()..].contains(tag))
-                    {
-                        self.open = true;
-                        self.closed = true;
-                        return true;
-                    }
-                }
-            }
-            TagKind::Enclosed { end, strip_end } => {
-                let start = line.find(&self.text);
-                let from = start.map_or(0, |n| n + self.text.len());
-                let close = line[from..].find(end).map(|n| n + from);
-                if let Some(start) = start {
-                    self.start = Some(if self.strip {
-                        start + self.text.len()
-                    } else {
-                        start
-                    });
-                    self.open = true;
-                }
-                if let Some(close) = close {
-                    self.end = Some(if *strip_end { close } else { close + end.len() });
-                    self.closed = true;
-                }
-                return self.open || self.closed;
-            }
-            TagKind::Prepend | TagKind::Normal => {
-                if let Some(start) = line.find(&self.text) {
-                    self.start = Some(if self.strip {
-                        start + self.text.len()
-                    } else {
-                        start
-                    });
-                    self.open = true;
-                    self.closed = !self.multi_line;
-                    return true;
-                }
-            }
-        }
-        false
-    }
-    fn message(&mut self) -> Option<String> {
-        let line = self.line.as_deref()?;
-        let value = match (self.start, self.end) {
-            (Some(start), Some(end)) => &line[start..end],
-            (Some(start), None) => &line[start..],
-            (None, Some(end)) => &line[..end],
-            _ => return None,
-        }
-        .trim();
-        let mut value = value.to_owned();
-        if self.open && self.takes_prepend {
-            if let Some(prepend) = self.prepend.take() {
-                if !prepend.is_empty() {
-                    value = format!("{prepend}\n{value}");
-                }
-            }
-        }
-        Some(value)
-    }
-    fn is_enclosed(&self) -> bool {
-        matches!(self.kind, TagKind::Enclosed { .. })
-    }
-    fn chunk(&self) -> bool {
-        self.list.is_some_and(ListType::is_chunk)
-    }
-    fn delete_message_string(&mut self) {
-        self.line = None;
-        self.start = None;
-        self.end = None;
-        self.open = false;
-        self.closed = false;
-    }
-}
+/// Java private static final `STANDARD_ERROR_TAGS`.
+const STANDARD_ERROR_TAGS: [&str; 3] = ["ERROR:", "Errno", "Traceback"];
 
-/// Java package-private `MessageParser`.
-pub struct MessageParser {
-    tags: Vec<Tag>,
-    multiline: VecDeque<Message>,
-    multiline_tag: Option<usize>,
-    chunk_message: bool,
-    finished: bool,
+/// Java package-private `final class MessageParser`.
+#[derive(Clone, Debug)]
+pub(crate) struct MessageParser {
+    /// Java private final `tags`.
+    tags: TagList,
+    /// Java private final `debug`.
     debug: bool,
+    /// Java private `multilineMessageQueue`.
+    multiline_message_queue: Option<Queue<Message>>,
+    /// Java private `multilineTag`.
+    multiline_tag: Option<usize>,
+    /// Java private `prependTag`.
+    prepend_tag: Option<usize>,
+    /// Java private `chunkMessage`.  Number of chunk messages on the multi-line
+    /// message stack.
+    chunk_message: bool,
+    /// Java private `finished`.
+    finished: bool,
 }
+
 impl MessageParser {
-    pub fn get_instance(
+    /// Java private `MessageParser(ProcessMessages, boolean)`.
+    fn new(debug: bool) -> MessageParser {
+        MessageParser {
+            tags: TagList::new(),
+            debug,
+            multiline_message_queue: None,
+            multiline_tag: None,
+            prepend_tag: None,
+            chunk_message: false,
+            finished: false,
+        }
+    }
+
+    /// Java static `getInstance(ProcessMessages, String, boolean, boolean)`.
+    pub(crate) fn get_instance(
         process_messages: &ProcessMessages,
         error_tag: Option<&str>,
         error_tag_always_multiline: bool,
         debug: bool,
-    ) -> Self {
-        let mut parser = Self {
-            tags: vec![],
-            multiline: VecDeque::new(),
-            multiline_tag: None,
-            chunk_message: false,
-            finished: true,
-            debug,
-        };
-        parser.init(process_messages, error_tag, error_tag_always_multiline);
-        parser
+    ) -> MessageParser {
+        let mut instance = MessageParser::new(debug);
+        instance.init(process_messages, error_tag, error_tag_always_multiline);
+        instance
     }
-    fn init(
-        &mut self,
-        pm: &ProcessMessages,
-        error_tag: Option<&str>,
-        error_tag_always_multiline: bool,
-    ) {
-        let logged = pm.is_log_all_messages();
-        let multiline_all = pm.is_multi_line_all_messages();
-        let mut pip = Tag::normal(
-            MessageType::PipWarningStart,
-            "PIP WARNING:",
-            true,
-            false,
-            Some(ListType::Info),
-            true,
-        );
-        pip.kind = TagKind::Enclosed {
-            end: "Using fallback options in main program".into(),
-            strip_end: false,
-        };
-        self.tags.push(pip);
-        self.tags.push(Tag::normal(
-            MessageType::LogFile,
-            "LOGFILE:",
-            false,
-            true,
-            Some(ListType::Logged),
-            false,
-        ));
-        self.tags.push(Tag::normal(
-            MessageType::Warning,
-            "WARNING:",
-            multiline_all || pm.is_multi_line_warning(),
-            false,
-            if logged {
-                Some(ListType::Logged)
-            } else {
-                Some(ListType::Warning)
-            },
-            true,
-        ));
-        if pm.is_chunks() {
-            let mut tag = Tag::normal(
-                MessageType::ChunkError,
-                "CHUNK ERROR:",
-                true,
-                false,
-                Some(ListType::ChunkError),
-                true,
-            );
-            tag.kind = TagKind::Enclosed {
-                end: "END CHUNK ERROR".into(),
-                strip_end: true,
-            };
-            self.tags.push(tag);
-        }
-        self.tags.push(Tag::normal(
-            MessageType::Info,
-            "INFO:",
-            multiline_all || pm.is_multi_line_info(),
-            false,
-            if pm.is_log_info_messages() || logged {
-                Some(ListType::Logged)
-            } else {
-                Some(ListType::Info)
-            },
-            false,
-        ));
-        self.tags.push(Tag::normal(
-            MessageType::Log,
-            "LOG:",
-            pm.is_allow_multi_line_log(),
-            true,
-            Some(ListType::Logged),
-            false,
-        ));
-        let mut eol = Tag::normal(
-            MessageType::Log,
-            "[:LOG]",
-            pm.is_allow_multi_line_log(),
-            true,
-            Some(ListType::Logged),
-            false,
-        );
-        eol.kind = TagKind::Eol;
-        self.tags.push(eol);
-        let antitags = vec!["prnstr('ERROR:".into(), "log.write('ERROR:".into()];
-        if let Some(override_tag) = pm.get_error_override_log_tag() {
-            let mut tag = Tag::normal(
-                MessageType::Error,
-                override_tag,
-                multiline_all && error_tag_always_multiline,
-                false,
-                Some(ListType::Error),
-                true,
-            );
-            tag.antitags = antitags.clone();
-            self.tags.push(tag);
-        }
-        let mut basic = Tag::normal(
-            MessageType::Error,
-            "ERROR:",
-            multiline_all,
-            false,
-            if logged {
-                Some(ListType::Logged)
-            } else {
-                Some(ListType::Error)
-            },
-            true,
-        );
-        basic.antitags = antitags.clone();
-        self.tags.push(basic);
-        if let Some(tag) = error_tag {
-            self.tags.push(Tag::normal(
-                MessageType::Error,
-                tag,
-                multiline_all || error_tag_always_multiline,
-                false,
-                if logged {
-                    Some(ListType::Logged)
-                } else {
-                    Some(ListType::Error)
-                },
-                true,
-            ));
-        }
-        let mut errno = Tag::normal(
-            MessageType::Error,
-            "Errno",
-            multiline_all,
-            false,
-            if logged {
-                Some(ListType::Logged)
-            } else {
-                Some(ListType::Error)
-            },
-            true,
-        );
-        errno.antitags = antitags.clone();
-        self.tags.push(errno);
-        let mut traceback = Tag::normal(
-            MessageType::Error,
-            "Traceback",
-            true,
-            false,
-            if logged {
-                Some(ListType::Logged)
-            } else {
-                Some(ListType::Error)
-            },
-            true,
-        );
-        traceback.antitags = antitags;
-        self.tags.push(traceback);
-        if let Some(tag1) = pm.get_success_tag1() {
-            let mut flag = Tag::normal(
-                MessageType::Success,
-                tag1,
-                false,
-                false,
-                Some(ListType::Flag),
-                false,
-            );
-            flag.kind = TagKind::Flag {
-                second: pm.get_success_tag2().map(str::to_owned),
-            };
-            self.tags.push(flag);
-        }
-    }
+
+    /// Java `setMultiParse(boolean)`.  When this is on, the parser will leave
+    /// multi-line messages open after it runs out of strings to parse.  This is
+    /// essential when parsing string by string, or parsing during a run.  You must call
+    /// endParse when the parse is done.
     pub(crate) fn set_multi_parse(&mut self, multi_parse: bool) {
         self.finished = !multi_parse;
     }
-    pub(crate) fn end_parse(&mut self, pm: &mut ProcessMessages) {
+
+    /// Java `endParse()`.  Makes the parser clean up - ending and saving any potential
+    /// multi-line messages.
+    pub(crate) fn end_parse(&mut self, process_messages: &mut ProcessMessages) {
         self.finished = true;
-        self.parse(pm, None);
+        self.parse(process_messages, None);
     }
-    pub fn set_prepend(&mut self, prepend: Option<&str>) {
-        self.tags
-            .retain(|tag| !matches!(tag.kind, TagKind::Prepend));
-        if let Some(text) = prepend {
-            let mut tag = Tag::normal(MessageType::Prepend, text, false, false, None, false);
-            tag.kind = TagKind::Prepend;
-            self.tags.push(tag);
+
+    /// Java private `init(String, boolean)`.  The order in which tags are stored
+    /// becomes their precedence.
+    fn init(
+        &mut self,
+        process_messages: &ProcessMessages,
+        error_tag: Option<&str>,
+        error_tag_always_multiline: bool,
+    ) {
+        let log_all_messages = process_messages.is_log_all_messages();
+        let multi_line_all_messages = process_messages.is_multi_line_all_messages();
+        // pip warning
+        // Pip warnings block other message; other messages become part of the pip
+        // warning.
+        let message_type = MessageType::PipWarningStart;
+        self.tags.add(TagKind::Enclosed(EnclosedTag::new(
+            message_type,
+            message_type.get_tag(),
+            MessageType::PipWarningEnd.get_tag().unwrap(),
+            false,
+            message_type.get_list_type(),
+            true,
+        )));
+        // logfile
+        // Logfile messages cause the contents of a file to be log (placed in the
+        // project log if available).
+        let message_type = MessageType::LogFile;
+        self.tags.add(TagKind::Tag(Tag::new(
+            message_type,
+            message_type.get_tag(),
+            false,
+            true,
+            Some(ListType::Logged),
+            false,
+        )));
+        // warning
+        let message_type = MessageType::Warning;
+        self.tags.add(TagKind::Tag(Tag::new(
+            message_type,
+            message_type.get_tag(),
+            multi_line_all_messages || process_messages.is_multi_line_warning(),
+            false,
+            if log_all_messages {
+                Some(ListType::Logged)
+            } else {
+                message_type.get_list_type()
+            },
+            true,
+        )));
+        // chunk error
+        if process_messages.is_chunks() {
+            let message_type = MessageType::ChunkError;
+            self.tags.add(TagKind::Enclosed(EnclosedTag::new(
+                message_type,
+                message_type.get_tag(),
+                "END CHUNK ERROR",
+                true,
+                message_type.get_list_type(),
+                true,
+            )));
+        }
+        // info
+        let message_type = MessageType::Info;
+        self.tags.add(TagKind::Tag(Tag::new(
+            message_type,
+            message_type.get_tag(),
+            multi_line_all_messages || process_messages.is_multi_line_info(),
+            false,
+            if process_messages.is_log_info_messages() || log_all_messages {
+                Some(ListType::Logged)
+            } else {
+                message_type.get_list_type()
+            },
+            false,
+        )));
+        // log
+        // Log tags are always stripped.
+        let multi_line_log = process_messages.is_allow_multi_line_log();
+        let message_type = MessageType::Log;
+        self.tags.add(TagKind::Tag(Tag::new(
+            message_type,
+            message_type.get_tag(),
+            multi_line_log,
+            true,
+            Some(ListType::Logged),
+            false,
+        )));
+        // End of line tags cause a truncation of everything after the tag.
+        self.tags.add(TagKind::Eol(EolTag::new(
+            message_type,
+            message_type.get_secondary_tag(),
+            multi_line_log,
+            Some(ListType::Logged),
+        )));
+        // error
+        // Use antitags to avoid messages that are not actually error messages.
+        let antitags = ["prnstr('ERROR:", "log.write('ERROR:"];
+        // Override log tag errors cannot be logged.  Treated the same as other errors.
+        // Takes presedence because it most likely contains an error tag - so it must be
+        // found first.
+        let message_type = MessageType::Error;
+        if let Some(error_override_log_tag) = process_messages.get_error_override_log_tag() {
+            self.tags.add(TagKind::Tag(Tag::new_antitags(
+                message_type,
+                Some(error_override_log_tag),
+                multi_line_all_messages && error_tag_always_multiline,
+                false,
+                message_type.get_list_type(),
+                true,
+                &antitags,
+            )));
+        }
+        // Basic error message.
+        self.tags.add(TagKind::Tag(Tag::new_antitags(
+            message_type,
+            message_type.get_tag(),
+            multi_line_all_messages,
+            false,
+            if log_all_messages {
+                Some(ListType::Logged)
+            } else {
+                message_type.get_list_type()
+            },
+            true,
+            &antitags,
+        )));
+        // Optional error message.
+        if let Some(error_tag) = error_tag {
+            self.tags.add(TagKind::Tag(Tag::new(
+                message_type,
+                Some(error_tag),
+                multi_line_all_messages || error_tag_always_multiline,
+                false,
+                if log_all_messages {
+                    Some(ListType::Logged)
+                } else {
+                    message_type.get_list_type()
+                },
+                true,
+            )));
+        }
+        // Alternative error messages.
+        self.tags.add(TagKind::Tag(Tag::new(
+            message_type,
+            Some(STANDARD_ERROR_TAGS[1]),
+            multi_line_all_messages,
+            false,
+            if log_all_messages {
+                Some(ListType::Logged)
+            } else {
+                message_type.get_list_type()
+            },
+            true,
+        )));
+        self.tags.add(TagKind::Tag(Tag::new(
+            message_type,
+            Some(STANDARD_ERROR_TAGS[2]),
+            true,
+            false,
+            if log_all_messages {
+                Some(ListType::Logged)
+            } else {
+                message_type.get_list_type()
+            },
+            true,
+        )));
+        // success - flags success - uses one or two tags (in order and not overlapping)
+        if let Some(success_tag1) = process_messages.get_success_tag1() {
+            self.tags.add(TagKind::Flag(FlagTag::new(
+                MessageType::Success,
+                success_tag1,
+                process_messages.get_success_tag2(),
+                Some(ListType::Flag),
+            )));
         }
     }
-    fn find_tag(&mut self, line: &str) -> Option<usize> {
-        for (index, tag) in self.tags.iter_mut().enumerate() {
-            if tag.parse(line) {
-                if matches!(tag.kind, TagKind::Prepend) {
-                    let value = line.to_owned();
-                    for receiver in &mut self.tags {
-                        if receiver.takes_prepend {
-                            receiver.prepend = Some(value.clone());
-                        }
-                    }
-                    return None;
+
+    /// Java synchronized `setPrepend(String)`.  Creates a prepend tag and adds it to
+    /// tags that require it.  Adds prepend tag to tags list.  Succeeding calls just
+    /// modify the prepend tag's tag string and remove the current message.
+    pub(crate) fn set_prepend(&mut self, prepend_tag_string: Option<&str>) {
+        if self.prepend_tag.is_none() {
+            let Some(prepend_tag_string) = prepend_tag_string else {
+                return;
+            };
+            let mut prepend_tag = PrependTag::new(prepend_tag_string);
+            let size = self.tags.size();
+            for i in 0..size {
+                if self.tags.takes_prepend(i) {
+                    prepend_tag.add_prepend_taker(i);
                 }
-                return Some(index);
+            }
+            // Add prepend with lowest precedence.
+            self.prepend_tag = Some(self.tags.add(TagKind::Prepend(prepend_tag)));
+        }
+        let prepend_tag = self.prepend_tag.unwrap();
+        match prepend_tag_string {
+            // The prepend tag has been removed.
+            None => PrependTag::delete_tag(&mut self.tags, prepend_tag),
+            Some(prepend_tag_string) => {
+                PrependTag::set_tag(&mut self.tags, prepend_tag, Some(prepend_tag_string))
             }
         }
-        None
     }
-    pub(crate) fn parse(&mut self, pm: &mut ProcessMessages, mut header: Option<&str>) {
-        while let Some(line) = pm.get_next_line() {
+
+    /// Java synchronized `parse(String)` (and `parse()`, with a null header).  Store
+    /// all messages in all available lines.
+    pub(crate) fn parse(&mut self, process_messages: &mut ProcessMessages, header: Option<&str>) {
+        let mut header = header.map(str::to_owned);
+        // Process each line.
+        loop {
+            let line = process_messages.get_next_line();
+            // Stop processing and clean up if necessary on a null line.
+            let Some(line) = line else {
+                break;
+            };
+            // Ignore the end stringfeed token
             if line == END_FEED_TOKEN {
                 continue;
             }
-            let mut possible = self.find_tag(&line);
-            let mut tag = None;
-            if let Some(open_index) = self.multiline_tag {
-                let open = &self.tags[open_index];
-                if !open.is_enclosed() {
-                    if possible.is_some_and(|index| {
-                        open.ty == MessageType::Error && self.tags[index].ty == MessageType::Error
-                    }) {
-                        tag = possible.take();
+            // Save the interior of a multiline message without parsing, or close a
+            // multiline message.
+            // See if the current line matches a tag.
+            let mut possible_tag = self.find_tag(Some(&line));
+            let mut tag: Option<usize> = None;
+
+            // Handle existing multi-line message.
+            if self
+                .multiline_message_queue
+                .as_ref()
+                .is_some_and(|queue| !queue.is_empty())
+                && let Some(multiline_tag) = self.multiline_tag
+            {
+                // Ignore the interior of a multiline message that is closed with an
+                // empty line.
+                if !self.tags.is_enclosed(multiline_tag) {
+                    // The possible tag is part of this message, unless this message is
+                    // an error and so is the possible tag.
+                    if let Some(possible) = possible_tag
+                        && self.tags.get_message_type(multiline_tag) == MessageType::Error
+                        && self.tags.get_message_type(possible) == MessageType::Error
+                    {
+                        tag = Some(possible);
+                        possible_tag = None;
                     }
+                    // Close message.  It can close on an empty line, or if the
+                    // multi-line message is an error, it can close on another error.
                     if line.is_empty() || tag.is_some() {
-                        self.store_queue(pm, header);
+                        // Store the multiline message
+                        process_messages.store_message_queue(
+                            header.as_deref(),
+                            self.multiline_message_queue.as_mut(),
+                            self.chunk_message,
+                        );
                         header = None;
-                        if self.tags[open_index].chunk() {
+                        self.multiline_message_queue.as_mut().unwrap().clear();
+                        if self.tags.is_chunk(multiline_tag) {
                             self.chunk_message = false;
                         }
                         self.multiline_tag = None;
+                        // Can only leave this interation if there isn't a new tag.
                         if tag.is_none() {
                             continue;
                         }
                     }
-                } else if self.tags[open_index].parse(&line) && self.tags[open_index].closed {
-                    let source = &mut self.tags[open_index];
-                    let mut message =
-                        Message::new(source.ty, source.list, true, source.chunk(), true);
-                    message.append(source.message().as_deref());
-                    source.delete_message_string();
-                    self.multiline.push_back(message);
-                    self.store_queue(pm, header);
-                    header = None;
-                    self.chunk_message = false;
+                }
+                // Search only for the close tag of an enclosed multiline message
+                else if self.tags.parse(multiline_tag, Some(&line))
+                    && self.tags.is_closed(multiline_tag)
+                {
+                    let mut message = Message::new(&self.tags, multiline_tag);
+                    message.append(self.tags.get_message_string(multiline_tag).as_deref());
+                    self.tags.delete_message_string(multiline_tag);
                     self.multiline_tag = None;
+                    let chunk = message.is_chunk();
+                    let queue = self.multiline_message_queue.as_mut().unwrap();
+                    queue.push(Some(message));
+                    process_messages.store_message_queue(
+                        header.as_deref(),
+                        Some(queue),
+                        self.chunk_message,
+                    );
+                    header = None;
+                    self.multiline_message_queue.as_mut().unwrap().clear();
+                    if chunk {
+                        self.chunk_message = false;
+                    }
                     continue;
                 }
+                // Save the interior line.  Even if it's been identified as a tag, if it
+                // did not close the multi-line tag, it's part of this tag.
                 if tag.is_none() {
-                    let source = &self.tags[open_index];
-                    let mut message = Message::new(
-                        source.ty,
-                        source.list,
-                        source.is_enclosed(),
-                        source.chunk(),
-                        source.multi_line,
-                    );
+                    let multiline_tag = self.multiline_tag.unwrap();
+                    let mut message = Message::new(&self.tags, multiline_tag);
                     message.append(Some(&line));
-                    self.multiline.push_back(message);
+                    self.multiline_message_queue
+                        .as_mut()
+                        .unwrap()
+                        .push(Some(message));
                     continue;
                 }
             }
-            let tag = tag.or(possible);
-            if let Some(index) = tag {
-                let source = &mut self.tags[index];
-                if source.multi_line && source.open && !source.closed {
-                    let mut message = Message::new(
-                        source.ty,
-                        source.list,
-                        source.is_enclosed(),
-                        source.chunk(),
-                        source.multi_line,
-                    );
-                    message.append(source.message().as_deref());
-                    source.delete_message_string();
-                    if message.is_chunk() {
+            // Not currently working on a multi-line message, or completed one by
+            // finding another message.
+            if tag.is_none() {
+                tag = possible_tag;
+            }
+            // Handle tag.
+            if let Some(tag) = tag {
+                // Start a multiline message
+                if self.tags.is_multi_line(tag)
+                    && self.tags.is_open(tag)
+                    && !self.tags.is_closed(tag)
+                {
+                    if self.multiline_message_queue.is_none() {
+                        self.multiline_message_queue = Some(Queue::new());
+                    }
+                    self.multiline_tag = Some(tag);
+                    let mut message = Message::new(&self.tags, tag);
+                    message.append(self.tags.get_message_string(tag).as_deref());
+                    self.tags.delete_message_string(tag);
+                    let chunk = message.is_chunk();
+                    self.multiline_message_queue
+                        .as_mut()
+                        .unwrap()
+                        .push(Some(message));
+                    if chunk {
                         self.chunk_message = true;
                     }
-                    self.multiline.push_back(message);
-                    self.multiline_tag = Some(index);
-                } else if !source.multi_line || (source.open && source.closed) {
-                    let ty = source.ty;
-                    let list = source.list;
-                    let text = if source.ty == MessageType::Success {
-                        Some(String::new())
-                    } else {
-                        source.message()
-                    };
-                    source.delete_message_string();
-                    pm.store_tag_message(ty, list, header, text, self.chunk_message);
+                }
+                // Handle single line message
+                else if !self.tags.is_multi_line(tag)
+                    || (self.tags.is_open(tag) && self.tags.is_closed(tag))
+                {
+                    process_messages.store_message_tag(
+                        header.as_deref(),
+                        &mut self.tags,
+                        tag,
+                        self.chunk_message,
+                    );
                     header = None;
+                    self.tags.delete_message_string(tag);
                 } else {
-                    source.delete_message_string();
+                    // No real message was found
+                    self.tags.delete_message_string(tag);
                 }
             }
         }
-        if !pm.is_string_feed() && self.finished && !self.multiline.is_empty() {
-            self.store_queue(pm, header);
-            self.multiline_tag = None;
-            self.chunk_message = false;
+        // Handle clean up if necessary
+        // Assume process output is complete when output ends - except when string feed
+        // is in use or the parse is unfinished.
+        if !process_messages.is_string_feed()
+            && self.finished
+            && self
+                .multiline_message_queue
+                .as_ref()
+                .is_some_and(|queue| !queue.is_empty())
+        {
+            let chunk = self
+                .multiline_message_queue
+                .as_ref()
+                .unwrap()
+                .peek()
+                .unwrap()
+                .is_chunk();
+            process_messages.store_message_queue(
+                header.as_deref(),
+                self.multiline_message_queue.as_mut(),
+                self.chunk_message,
+            );
+            self.multiline_message_queue.as_mut().unwrap().clear();
+            if chunk {
+                self.chunk_message = false;
+            }
         }
     }
-    fn store_queue(&mut self, pm: &mut ProcessMessages, header: Option<&str>) {
-        while let Some(mut message) = self.multiline.pop_front() {
-            pm.store_message(header, &mut message, self.chunk_message);
+
+    /// Java private `findTag(String)`.
+    fn find_tag(&mut self, line: Option<&str>) -> Option<usize> {
+        let line = line?;
+        if line.is_empty() {
+            return None;
         }
+        let size = self.tags.size();
+        for i in 0..size {
+            if self.tags.parse(i, Some(line)) {
+                if self.tags.is_prepend(i) {
+                    return None;
+                }
+                return Some(i);
+            }
+        }
+        None
     }
 }

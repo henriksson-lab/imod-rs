@@ -48,7 +48,7 @@ export component AnisotropicDiffusionDialog inherits Rectangle {
 
             // ---- first column: `pnlFirst`, BoxLayout.Y_AXIS ----
             VerticalLayout {
-                spacing: EtomoStyle.gap;
+                spacing: EtomoStyle.row-gap;
                 alignment: start;
 
                 // `ftfVolume` = FileTextField.getPartialPathInstance("Pick a volume")
@@ -107,7 +107,7 @@ export component AnisotropicDiffusionDialog inherits Rectangle {
 
             // ---- second column: `pnlSecond`, BoxLayout.Y_AXIS ----
             VerticalLayout {
-                spacing: EtomoStyle.gap;
+                spacing: EtomoStyle.row-gap;
                 alignment: start;
 
                 // `pnlVaryingK`: Y_AXIS,
@@ -119,7 +119,7 @@ export component AnisotropicDiffusionDialog inherits Rectangle {
                         spacing: EtomoStyle.gap;
                         alignment: start;
                         InlineTextField { label: "List of K values: "; text: ""; field-width: 170px; }
-                        InlineSpinner { label: "Iterations: "; text: "10"; }
+                        InlineSpinner { label: "Iterations: "; occurrence: "#1"; text: "10"; }
                     }
                     // `pnlVaryingKButtons`: X_AXIS -- glue, btnRunVaryingK,
                     // glue, btnViewVaryingK, glue.
@@ -139,7 +139,7 @@ export component AnisotropicDiffusionDialog inherits Rectangle {
                     HorizontalLayout {
                         spacing: EtomoStyle.gap;
                         alignment: start;
-                        InlineTextField { label: "K value: "; text: ""; field-width: 90px; }
+                        InlineTextField { label: "K value: "; occurrence: "#1"; text: ""; field-width: 90px; }
                         InlineTextField { label: "List of iterations: "; text: ""; field-width: 170px; }
                     }
                     // `pnlVaryingIterationButtons`: X_AXIS -- glue,
@@ -161,8 +161,8 @@ export component AnisotropicDiffusionDialog inherits Rectangle {
                     HorizontalLayout {
                         spacing: EtomoStyle.gap;
                         alignment: start;
-                        InlineTextField { label: "K value: "; text: ""; field-width: 90px; }
-                        InlineSpinner { label: "Iterations: "; text: "10"; }
+                        InlineTextField { label: "K value: "; occurrence: "#2"; text: ""; field-width: 90px; }
+                        InlineSpinner { label: "Iterations: "; occurrence: "#2"; text: "10"; }
                         InlineSpinner { label: "Memory per chunk (MB): "; text: "504"; }
                     }
                     // `pnlCheckBox`: X_AXIS -- check box, glue.

@@ -1,19 +1,31 @@
 //! `IMOD/Etomo/src/etomo/process/ProcessData.java`.
 //!
-//! Persisted process identity for a process which survived an eTomo restart.
-//! The property vocabulary and chunk bookkeeping are represented directly.  The Java
-//! `PsParam`, `Network`, `OSType`, `Time`, `ProcessingMethod`, and `BaseManager`
-//! units have not all crossed this dependency frontier; their operations remain explicit
-//! null-equivalent boundaries rather than simulated process-state answers.
+//! Process data to allow identification of processes that Etomo is no longer
+//! managing because it exited after they started.  Allows Etomo to prevent two
+//! processes from running on an axis, even when the running process is unmanaged.
+//! Saved in the data file.  The process is found again with `ps` (`PsParam`, run
+//! through `SystemProgram`, over ssh for another host); the host is the one
+//! `Network.getLocalHostName` (`b3dhostname`) reports.
 #![allow(dead_code)]
 
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::comscript::ps_param::PsParam;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::process::system_program::SystemProgram;
+use crate::imod::etomo::storage::network::Network;
 use crate::imod::etomo::storage::storable::StorableValue;
 use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_number::ConstEtomoNumber;
+use crate::imod::etomo::r#type::const_string_property::ConstStringProperty;
 use crate::imod::etomo::r#type::debug_level::DebugLevel;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
+use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
+use crate::imod::etomo::r#type::os_type::{self, OSType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::processing_method::ProcessingMethod;
+use crate::imod::etomo::r#type::string_property::StringProperty;
+use crate::imod::etomo::r#type::time::Time;
+use crate::imod::etomo::util::java_hash_map::JavaHashMap;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
@@ -21,28 +33,29 @@ const PID_KEY: &str = "PID";
 const GROUP_PID_KEY: &str = "GroupPID";
 const START_TIME_KEY: &str = "StartTime";
 const PROCESS_NAME_KEY: &str = "ProcessName";
+/// Java declares `OS_TYPE_KEY = "OS"` and never reads it; the OS is stored under
+/// `OSType.KEY`.
 const OS_TYPE_KEY: &str = "OS";
 const COMPUTER_KEY: &str = "Computer";
 const LINE_NUMBER_KEY: &str = "LineNumber";
 const LINE_NUMBER_DEFAULT: i32 = 0;
 
-/// One local `ps` row consumed by Java `PsParam` in `runPs`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PsRecord {
-    pub pid: String,
-    pub group_pid: String,
-    pub start_time: String,
-}
-
 /// Java final `ProcessData implements Storable`.
 pub struct ProcessData {
-    display_id: i32,
-    factory_id: Option<String>,
-    sub_process_name: Option<String>,
-    sub_dir_name: Option<String>,
-    host_name: Option<String>,
-    last_process: Option<String>,
-    secondary_queue: Option<String>,
+    /// Java `EtomoNumber displayID = new EtomoNumber("DisplayID")`.
+    display_id: EtomoNumber,
+    /// Java `StringProperty factoryID = new StringProperty("FactoryID")`.
+    factory_id: StringProperty,
+    /// Java `StringProperty subProcessName`.
+    sub_process_name: StringProperty,
+    /// Java `StringProperty subDirName`.
+    sub_dir_name: StringProperty,
+    /// Java `StringProperty hostName`.
+    host_name: StringProperty,
+    /// Java `StringProperty lastProcess`.
+    last_process: StringProperty,
+    /// Java `StringProperty secondaryQueue`.
+    secondary_queue: StringProperty,
     axis_id: AxisID,
     process_data_prepend: String,
     /// Java final `manager`.  Managers are process-lifetime objects in both
@@ -50,21 +63,22 @@ pub struct ProcessData {
     manager: Option<&'static dyn BaseManager>,
     pid: Option<String>,
     group_pid: Option<String>,
-    /// Java `Time`; its serialized source representation is retained verbatim.
-    start_time: Option<String>,
+    /// Java `Time startTime`.
+    start_time: Option<Time>,
     process_name: Option<ProcessName>,
     do_not_load: bool,
-    /// Java `OSType`; its serialized value is retained verbatim.
-    os_type: Option<String>,
+    /// Java `OSType osType`.
+    os_type: Option<OSType>,
     ssh_failed: bool,
     computer_map: Option<BTreeMap<String, String>>,
     /// Java `ProcessingMethod`.
     processing_method: Option<ProcessingMethod>,
     dialog_type: Option<DialogType>,
-    /// Java `DebugLevel`.
-    debug: Option<DebugLevel>,
+    /// Java `debug = EtomoDirector.INSTANCE.getArguments().getDebugLevel()`.
+    debug: DebugLevel,
     line_number: i32,
-    num_done: i32,
+    /// Java `EtomoNumber numDone = new EtomoNumber("NumDone")`.
+    num_done: EtomoNumber,
     chunk_map: Option<BTreeMap<i32, Chunk>>,
 }
 
@@ -75,14 +89,19 @@ impl ProcessData {
             Some(AxisID::Only) | None => AxisID::First,
             Some(axis) => axis,
         };
+        // `displayID.setDisplayValue(-1)`, `numDone.setDisplayValue(0)`.
+        let mut display_id = EtomoNumber::new_with_name("DisplayID");
+        display_id.set_display_value_int(-1);
+        let mut num_done = EtomoNumber::new_with_name("NumDone");
+        num_done.set_display_value_int(0);
         Self {
-            display_id: -1,
-            factory_id: None,
-            sub_process_name: None,
-            sub_dir_name: None,
-            host_name: None,
-            last_process: None,
-            secondary_queue: None,
+            display_id,
+            factory_id: StringProperty::new_with_key(Some("FactoryID")),
+            sub_process_name: StringProperty::new_with_key(Some("SubProcessName")),
+            sub_dir_name: StringProperty::new_with_key(Some("SubDirName")),
+            host_name: StringProperty::new_with_key(Some("HostName")),
+            last_process: StringProperty::new_with_key(Some("LastProcess")),
+            secondary_queue: StringProperty::new_with_key(Some("SecondaryQueue")),
             axis_id,
             process_data_prepend: format!("ProcessData.{}", axis_id.get_extension()),
             manager,
@@ -96,36 +115,66 @@ impl ProcessData {
             computer_map: None,
             processing_method: None,
             dialog_type: None,
-            debug: None,
+            debug: etomo_director::ARGUMENTS.lock().unwrap().get_debug_level(),
             line_number: LINE_NUMBER_DEFAULT,
-            num_done: 0,
+            num_done,
             chunk_map: None,
         }
     }
 
-    /// Java static `getManagedInstance`.  Host/OS discovery has unavailable Network and
-    /// OSType dependencies, but its managed/load invariant and fixed process name hold.
+    /// Java static `getManagedInstance`.  Get an instance of ProcessData which is
+    /// associated with a process managed by Etomo.  It cannot be loaded from the param
+    /// file.  This instance will have a fixed process name, and a host name and OS taken
+    /// from the current computer.
     pub fn get_managed_instance(
         axis_id: Option<AxisID>,
         manager: Option<&'static dyn BaseManager>,
         process_name: Option<ProcessName>,
     ) -> Self {
-        let mut data = Self::new(axis_id, manager);
-        data.process_name = process_name;
-        data.do_not_load = true;
-        data
+        let mut process_data = Self::new(axis_id, manager);
+        process_data.process_name = process_name;
+        // `processData.hostName.set(Network.getLocalHostName(manager, axisID,
+        // manager.getPropertyUserDir()))`; every caller passes its manager.
+        if let Some(manager) = manager {
+            let host_name = Network::get_local_host_name(
+                manager,
+                axis_id.unwrap_or(AxisID::Only),
+                manager.get_property_user_dir().as_deref(),
+            );
+            process_data.host_name.set(host_name.as_deref());
+        }
+        process_data.os_type = Some(OSType::get_instance());
+        process_data.do_not_load = true;
+        process_data
     }
     /// Java package-private `dumpState`.
+    ///
+    /// `computerMap.toString()` lists a Java `HashMap`, in Java's order
+    /// (`JavaHashMap`).  The map is kept as a `BTreeMap` here, so two computers that
+    /// share a `HashMap` bucket are listed in key order, where Java lists them in the
+    /// order they were put (the processchunks machine list, or the `Properties`
+    /// order of the data file's keys on a reconnect).
     pub fn dump_state(&self) {
         eprintln!(
-            "[processDataPrepend:{},pid:{:?},\ngroupPid:{:?},doNotLoad:{},sshFailed:{},computerMap:{:?}]",
+            "[processDataPrepend:{},pid:{},\ngroupPid:{},doNotLoad:{},sshFailed:{},computerMap:",
             self.process_data_prepend,
-            self.pid,
-            self.group_pid,
+            self.pid.as_deref().unwrap_or("null"),
+            self.group_pid.as_deref().unwrap_or("null"),
             self.do_not_load,
-            self.ssh_failed,
-            self.computer_map
+            self.ssh_failed
         );
+        if let Some(computer_map) = &self.computer_map {
+            // Every Java computerMap is a `new HashMap<String, String>()` filled
+            // by `put`.
+            let mut java_map: JavaHashMap<String, String> = JavaHashMap::new();
+            for (key, value) in computer_map {
+                java_map.insert(key.clone(), value.clone());
+            }
+            eprintln!(
+                "{}",
+                java_map.to_java_string(|key| key.clone(), |value| value.clone())
+            );
+        }
         self.print_chunk_map();
     }
     /// Java `toString`.
@@ -136,14 +185,14 @@ impl ProcessData {
             self.pid,
             self.group_pid,
             self.start_time,
-            self.sub_process_name,
-            self.sub_dir_name,
-            self.host_name,
+            self.sub_process_name.to_string_option(),
+            self.sub_dir_name.to_string_option(),
+            self.host_name.to_string_option(),
             self.os_type,
-            self.display_id,
-            self.factory_id,
+            self.display_id.to_string(),
+            self.factory_id.to_string_option(),
             self.dialog_type,
-            self.last_process,
+            self.last_process.to_string_option(),
             self.processing_method
         )
     }
@@ -155,8 +204,10 @@ impl ProcessData {
         >,
     ) {
         if let Some(process_result_display) = process_result_display {
-            self.display_id = process_result_display.get_display_id();
-            self.factory_id = process_result_display.get_factory_id();
+            self.display_id
+                .set_int(process_result_display.get_display_id());
+            self.factory_id
+                .set(process_result_display.get_factory_id().as_deref());
         }
     }
     /// Java package-private `setDialogType`.
@@ -176,90 +227,68 @@ impl ProcessData {
         if process_series.will_process_list_be_dropped() && resumable {
             eprintln!("WARNING:  Not compatible with ProcessSeries.processList.");
         }
-        self.last_process = process_series.get_last_process();
+        self.last_process
+            .set(process_series.get_last_process().as_deref());
     }
     /// Java `getLastProcess`.
     pub fn get_last_process(&self) -> Option<String> {
-        self.last_process.clone().filter(|s| !s.is_empty())
+        if self.last_process.is_empty() {
+            return None;
+        }
+        self.last_process.to_string_option()
     }
     /// Java `getSecondaryQueue`.
     pub fn get_secondary_queue(&self) -> Option<String> {
-        self.secondary_queue.clone().filter(|s| !s.is_empty())
+        if self.secondary_queue.is_empty() {
+            return None;
+        }
+        self.secondary_queue.to_string_option()
     }
     /// Java package-private `setSubProcessName`.
     pub fn set_sub_process_name(&mut self, input: Option<&str>) {
-        self.sub_process_name = input.filter(|s| !s.trim().is_empty()).map(str::to_owned);
+        self.sub_process_name.set(input);
     }
     /// Java package-private `setSubDirName`.
     pub fn set_sub_dir_name(&mut self, input: Option<&str>) {
-        self.sub_dir_name = input.filter(|s| !s.trim().is_empty()).map(str::to_owned);
+        self.sub_dir_name.set(input);
     }
     /// Java `isEmpty`.
     pub fn is_empty(&self) -> bool {
         self.pid.is_none() || self.group_pid.is_none() || self.start_time.is_none()
     }
-    /// Java `isRunning`; local process records use the OS PID probe while
-    /// remote-host records remain unavailable until the SSH process runner lands.
-    pub fn is_running(&self) -> bool {
-        if self.is_empty() || self.is_on_different_host() {
+    /// Java `isRunning`.  Look for the process data in the ps output.  Returns true if
+    /// the process data is found in the ps output, false if the process data is not
+    /// found or this instance is empty.
+    pub fn is_running(&mut self) -> bool {
+        if self.is_empty() {
             return false;
         }
-        let Some(pid) = self.pid.as_deref().and_then(|pid| pid.parse::<i32>().ok()) else {
+        let pid = self.pid.clone();
+        let Some(mut param) = self.run_ps(pid.as_deref()) else {
             return false;
         };
-        #[cfg(unix)]
-        unsafe {
-            // `kill(pid, 0)` is the POSIX query used by the Java PsParam path:
-            // EPERM still means the process exists.
-            libc::kill(pid, 0) == 0
-                || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-        }
-        #[cfg(not(unix))]
-        {
-            false
-        }
+        param.find_row_with_start_time(
+            self.pid.as_deref(),
+            self.group_pid.as_deref(),
+            self.start_time.as_ref(),
+        )
     }
-    /// Java `isOnDifferentHost`.  `Network` compares the persisted host with
-    /// the local machine before attempting a PID query.  Keep `localhost`
-    /// local for records created by the Rust runner, then use gethostname on
-    /// POSIX; a loaded nonempty name that cannot match is necessarily remote.
+    /// Java `isOnDifferentHost`.
     pub fn is_on_different_host(&self) -> bool {
-        let Some(host_name) = self
-            .host_name
-            .as_deref()
-            .filter(|name| !name.trim().is_empty())
-        else {
-            return false;
-        };
-        if host_name.eq_ignore_ascii_case("localhost")
-            || host_name == "127.0.0.1"
-            || host_name == "::1"
-        {
-            return false;
-        }
-        #[cfg(unix)]
-        {
-            let mut buffer = [0i8; 256];
-            let local = unsafe {
-                if libc::gethostname(buffer.as_mut_ptr(), buffer.len()) != 0 {
-                    return true;
-                }
-                std::ffi::CStr::from_ptr(buffer.as_ptr())
-                    .to_string_lossy()
-                    .into_owned()
+        if !self.host_name.is_empty() {
+            let Some(manager) = self.manager else {
+                return false;
             };
-            // Hostname services commonly return the short host name while a
-            // persisted record may contain its FQDN; Java Network treats these
-            // as the same local computer.
-            let local_short = local.split('.').next().unwrap_or(&local);
-            let record_short = host_name.split('.').next().unwrap_or(host_name);
-            !host_name.eq_ignore_ascii_case(&local)
-                && !record_short.eq_ignore_ascii_case(local_short)
+            return !self.host_name.equals(
+                Network::get_local_host_name(
+                    manager,
+                    self.axis_id,
+                    manager.get_property_user_dir().as_deref(),
+                )
+                .as_deref(),
+            );
         }
-        #[cfg(not(unix))]
-        {
-            true
-        }
+        false
     }
     /// Java `isSshFailed`.
     pub fn is_ssh_failed(&self) -> bool {
@@ -271,76 +300,72 @@ impl ProcessData {
     }
     /// Java package-private `setSecondaryQueue`.
     pub fn set_secondary_queue(&mut self, secondary_queue: Option<&str>) {
-        self.secondary_queue = secondary_queue
-            .filter(|s| !s.trim().is_empty())
-            .map(str::to_owned);
+        self.secondary_queue.set(secondary_queue);
     }
     /// Java `setProcessingMethod`.
     pub fn set_processing_method(&mut self, processing_method: Option<ProcessingMethod>) {
         self.processing_method = processing_method;
     }
-    /// Java package-private `setPid`, retaining a local PID/provenance record.
+    /// Java package-private `setPid`.  Use the pid to get the process data from the ps
+    /// output.
     pub fn set_pid(&mut self, pid: Option<&str>) {
         self.pid = None;
         self.group_pid = None;
         self.start_time = None;
-        if let Some(pid) = pid.filter(|pid| !pid.trim().is_empty()) {
-            if let Some(record) = self.run_ps(Some(pid)) {
-                self.pid = Some(record.pid);
-                self.group_pid = Some(record.group_pid);
-                self.start_time = Some(record.start_time);
-            }
+        let Some(pid) = pid else {
+            return;
+        };
+        // `pid.matches("\\s*+")`
+        if pid.chars().all(char::is_whitespace) {
+            return;
+        }
+        let Some(mut param) = self.run_ps(Some(pid)) else {
+            return;
+        };
+        let mut row = param.get_row();
+        if row.find(Some(pid)) {
+            self.pid = Some(pid.to_owned());
+            self.group_pid = row.get_group_pid();
+            self.start_time = row.get_start_time();
         }
     }
-    /// Register a child launched by the typed Rust `SystemProgram` path.
-    pub fn set_local_process(&mut self, pid: u32, process_name: Option<ProcessName>) {
-        self.set_pid(Some(&pid.to_string()));
-        self.process_name = process_name;
-        self.host_name = Some("localhost".to_owned());
-        self.os_type = Some(std::env::consts::OS.to_owned());
-    }
-    /// Java private `runPs`.  The translated local process runner uses the
-    /// same PID query instead of manufacturing process-group/start metadata.
-    /// Remote records remain a deliberate SSH-runner frontier.
-    pub fn run_ps(&mut self, pid: Option<&str>) -> Option<PsRecord> {
-        let pid = pid?.trim();
-        if pid.is_empty() || self.is_on_different_host() {
-            self.ssh_failed = self.is_on_different_host();
-            return None;
+    /// Java private `runPs`.  Run ps.  Use the -p pid option.
+    ///
+    /// Java dereferences `manager` for the property user directory; every
+    /// instance that reaches here was built with one.  Without one there is no
+    /// `ps` to run and `None` stands for the missing row.
+    pub fn run_ps(&mut self, pid: Option<&str>) -> Option<PsParam> {
+        if self.debug.is_verbose() {
+            eprintln!("ProcessData.runPs");
         }
-        #[cfg(unix)]
-        {
-            if self.debug.is_some_and(DebugLevel::is_verbose) {
-                eprintln!("ProcessData.runPs");
-            }
-            let output = std::process::Command::new("ps")
-                .args(["-o", "pid=", "-o", "pgid=", "-o", "lstart=", "-p", pid])
-                .output();
-            let Ok(output) = output else {
-                self.ssh_failed = true;
-                return None;
-            };
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            self.ssh_failed = stdout.trim().is_empty();
-            let mut fields = stdout.split_whitespace();
-            let actual_pid = fields.next()?;
-            let group_pid = fields.next()?;
-            let start_time = fields.collect::<Vec<_>>().join(" ");
-            if actual_pid != pid || start_time.is_empty() {
-                return None;
-            }
-            Some(PsRecord {
-                pid: actual_pid.to_owned(),
-                group_pid: group_pid.to_owned(),
-                start_time,
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = pid;
-            self.ssh_failed = true;
-            None
-        }
+        let manager = self.manager?;
+        // `osType` is null only for an instance loaded without an OS entry, which
+        // `OSType.getInstance(props, prepend)` never leaves; Linux is its default.
+        let mut param = PsParam::new(
+            manager,
+            self.axis_id,
+            pid,
+            self.os_type.unwrap_or(os_type::DEFAULT),
+            // `hostName.toString()`: "" when empty.
+            self.host_name.to_string_option().as_deref(),
+            false,
+        );
+        let ps = SystemProgram::new_array(
+            Some(manager),
+            manager.get_property_user_dir(),
+            Some(param.get_command_array().clone()),
+            self.axis_id,
+        );
+        ps.run();
+        let stdout = ps.get_std_output();
+        // Ps should always return something - usually as header, but on Mac it will
+        // return a bunch of result lines because we are not using the -p pid option.
+        self.ssh_failed = match &stdout {
+            None => true,
+            Some(stdout) => stdout.is_empty(),
+        };
+        param.set_output(stdout.map(|stdout| stdout.into_iter().map(Some).collect()));
+        Some(param)
     }
     /// Java `store(Properties)`.
     pub fn store_properties(&self, properties: &mut BTreeMap<String, String>) {
@@ -355,24 +380,27 @@ impl ProcessData {
         self.process_name
     }
     /// Java package-private `getSubProcessName`.
+    /// `subProcessName.toString()`: "" when empty.
     pub fn get_sub_process_name(&self) -> Option<String> {
-        self.sub_process_name.clone()
+        self.sub_process_name.to_string_option()
     }
-    /// Java package-private `getSubDirName` (ConstStringProperty represented by value).
+    /// Java package-private `getSubDirName`: the `ConstStringProperty`, here its
+    /// `toString()` ("" when empty).
     pub fn get_sub_dir_name(&self) -> Option<String> {
-        self.sub_dir_name.clone()
+        self.sub_dir_name.to_string_option()
     }
-    /// Java `getDisplayID`.
+    /// Java `getDisplayID`: `displayID.getInt()` (-1, the display value, when
+    /// not set).
     pub fn get_display_id(&self) -> i32 {
-        self.display_id
+        self.display_id.get_int()
     }
-    /// Java `getFactoryID`.
+    /// Java `getFactoryID`: `factoryID.toString()`, "" when empty.
     pub fn get_factory_id(&self) -> Option<String> {
-        self.factory_id.clone()
+        self.factory_id.to_string_option()
     }
-    /// Java `getHostName`.
+    /// Java `getHostName`: `hostName.toString()`.
     pub fn get_host_name(&self) -> String {
-        self.host_name.clone().unwrap_or_default()
+        self.host_name.to_string_option().unwrap_or_default()
     }
     /// Java package-private `getComputerMap`.
     pub fn get_computer_map(&self) -> Option<&BTreeMap<String, String>> {
@@ -416,7 +444,7 @@ impl ProcessData {
     }
     /// Java package-private `resetNumDone`.
     pub fn reset_num_done(&mut self) {
-        self.num_done = 0;
+        self.num_done.reset();
     }
     /// Java package-private `gtLineNumber(int)`.
     pub fn gt_line_number(&self, input: i32) -> bool {
@@ -451,7 +479,7 @@ impl ProcessData {
     }
     /// Java package-private `getNumDone`.
     pub fn get_num_done(&self) -> i32 {
-        self.num_done
+        self.num_done.get_int()
     }
     /// Java package-private `incrementLineNumber()`.
     pub fn increment_line_number(&mut self) {
@@ -468,12 +496,37 @@ impl ProcessData {
             .increment_line_number();
     }
     /// Java package-private `printChunkMap`.
+    ///
+    /// Upstream bug fixed in translation (ProcessData.java:552-565): `entryFound` is
+    /// never set and `entryFound ? "," : "" + entry.getValue()` binds the `+` inside
+    /// the conditional, so Java prints the line numbers run together and then
+    /// "null" as if the map were empty.  Here the values are separated by "," and
+    /// "null" is printed only for an empty map, as the code evidently intends.
     pub fn print_chunk_map(&self) {
-        eprintln!("chunkMap:{:?}", self.chunk_map);
+        let Some(chunk_map) = &self.chunk_map else {
+            eprintln!("chunkMap:null");
+            return;
+        };
+        eprint!("chunkMap:");
+        let mut entry_found = false;
+        // A `TreeMap<Integer, Chunk>`: ascending keys.
+        for chunk in chunk_map.values() {
+            eprint!(
+                "{}{}",
+                if entry_found { "," } else { "" },
+                chunk.line_number
+            );
+            entry_found = true;
+        }
+        if !entry_found {
+            eprintln!("null");
+        } else {
+            eprintln!();
+        }
     }
     /// Java package-private `incrementNumDone`.
     pub fn increment_num_done(&mut self) {
-        self.num_done += 1;
+        self.num_done.increment();
     }
     /// Java private `storeMap`.
     pub fn store_map(
@@ -498,7 +551,7 @@ impl ProcessData {
         }
     }
     /// Java `load(Properties)`.
-    pub fn load_properties(&mut self, properties: &BTreeMap<String, String>) {
+    pub fn load_properties(&mut self, properties: &mut BTreeMap<String, String>) {
         self.load_with_prepend(properties, "");
     }
     /// Java `reset`.
@@ -507,21 +560,21 @@ impl ProcessData {
         self.group_pid = None;
         self.start_time = None;
         self.process_name = None;
-        self.sub_process_name = None;
-        self.sub_dir_name = None;
-        self.display_id = -1;
-        self.factory_id = None;
+        self.sub_process_name.reset();
+        self.sub_dir_name.reset();
+        self.display_id.reset();
+        self.factory_id.reset();
         self.os_type = None;
-        self.host_name = None;
+        self.host_name.reset();
         if let Some(map) = &mut self.computer_map {
             map.clear();
         }
         self.processing_method = None;
         self.dialog_type = None;
-        self.last_process = None;
-        self.secondary_queue = None;
+        self.last_process.reset();
+        self.secondary_queue.reset();
         self.line_number = LINE_NUMBER_DEFAULT;
-        self.num_done = 0;
+        self.num_done.reset();
         if let Some(map) = &mut self.chunk_map {
             map.clear();
         }
@@ -538,13 +591,12 @@ impl ProcessData {
         let prefix = format!("{group}{key}.");
         for (property, value) in properties {
             if property.trim().starts_with(&prefix) {
+                // `props.getProperty(enumKey, defaultString)`: the key is present,
+                // so its value (the default is never used).
+                let _ = default_string;
                 map.get_or_insert_with(BTreeMap::new).insert(
                     property[property.find(&prefix).unwrap() + prefix.len()..].to_owned(),
-                    if value.is_empty() {
-                        default_string.to_owned()
-                    } else {
-                        value.clone()
-                    },
+                    value.clone(),
                 );
             }
         }
@@ -566,91 +618,100 @@ impl StorableValue for ProcessData {
     fn store(&self, properties: &mut BTreeMap<String, String>) {
         self.store_properties(properties);
     }
+    /// Java `store(Properties, String)`.
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         let prepend = self.create_prepend(prepend);
         let group = format!("{prepend}.");
+        // Remove everything containing COMPUTER_KEY to prevent entries that
+        // where removed from computerMap from remaining in props.
         self.remove_map(properties, &group, COMPUTER_KEY);
         Chunk::remove_all(properties, &prepend);
         if self.is_empty() {
-            for key in [
-                PID_KEY,
-                GROUP_PID_KEY,
-                START_TIME_KEY,
-                PROCESS_NAME_KEY,
-                OS_TYPE_KEY,
-                LINE_NUMBER_KEY,
-            ] {
-                properties.remove(&format!("{group}{key}"));
-            }
-            for key in [
-                "DisplayID",
-                "FactoryID",
-                "SubProcessName",
-                "SubDirName",
-                "HostName",
-                "LastProcess",
-                "SecondaryQueue",
-                "NumDone",
-                "DialogType",
-                "ProcessingMethod",
-            ] {
-                properties.remove(&format!("{prepend}.{key}"));
-            }
-            return;
-        }
-        properties.insert(format!("{group}{PID_KEY}"), self.pid.clone().unwrap());
-        properties.insert(
-            format!("{group}{GROUP_PID_KEY}"),
-            self.group_pid.clone().unwrap(),
-        );
-        properties.insert(
-            format!("{group}{START_TIME_KEY}"),
-            self.start_time.clone().unwrap(),
-        );
-        if let Some(name) = self.process_name {
-            properties.insert(format!("{group}{PROCESS_NAME_KEY}"), name.to_string());
-        } else {
+            // Remove everything if no process was added to processData.
+            properties.remove(&format!("{group}{PID_KEY}"));
+            properties.remove(&format!("{group}{GROUP_PID_KEY}"));
+            properties.remove(&format!("{group}{START_TIME_KEY}"));
             properties.remove(&format!("{group}{PROCESS_NAME_KEY}"));
-        }
-        properties.insert(format!("{prepend}.DisplayID"), self.display_id.to_string());
-        for (key, value) in [
-            ("FactoryID", &self.factory_id),
-            ("SubProcessName", &self.sub_process_name),
-            ("SubDirName", &self.sub_dir_name),
-            ("HostName", &self.host_name),
-            ("LastProcess", &self.last_process),
-            ("SecondaryQueue", &self.secondary_queue),
-            ("OS", &self.os_type),
-        ] {
-            if let Some(value) = value {
-                properties.insert(format!("{prepend}.{key}"), value.clone());
-            } else {
-                properties.remove(&format!("{prepend}.{key}"));
+            // `ProcessingMethod.remove(props, prepend)`.
+            properties.remove(&ProcessingMethod::create_key(Some(&prepend)));
+            self.display_id
+                .remove_with_prepend(properties, Some(&prepend));
+            self.factory_id.remove(Some(properties), Some(&prepend));
+            self.sub_process_name
+                .remove(Some(properties), Some(&prepend));
+            self.sub_dir_name.remove(Some(properties), Some(&prepend));
+            self.host_name.remove(Some(properties), Some(&prepend));
+            properties.remove(&format!("{group}{}", os_type::KEY));
+            DialogType::remove(properties, &prepend);
+            self.last_process.remove(Some(properties), Some(&prepend));
+            self.secondary_queue
+                .remove(Some(properties), Some(&prepend));
+            properties.remove(&format!("{group}{LINE_NUMBER_KEY}"));
+        } else {
+            properties.insert(format!("{group}{PID_KEY}"), self.pid.clone().unwrap());
+            properties.insert(
+                format!("{group}{GROUP_PID_KEY}"),
+                self.group_pid.clone().unwrap(),
+            );
+            properties.insert(
+                format!("{group}{START_TIME_KEY}"),
+                self.start_time.as_ref().unwrap().to_string(),
+            );
+            match self.process_name {
+                None => {
+                    properties.remove(&format!("{group}{PROCESS_NAME_KEY}"));
+                }
+                Some(name) => {
+                    properties.insert(format!("{group}{PROCESS_NAME_KEY}"), name.to_string());
+                }
             }
+            ConstEtomoNumber::store_with_prepend(&self.display_id, properties, Some(&prepend));
+            self.factory_id
+                .store_with_prepend(Some(properties), Some(&prepend));
+            self.sub_process_name
+                .store_with_prepend(Some(properties), Some(&prepend));
+            self.sub_dir_name
+                .store_with_prepend(Some(properties), Some(&prepend));
+            self.host_name
+                .store_with_prepend(Some(properties), Some(&prepend));
+            // `processingMethod.store(props, prepend)` / `ProcessingMethod.remove`.
+            let processing_key = ProcessingMethod::create_key(Some(&prepend));
+            match self.processing_method {
+                None => {
+                    properties.remove(&processing_key);
+                }
+                Some(method) => {
+                    properties.insert(processing_key, method.to_string());
+                }
+            }
+            match self.os_type {
+                None => {
+                    properties.remove(&format!("{group}{}", os_type::KEY));
+                }
+                Some(os_type) => os_type.store(properties, &prepend),
+            }
+            match self.dialog_type {
+                None => DialogType::remove(properties, &prepend),
+                Some(dialog) => dialog.store_with_prepend(properties, &prepend),
+            }
+            self.last_process
+                .store_with_prepend(Some(properties), Some(&prepend));
+            self.secondary_queue
+                .store_with_prepend(Some(properties), Some(&prepend));
+            properties.insert(
+                format!("{group}{LINE_NUMBER_KEY}"),
+                self.line_number.to_string(),
+            );
+            ConstEtomoNumber::store_with_prepend(&self.num_done, properties, Some(&prepend));
+            // Store everything in computerMap in props.
+            self.store_map(properties, &group, self.computer_map.as_ref(), COMPUTER_KEY);
+            self.store_chunk_map(properties, &prepend);
         }
-        if let Some(dialog) = self.dialog_type {
-            dialog.store_with_prepend(properties, &prepend);
-        } else {
-            properties.remove(&format!("{prepend}.DialogType"));
-        }
-        let processing_key = ProcessingMethod::create_key(Some(&prepend));
-        if let Some(method) = self.processing_method {
-            properties.insert(processing_key, method.to_string());
-        } else {
-            properties.remove(&processing_key);
-        }
-        properties.insert(
-            format!("{group}{LINE_NUMBER_KEY}"),
-            self.line_number.to_string(),
-        );
-        properties.insert(format!("{prepend}.NumDone"), self.num_done.to_string());
-        self.store_map(properties, &group, self.computer_map.as_ref(), COMPUTER_KEY);
-        self.store_chunk_map(properties, &prepend);
     }
-    fn load(&mut self, properties: &BTreeMap<String, String>) {
+    fn load(&mut self, properties: &mut BTreeMap<String, String>) {
         self.load_properties(properties);
     }
-    fn load_with_prepend(&mut self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         assert!(
             !self.do_not_load,
             "Trying to load into into thread data that belongs to a managed process."
@@ -660,39 +721,44 @@ impl StorableValue for ProcessData {
         let group = format!("{prepend}.");
         self.pid = properties.get(&format!("{group}{PID_KEY}")).cloned();
         self.group_pid = properties.get(&format!("{group}{GROUP_PID_KEY}")).cloned();
-        self.start_time = properties.get(&format!("{group}{START_TIME_KEY}")).cloned();
+        self.start_time = properties
+            .get(&format!("{group}{START_TIME_KEY}"))
+            .map(|start_time| Time::new(start_time));
         self.process_name = properties
             .get(&format!("{group}{PROCESS_NAME_KEY}"))
             .and_then(|s| ProcessName::get_instance_with_axis(s, self.axis_id));
-        self.display_id = properties
-            .get(&format!("{prepend}.DisplayID"))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(-1);
-        self.factory_id = properties.get(&format!("{prepend}.FactoryID")).cloned();
-        self.sub_process_name = properties
-            .get(&format!("{prepend}.SubProcessName"))
-            .cloned();
-        self.sub_dir_name = properties.get(&format!("{prepend}.SubDirName")).cloned();
-        self.host_name = properties.get(&format!("{prepend}.HostName")).cloned();
-        self.last_process = properties.get(&format!("{prepend}.LastProcess")).cloned();
-        self.secondary_queue = properties
-            .get(&format!("{prepend}.SecondaryQueue"))
-            .cloned();
-        self.os_type = properties.get(&format!("{prepend}.OS")).cloned();
-        self.dialog_type = DialogType::load(properties, &prepend);
+        // The `StringProperty` loads take a mutable `Properties` (they drop a
+        // backward-compatible key, which none of these has).
+        let mut props = properties.clone();
+        self.sub_process_name
+            .load_with_prepend(Some(&mut props), Some(&prepend));
+        self.sub_dir_name
+            .load_with_prepend(Some(&mut props), Some(&prepend));
+        self.display_id
+            .load_with_prepend(properties, Some(&prepend));
+        self.factory_id
+            .load_with_prepend(Some(&mut props), Some(&prepend));
+        self.host_name
+            .load_with_prepend(Some(&mut props), Some(&prepend));
         self.processing_method = ProcessingMethod::get_instance(
             properties
                 .get(&ProcessingMethod::create_key(Some(&prepend)))
                 .map(String::as_str),
         );
-        self.line_number = properties
-            .get(&format!("{prepend}.{LINE_NUMBER_KEY}"))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(LINE_NUMBER_DEFAULT);
-        self.num_done = properties
-            .get(&format!("{prepend}.NumDone"))
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(0);
+        self.os_type = Some(OSType::get_instance_from_props(properties, &prepend));
+        self.dialog_type = DialogType::load(properties, &prepend);
+        self.last_process
+            .load_with_prepend(Some(&mut props), Some(&prepend));
+        self.secondary_queue
+            .load_with_prepend(Some(&mut props), Some(&prepend));
+        let mut et_line_number = EtomoNumber::new_with_name(LINE_NUMBER_KEY);
+        et_line_number.load_with_prepend(properties, Some(&prepend));
+        self.num_done.load_with_prepend(properties, Some(&prepend));
+        if et_line_number.is_null() {
+            self.line_number = LINE_NUMBER_DEFAULT;
+        } else {
+            self.line_number = et_line_number.get_int();
+        }
         let computer_map = self.computer_map.take();
         self.computer_map = self.load_map(properties, &group, computer_map, COMPUTER_KEY, "0");
         self.load_chunk_map(properties, &prepend);
@@ -776,7 +842,7 @@ mod tests {
         let mut data = ProcessData::new(Some(AxisID::First), None);
         data.pid = Some("10".into());
         data.group_pid = Some("10".into());
-        data.start_time = Some("now".into());
+        data.start_time = Some(Time::new("10:11:12"));
         data.set_sub_dir_name(Some("chunks"));
         data.set_processing_method(Some(ProcessingMethod::PpGpu));
         data.set_computer_map(Some(BTreeMap::from([("host".into(), "4".into())])));
@@ -785,7 +851,7 @@ mod tests {
         let mut props = BTreeMap::new();
         data.store(&mut props);
         let mut loaded = ProcessData::new(Some(AxisID::First), None);
-        loaded.load(&props);
+        loaded.load(&mut props);
         assert_eq!(loaded.get_sub_dir_name().as_deref(), Some("chunks"));
         assert_eq!(loaded.get_chunk_line_number(3), 2);
         assert_eq!(loaded.get_computer_map().unwrap()["host"], "4");
@@ -793,36 +859,5 @@ mod tests {
             loaded.get_processing_method(),
             Some(ProcessingMethod::PpGpu)
         );
-    }
-
-    #[test]
-    fn persisted_host_distinguishes_local_and_remote_process_records() {
-        let mut data = ProcessData::new(Some(AxisID::First), None);
-        data.host_name = Some("localhost".into());
-        assert!(!data.is_on_different_host());
-        data.host_name = Some("remote.example.invalid".into());
-        assert!(data.is_on_different_host());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn set_pid_uses_real_process_group_and_start_metadata() {
-        let mut data = ProcessData::new(Some(AxisID::First), None);
-        let pid = std::process::id().to_string();
-        data.set_pid(Some(&pid));
-        assert_eq!(data.get_pid().as_deref(), Some(pid.as_str()));
-        let mut properties = BTreeMap::new();
-        data.store_properties(&mut properties);
-        let group_pid = properties
-            .iter()
-            .find(|(key, _)| key.ends_with(".GroupPID"))
-            .map(|(_, value)| value.as_str());
-        let start_time = properties
-            .iter()
-            .find(|(key, _)| key.ends_with(".StartTime"))
-            .map(|(_, value)| value.as_str());
-        assert!(group_pid.is_some_and(|value| !value.is_empty()));
-        assert!(start_time.is_some_and(|value| value.split_whitespace().count() >= 5));
-        assert!(!data.is_ssh_failed());
     }
 }

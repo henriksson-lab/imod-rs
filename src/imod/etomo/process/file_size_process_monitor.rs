@@ -37,8 +37,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 /// The checked exceptions of Java `calcFileSize`: `InvalidParameterException`
-/// and `IOException`.  `MRCHeader.read` reports both as one message
-/// (`util/mrc_header.rs`), which arrives as `Io`.
+/// and `IOException`.
 #[derive(Debug)]
 pub enum CalcFileSizeError {
     /// `etomo.util.InvalidParameterException`.
@@ -52,6 +51,23 @@ impl std::fmt::Display for CalcFileSizeError {
         match self {
             CalcFileSizeError::InvalidParameter(e) => write!(f, "{e}"),
             CalcFileSizeError::Io(message) => write!(f, "java.io.IOException: {message}"),
+        }
+    }
+}
+
+/// `MRCHeader.read` throws `IOException` and `etomo.util.InvalidParameterException`;
+/// its unchecked `NumberFormatException` (a header whose size is not a number) is
+/// taken as the `IOException` arm, which fails the monitor.
+impl From<crate::imod::etomo::util::mrc_header::ReadError> for CalcFileSizeError {
+    fn from(e: crate::imod::etomo::util::mrc_header::ReadError) -> CalcFileSizeError {
+        match e {
+            crate::imod::etomo::util::mrc_header::ReadError::InvalidParameter(message) => {
+                CalcFileSizeError::InvalidParameter(InvalidParameterException::new(&message))
+            }
+            crate::imod::etomo::util::mrc_header::ReadError::Io(message)
+            | crate::imod::etomo::util::mrc_header::ReadError::NumberFormat(message) => {
+                CalcFileSizeError::Io(message)
+            }
         }
     }
 }
@@ -138,10 +154,7 @@ pub struct FileSizeProcessMonitor {
     /// Java field `findWatchedFileName`.
     find_watched_file_name: AtomicBool,
     /// Java field `messageReporter`.
-    // TODO(unit): needs etomo/process/MessageReporter.java - the reporter
-    // `useMessageReporter` creates (`new MessageReporter(axisID, logFile)`) and
-    // the loop's `checkForMessages(manager)`/`close()`; until then it stays null.
-    message_reporter: Mutex<Option<Infallible>>,
+    message_reporter: Mutex<Option<super::message_reporter::MessageReporter>>,
     /// Java field `gotStatusFromLog`.
     got_status_from_log: AtomicBool,
     /// Java field `fileWriting`.
@@ -267,9 +280,13 @@ impl FileSizeProcessMonitor {
 
     /// Java `useMessageReporter`.
     pub fn use_message_reporter(&self) {
-        // TODO(unit): needs etomo/process/MessageReporter.java -
-        // `messageReporter = new MessageReporter(axisID, logFile)`.
-        let _ = &self.message_reporter;
+        // Java hands a null `logFile` (the constructor could not create it) to the
+        // reporter, whose first read then throws NullPointerException in the
+        // monitor thread; without a log file there is no reporter here.
+        *self.message_reporter.lock().unwrap() = self
+            .log_file
+            .clone()
+            .map(|log_file| super::message_reporter::MessageReporter::new(self.axis_id, log_file));
     }
 
     /// Java final `stop`.
@@ -406,8 +423,9 @@ impl FileSizeProcessMonitor {
     pub fn close_open_files(&self) {
         self.close_channel();
         self.close_log_file_reader();
-        // TODO(unit): needs etomo/process/MessageReporter.java -
-        // `if (messageReporter != null) messageReporter.close()`.
+        if let Some(message_reporter) = self.message_reporter.lock().unwrap().as_mut() {
+            message_reporter.close();
+        }
     }
 
     /// Java final `setFindWatchedFileName`.
@@ -687,16 +705,22 @@ impl<S: ?Sized + FileSizeProcessMonitorImpl> FileSizeProcessMonitorOf<S> {
                     }
                     let i_current_length = i_current_length.unwrap();
                     base.manager.post_main_panel(Box::new(move |panel| {
-                        panel.set_progress_bar_value_int_string_axis_id(i_current_length, Some(&message), axis_id);
+                        panel.set_progress_bar_value_int_string_axis_id(
+                            i_current_length,
+                            Some(&message),
+                            axis_id,
+                        );
                     }));
                 }
             }
             monitor_tool_kit::sleep(&base.interrupted, base.update_period())?;
-            // TODO(unit): needs etomo/process/MessageReporter.java -
-            // `if (messageReporter != null) messageReporter.checkForMessages(manager)`.
+            if let Some(message_reporter) = base.message_reporter.lock().unwrap().as_mut() {
+                message_reporter.check_for_messages(base.manager);
+            }
         }
-        // TODO(unit): needs etomo/process/MessageReporter.java -
-        // `if (messageReporter != null) messageReporter.close()`.
+        if let Some(message_reporter) = base.message_reporter.lock().unwrap().as_mut() {
+            message_reporter.close();
+        }
         base.close_open_files();
         Ok(())
     }

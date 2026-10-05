@@ -1,23 +1,22 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/ReferenceParent.java`.
-#![allow(dead_code)]
+//!
+//! The implementor (`PeetDialog`) is an event dispatch thread object reached through
+//! `Rc`, so the methods take `&self`.
 
 use super::file_text_field_interface::FileTextFieldInterface;
 
-/// Java `ReferenceParent`.
+/// Java package-private `interface ReferenceParent`.
 pub trait ReferenceParent {
     /// Java `fixIncorrectPath(FileTextFieldInterface, boolean)`.
-    fn fix_incorrect_path(
-        &mut self,
-        file_text_field: &mut dyn FileTextFieldInterface,
-        choose_path: bool,
-    ) -> bool;
+    fn fix_incorrect_path(&self, file_text_field: &dyn FileTextFieldInterface, choose_path: bool)
+    -> bool;
 
-    /// Java `getVolumeTableSize`.
+    /// Java `getVolumeTableSize()`.
     fn get_volume_table_size(&self) -> i32;
 
     /// Java `updateDisplay(boolean)`.
-    fn update_display(&mut self, init: bool);
+    fn update_display(&self, init: bool);
 
-    /// Java `isFlgVolNamesAreTemplates`.
+    /// Java `isFlgVolNamesAreTemplates()`.
     fn is_flg_vol_names_are_templates(&self) -> bool;
 }

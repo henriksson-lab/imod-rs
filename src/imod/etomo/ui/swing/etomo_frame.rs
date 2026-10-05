@@ -9,9 +9,6 @@
 //! to `SubFrame`; they are EDT-confined `thread_local!`s holding the concrete
 //! types here, and [`get_other_frame`](EtomoFrame::get_other_frame) /
 //! `getFrame` hand them out as `Rc<dyn EtomoFrameVirtual>`.
-//!
-//! Java `etomo.type.FrameType` is defined here as well
-//! (`type/user_configuration.rs` imports it from this module).
 
 use std::cell::{Cell, RefCell};
 use std::ops::Deref;
@@ -33,26 +30,8 @@ use crate::imod::etomo::storage::data_file_filter::DataFileFilter;
 use crate::imod::etomo::storage::log_file::LogFileError;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
+use crate::imod::etomo::r#type::frame_type::FrameType;
 use crate::imod::etomo::ui::ui_component::UIComponent;
-
-/// Java `etomo.type.FrameType` (`Main`, `Sub`).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FrameType {
-    /// Java `FrameType.Main`.
-    Main,
-    /// Java `FrameType.Sub`.
-    Sub,
-}
-
-impl std::fmt::Display for FrameType {
-    /// Java `toString()`.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameType::Main => f.write_str("Main"),
-            FrameType::Sub => f.write_str("Sub"),
-        }
-    }
-}
 
 thread_local! {
     /// Java package-private static `EtomoFrame mainFrame = null`.
@@ -263,10 +242,9 @@ impl EtomoFrame {
             } else if menu.equals_new_batch_run_tomo(event) {
                 let _ = etomo_director::INSTANCE.open_batch_run_tomo_boolean_axis_id(true, axis_id);
             } else if menu.equals_new_peet(event) {
-                // TODO(unit): needs etomo/PeetManager.java - `if
-                // (PeetManager.isInterfaceAvailable())
-                // EtomoDirector.INSTANCE.openPeet(true, axisID)`.  Without the
-                // availability check the PEET manager is not opened.
+                if crate::imod::etomo::peet_manager::PeetManager::is_interface_available() {
+                    let _ = etomo_director::INSTANCE.open_peet_boolean_axis_id(true, axis_id);
+                }
             } else if menu.equals_new_serial_sections(event) {
                 let _ =
                     etomo_director::INSTANCE.open_serial_sections_boolean_axis_id(true, axis_id);

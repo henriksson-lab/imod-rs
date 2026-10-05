@@ -456,9 +456,10 @@ impl TomogramPositioningDialog {
         // Mouse adapter for context menu
         let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
         let mouse_adapter: Rc<dyn MouseListener> = GenericMouseAdapter::new(context_menu);
-        // Swing events: rootPanel.addMouseListener(mouseAdapter) - mouse events are
-        // not modelled by the Swing stand-in (jdk.rs).
-        let _ = mouse_adapter;
+        self.base
+            .root_panel
+            .get_component()
+            .add_mouse_listener(mouse_adapter);
     }
 
     /// Java `setImageRotation(String)` (TomogramPositioningDialog.java:554).

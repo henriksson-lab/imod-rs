@@ -7,7 +7,3 @@ pub trait FlattenWarpDisplay {
     /// Java `getParameters(FlattenWarpParam, boolean)`.
     fn get_parameters(&self, param: &mut FlattenWarpParam, do_validation: bool) -> bool;
 }
-
-// TODO(unit): SmoothingAssessmentPanel.java implements FlattenWarpDisplay (the
-// Rust tree had it on `FlattenVolumePanel` through a boundary param); the impl
-// waits for a faithful panel translation.

@@ -35,6 +35,9 @@ use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::comscript::makecomfile_param::MakecomfileParam;
 use crate::imod::etomo::comscript::processchunks_param::OutputImageFileKey;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::plugin::plugin_factory::PluginFactory;
+use crate::imod::etomo::plugin::tomo_gen_method_plugin::TomoGenMethodPlugin;
 use crate::imod::etomo::process::base_process_manager::BaseProcessManager;
 use crate::imod::etomo::process::imod_manager;
 use crate::imod::etomo::process_series::{Process, ProcessSeriesHandle};
@@ -47,6 +50,7 @@ use crate::imod::etomo::r#type::process_track::ProcessTrack;
 use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
 use crate::imod::etomo::r#type::tomogram_state::TomogramState;
 use crate::imod::etomo::r#type::view_type::ViewType;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 use crate::imod::etomo::util::utilities;
 
 /// Java `public static final String SIRT_DONE`.
@@ -69,10 +73,8 @@ pub struct TomogramGenerationExpert {
     /// Java private `getBinningFromNewst`, initialised to true (never read in
     /// the Java).
     get_binning_from_newst: Cell<bool>,
-    // TODO(unit): needs etomo/plugin/TomoGenMethodPlugin.java and
-    // etomo/plugin/PluginFactory.java - Java private `methodPlugin`,
-    // initialised to null.  With no plugin loader translated it stays null,
-    // and every `methodPlugin != null` branch below takes its null path.
+    /// Java private `methodPlugin`, initialised to null.
+    method_plugin: RefCell<Option<Rc<dyn TomoGenMethodPlugin>>>,
 }
 
 impl Deref for TomogramGenerationExpert {
@@ -87,7 +89,7 @@ impl TomogramGenerationExpert {
     /// ProcessTrack, AxisID)`.
     pub fn new(
         manager: &'static ApplicationManager,
-        main_panel: Rc<MainTomogramPanel>,
+        main_panel: Option<Rc<MainTomogramPanel>>,
         process_track: Option<&'static ProcessTrack>,
         axis_id: AxisID,
     ) -> Rc<TomogramGenerationExpert> {
@@ -108,6 +110,7 @@ impl TomogramGenerationExpert {
             dialog: RefCell::new(None),
             advanced: Cell::new(false),
             get_binning_from_newst: Cell::new(true),
+            method_plugin: RefCell::new(None),
         });
         let this: Weak<dyn ReconUIExpertVirtual> =
             Rc::downgrade(&instance) as Weak<dyn ReconUIExpertVirtual>;
@@ -328,8 +331,10 @@ impl ReconUIExpertVirtual for TomogramGenerationExpert {
         let sirtsetup_display = dialog.get_sirtsetup_display();
         self.manager
             .update_sirt_setup_com(self.axis_id, &*sirtsetup_display, false);
-        // methodPlugin is null (see the struct docs): methodPlugin.save() is not
-        // reached.
+        let method_plugin = self.method_plugin.borrow().clone();
+        if let Some(method_plugin) = method_plugin {
+            method_plugin.save();
+        }
         self.manager.save_storables(Some(self.axis_id));
     }
 
@@ -365,16 +370,36 @@ impl UIExpert for TomogramGenerationExpert {
             Some("TomogramGenerationDialog"),
             Some(utilities::STARTED_STATUS),
         );
-        // TODO(unit): needs etomo/plugin/PluginFactory.java and
-        // etomo/plugin/TomoGenMethodPlugin.java - `if (methodPlugin == null)`
-        // loads `PluginFactory.loadDemoPlugin(manager.getMainPanel())` when
-        // `EtomoDirector.INSTANCE.getArguments().isPlugin()`, otherwise
-        // `PluginFactory.loadTomoGenMethodPlugin(manager.getMainPanel())`, and
-        // when a plugin loads calls `methodPlugin.init(manager, axisID,
-        // manager.getBaseMetaData().getAxisType(), dialogType)` and
-        // `methodPlugin.initTomoGenMethod(manager, this)`.  With no loader
-        // translated the plugin stays null.
-        let dialog = TomogramGenerationDialog::get_instance(manager, self.this.clone(), axis_id);
+        if self.method_plugin.borrow().is_none() {
+            let main_panel = manager.get_main_panel();
+            let ui_component: Option<&dyn UIComponent> = main_panel
+                .as_ref()
+                .map(|main_panel| &**main_panel.main_panel() as &dyn UIComponent);
+            let method_plugin = if etomo_director::ARGUMENTS.lock().unwrap().is_plugin() {
+                PluginFactory::load_demo_plugin(ui_component)
+            } else {
+                PluginFactory::load_tomo_gen_method_plugin(ui_component)
+            };
+            if let Some(method_plugin) = &method_plugin {
+                method_plugin.init(
+                    manager,
+                    Some(axis_id),
+                    manager
+                        .get_base_meta_data()
+                        .map(|meta_data| meta_data.base().get_axis_type()),
+                    Some(self.dialog_type),
+                );
+                method_plugin.init_tomo_gen_method(manager, self.this.clone());
+            }
+            *self.method_plugin.borrow_mut() = method_plugin;
+        }
+        let method_plugin = self.method_plugin.borrow().clone();
+        let dialog = TomogramGenerationDialog::get_instance(
+            manager,
+            self.this.clone(),
+            axis_id,
+            method_plugin.as_ref(),
+        );
         *self.dialog.borrow_mut() = Some(dialog.clone());
         utilities::timestamp_process_container_status(
             Some("new"),
@@ -398,7 +423,9 @@ impl UIExpert for TomogramGenerationExpert {
             .get_com_script_manager()
             .get_sirtsetup_param(axis_id);
         self.set_parameters_sirtsetup_param(&sirtsetup_param);
-        // methodPlugin is null: methodPlugin.setParameters() is not reached.
+        if let Some(method_plugin) = &method_plugin {
+            method_plugin.set_parameters();
+        }
         // Read in the tilt{|a|b}.com parameters and display the dialog panel
         manager.get_com_script_manager().load_tilt(axis_id);
         let mut tilt_param = manager.get_com_script_manager().get_tilt_param(axis_id);

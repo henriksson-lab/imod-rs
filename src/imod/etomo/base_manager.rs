@@ -48,11 +48,15 @@ use crate::imod::etomo::process::imodqtassist_process;
 use crate::imod::etomo::process::load_monitor::LoadMonitor;
 use crate::imod::etomo::process::process_data::ProcessData;
 use crate::imod::etomo::process::process_interface::{ProcessResultDisplayRef, ProcessSeriesRef};
+use crate::imod::etomo::process::process_messages::MessagesArray;
 use crate::imod::etomo::process::process_messages::ProcessMessages;
 use crate::imod::etomo::process::tomosetexts_output::TomosetextsOutput;
 use crate::imod::etomo::process_series::{Process, ProcessSeries, ProcessSeriesHandle};
 use crate::imod::etomo::processing_method_mediator::ProcessingMethodMediator;
+use crate::imod::etomo::storage::file_reader::FileReaderRef;
+use crate::imod::etomo::storage::file_writer::FileWriterRef;
 use crate::imod::etomo::storage::log_file::{Handle, LogFile, LogFileError, ReaderId};
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::storage::parameter_store::ParameterStore;
 use crate::imod::etomo::storage::storable::{Storable, StorableValue};
 use crate::imod::etomo::task_interface::TaskInterface;
@@ -78,9 +82,7 @@ use crate::imod::etomo::ui::UiComponent;
 use crate::imod::etomo::ui::log_properties::LogProperties;
 use crate::imod::etomo::ui::shared_strings;
 use crate::imod::etomo::ui::standard_bar_string::StandardBarString;
-use crate::imod::etomo::ui::swing::log_interface::{
-    FileReaderRef, FileWriterRef, LogInterface, Loggable, LoggableException,
-};
+use crate::imod::etomo::ui::swing::log_interface::LogInterface;
 use crate::imod::etomo::ui::swing::log_window::LogWindow;
 use crate::imod::etomo::ui::swing::main_panel::{MainPanel, MainPanelVirtual};
 use crate::imod::etomo::ui::swing::process_display::ProcessDisplay;
@@ -90,7 +92,6 @@ use crate::imod::etomo::util::event_queue::{EdtCell, EdtRef};
 use crate::imod::etomo::util::unique_key::UniqueKey;
 use crate::imod::etomo::util::utilities;
 use crate::imod::etomo::util::valid_directory::ValidDirectory;
-use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
@@ -582,12 +583,8 @@ pub trait BaseManager: Send + Sync {
         // Looking for an output line like this:
         // "Qt ideal thread count = 20 physical cores = 10 logical processors = 20"
         let mut exception: Option<String> = None;
-        // TODO(unit): needs etomo/process/BaseProcessManager.java's
-        // `imodqtassistQuery(AxisID)` (its module notes it is untranslated) -
-        // `processManager.imodqtassistQuery(axisID)`.
-        let _ = (process_manager, axis_id);
-        let stdout: Option<Vec<String>> = None;
-        let stdout = stdout?;
+        // Java passes the (possibly null) `axisID` on; `SystemProgram` keeps it.
+        let stdout = process_manager.imodqtassist_query(axis_id.unwrap_or(AxisID::Only))?;
         let delimiter = "=";
         let key = "physical cores";
         // Java `split("\\s*" + delimiter + "\\s*")` and `split("\\s+")`.
@@ -880,8 +877,12 @@ pub trait BaseManager: Send + Sync {
         false
     }
 
-    /// Java package-private `getAutoAlignmentMetaData`.
-    fn get_auto_alignment_meta_data(&self) -> Option<&'static AutoAlignmentMetaData> {
+    /// Java package-private `getAutoAlignmentMetaData`.  The object is shared and
+    /// mutated (the auto-alignment panel writes it, `XfalignParam` reads it), so it is
+    /// handed out with its lock.
+    fn get_auto_alignment_meta_data(
+        &self,
+    ) -> Option<&'static std::sync::Mutex<AutoAlignmentMetaData>> {
         None
     }
 
@@ -1043,12 +1044,22 @@ pub trait BaseManager: Send + Sync {
         self.log_message_private(file, false, None);
     }
 
-    /// Java `logSimpleMessage(File, FileWriter)`.
+    /// Java `logSimpleMessage(File, FileWriter)`.  Off the event dispatch thread the
+    /// call is posted to it, where the log window lives (Java's `EtomoLogger` posts
+    /// each append the same way).
     fn log_simple_message_file(
         &'static self,
         file: Option<&Path>,
         secondary_log: Option<FileWriterRef>,
     ) {
+        if !crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+            let manager = self.this();
+            let file = file.map(Path::to_path_buf);
+            crate::imod::etomo::util::event_queue::invoke_later(move || {
+                manager.log_simple_message_file(file.as_deref(), secondary_log);
+            });
+            return;
+        }
         self.log_message_private(file, true, secondary_log);
     }
 
@@ -1138,8 +1149,22 @@ pub trait BaseManager: Send + Sync {
         }
     }
 
-    /// Java `logSimpleMessage(String, FileWriter)`.  Log without extra stuff.
-    fn log_simple_message(&self, message: Option<&str>, secondary_log: Option<FileWriterRef>) {
+    /// Java `logSimpleMessage(String, FileWriter)`.  Log without extra stuff.  Off the
+    /// event dispatch thread the call is posted to it, where the log window lives
+    /// (Java's `EtomoLogger` posts each append the same way).
+    fn log_simple_message(
+        &'static self,
+        message: Option<&str>,
+        secondary_log: Option<FileWriterRef>,
+    ) {
+        if !crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+            let manager = self.this();
+            let message = message.map(str::to_owned);
+            crate::imod::etomo::util::event_queue::invoke_later(move || {
+                manager.log_simple_message(message.as_deref(), secondary_log);
+            });
+            return;
+        }
         let log_interface = self.get_log_interface();
         if let Some(log_interface) = log_interface {
             log_interface.log_message_string_boolean_boolean_file_writer(
@@ -1153,8 +1178,20 @@ pub trait BaseManager: Send + Sync {
         }
     }
 
-    /// Java `logSimpleMessage(String, boolean)`.
-    fn log_simple_message_newline(&self, message: Option<&str>, newline: bool) {
+    /// Java `logSimpleMessage(String, boolean)`.  Off the event dispatch
+    /// thread the call is posted to it, as `logSimpleMessage(String,
+    /// FileWriter)` is: the log window lives there, and `ProcessManager`
+    /// calls this from a process's completion thread
+    /// (`postProcess(String, AxisID)`, the alternate-stack message).
+    fn log_simple_message_newline(&'static self, message: Option<&str>, newline: bool) {
+        if !crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+            let manager = self.this();
+            let message = message.map(str::to_owned);
+            crate::imod::etomo::util::event_queue::invoke_later(move || {
+                manager.log_simple_message_newline(message.as_deref(), newline);
+            });
+            return;
+        }
         let log_interface = self.get_log_interface();
         if let Some(log_interface) = log_interface {
             log_interface
@@ -1455,6 +1492,25 @@ pub trait BaseManager: Send + Sync {
             log_file.close_id(id.as_ref().map(|id| &**id));
         }
         false
+    }
+
+    /// Java `updateDirectiveMap(DirectiveMap, StringBuffer)`, the overload that
+    /// `ApplicationManager` and `DirectiveEditorManager` declare.
+    ///
+    /// Upstream bug fixed in translation (DirectiveEditorBuilder.java:149,
+    /// DirectiveEditorManager.java:102): both callers hold the manager as a
+    /// `BaseManager`, so Java resolves the call at compile time to
+    /// `BaseManager.updateDirectiveMap(DirectiveMapInterface, ...)`, which is empty,
+    /// and the dataset's setupset/runtime values never reach the directive editor (the
+    /// `DirectiveMap` overloads have no other caller).  Here the call dispatches to
+    /// the `DirectiveMap` overload, as the builder's documentation says it should;
+    /// managers without one fall back to the base class's empty method.
+    fn update_directive_map_directive_map(
+        &'static self,
+        directive_map: &crate::imod::etomo::storage::directive_map::DirectiveMap,
+        errmsg: &mut String,
+    ) {
+        self.update_directive_map(Some(directive_map), errmsg);
     }
 
     /// Java `updateDirectiveMap`.  Empty in the base class.
@@ -2203,10 +2259,6 @@ pub trait BaseManager: Send + Sync {
     /// Java `closeImod(FileKey, AxisID, boolean)`.  Ask to close all 3dmods associated
     /// with this file type.  A file type may have multiple 3dmod keys.  `warnOnce` -
     /// when true, only one warning is give for the open 3dmod instance.
-    // TODO(unit): needs a dispatching etomo/type/FileKey.java - Java's
-    // `fileKey.getFileName(this, axisID)` reaches `FileType`'s override when the key is a
-    // `FileType`; the translated `FileKey` is the plain superclass struct `FileType`
-    // embeds, so a `&FileKey` only has the superclass body (the description).
     fn close_imod_file_key(
         &'static self,
         file_key: Option<&FileKey>,
@@ -2219,13 +2271,17 @@ pub trait BaseManager: Send + Sync {
         self.close_imod(
             file_key.get_imod_manager_key(),
             axis_id,
-            file_key.get_file_name().as_deref(),
+            file_key
+                .get_file_name(Some(self.this()), axis_id)
+                .as_deref(),
             warn_once,
         );
         self.close_imod(
             file_key.get_imod_manager_key2(),
             axis_id,
-            file_key.get_file_name().as_deref(),
+            file_key
+                .get_file_name(Some(self.this()), axis_id)
+                .as_deref(),
             warn_once,
         );
     }
@@ -3750,7 +3806,7 @@ pub trait BaseManager: Send + Sync {
             return false;
         };
         let (host_name, is_running, is_ssh_failed, process_name) = {
-            let process_data = process_data.lock().unwrap();
+            let mut process_data = process_data.lock().unwrap();
             (
                 process_data.get_host_name(),
                 process_data.is_running(),
@@ -3803,7 +3859,19 @@ pub trait BaseManager: Send + Sync {
         process_data: Option<Arc<Mutex<ProcessData>>>,
         axis_id: Option<AxisID>,
         multi_line_messages: bool,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
+    ) -> bool {
+        self.reconnect_super(process_data, axis_id, multi_line_messages, messages_array)
+    }
+
+    /// The base class's `reconnect` body (`super.reconnect(...)` in an override,
+    /// `BatchRunTomoManager`).
+    fn reconnect_super(
+        &'static self,
+        process_data: Option<Arc<Mutex<ProcessData>>>,
+        axis_id: Option<AxisID>,
+        multi_line_messages: bool,
+        messages_array: Option<MessagesArray>,
     ) -> bool {
         let axis = axis_id.unwrap_or(AxisID::Only);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
@@ -3896,7 +3964,7 @@ pub trait BaseManager: Send + Sync {
         process_data: Option<Arc<Mutex<ProcessData>>>,
         axis_id: Option<AxisID>,
         multi_line_messages: bool,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
     ) -> Result<bool, LogFileError> {
         // Upstream bug fixed in translation (BaseManager.java:2261): a null
         // `processData` throws a NullPointerException; here nothing is reconnected.
@@ -4018,7 +4086,7 @@ pub trait BaseManager: Send + Sync {
         dialog_type: Option<DialogType>,
         run_type: Option<RunType>,
         managed_process_data: Option<Arc<Mutex<ProcessData>>>,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
     ) -> bool {
         let axis = axis_id.unwrap_or(AxisID::Only);
         let process_series = match process_series {
@@ -4226,11 +4294,23 @@ pub trait BaseManager: Send + Sync {
     /// Upstream bug fixed in translation (BaseManager.java:2467): a null main panel
     /// (headless) throws a NullPointerException; here nothing happens.
     fn start_progress_bar(
-        &self,
+        &'static self,
         label: Option<&str>,
         axis_id: Option<AxisID>,
         process_name: Option<ProcessName>,
     ) {
+        // The Java monitors call this from their own threads
+        // (`CombineProcessMonitor.initializeProgressBar`/`startProgressBar`);
+        // the main panel is an event-dispatch-thread object, so the call is
+        // posted there, as `progressBarDone` does.
+        if !crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+            let this = self.this();
+            let label = label.map(str::to_owned);
+            crate::imod::etomo::util::event_queue::invoke_later(move || {
+                this.start_progress_bar(label.as_deref(), axis_id, process_name)
+            });
+            return;
+        }
         if let Some(main_panel) = self.get_main_panel() {
             main_panel
                 .main_panel()
@@ -4246,7 +4326,16 @@ pub trait BaseManager: Send + Sync {
     ///
     /// Upstream bug fixed in translation (BaseManager.java:2471): a null main panel
     /// (headless) throws a NullPointerException; here nothing happens.
-    fn stop_progress_bar(&self, axis_id: Option<AxisID>) {
+    fn stop_progress_bar(&'static self, axis_id: Option<AxisID>) {
+        // Posted to the event dispatch thread from another thread, as
+        // `startProgressBar`.
+        if !crate::imod::etomo::util::event_queue::is_dispatch_thread() {
+            let this = self.this();
+            crate::imod::etomo::util::event_queue::invoke_later(move || {
+                this.stop_progress_bar(axis_id)
+            });
+            return;
+        }
         if let Some(main_panel) = self.get_main_panel() {
             main_panel
                 .main_panel()
@@ -4526,6 +4615,36 @@ pub trait BaseManager: Send + Sync {
     }
 
     /// Java `resume(AxisID, ProcesschunksParam, ProcessResultDisplay, ProcessSeries,
+    /// CommandDetails, boolean, ProcessingMethod, boolean, DialogType)`, the virtual
+    /// method (`PeetManager` overrides it); the base body is [`Self::resume_super`].
+    #[allow(clippy::too_many_arguments)]
+    fn resume(
+        &'static self,
+        axis_id: Option<AxisID>,
+        param: Option<Arc<ProcesschunksParam>>,
+        process_result_display: Option<ProcessResultDisplayHandle>,
+        process_series: Option<ProcessSeriesHandle>,
+        subcommand_details: Option<Arc<dyn CommandDetails + Send + Sync>>,
+        popup_chunk_warnings: bool,
+        processing_method: Option<ProcessingMethod>,
+        multi_line_messages: bool,
+        dialog_type: Option<DialogType>,
+    ) {
+        self.resume_super(
+            axis_id,
+            param,
+            process_result_display,
+            process_series,
+            subcommand_details,
+            popup_chunk_warnings,
+            processing_method,
+            multi_line_messages,
+            dialog_type,
+        )
+    }
+
+    /// `BaseManager.resume` itself, for the overrides' `super` call.  Java
+    /// `resume(AxisID, ProcesschunksParam, ProcessResultDisplay, ProcessSeries,
     /// CommandDetails, boolean, ProcessingMethod, boolean, DialogType)`.  Get the
     /// current processchunks root name from meta data.  If it exists, attempt to resume
     /// processchunks.
@@ -4535,7 +4654,7 @@ pub trait BaseManager: Send + Sync {
     /// here a null process manager leaves the axis not in use, a null meta data has no
     /// root name, and a null main panel has no parallel panel.
     #[allow(clippy::too_many_arguments)]
-    fn resume(
+    fn resume_super(
         &'static self,
         axis_id: Option<AxisID>,
         param: Option<Arc<ProcesschunksParam>>,
@@ -4668,17 +4787,19 @@ pub trait BaseManager: Send + Sync {
         );
     }
 
-    /// Java package-private `createRunList`.
-    // TODO(unit): needs etomo/type/RunList.java and etomo/type/RunType.java - the
-    // return and parameter types.  The base class returns null.
-    fn create_run_list(&self, run_type: Option<Infallible>) -> Option<Infallible> {
+    /// Java package-private `createRunList(RunType)`.  The base class returns null.
+    /// The list is handed to monitor threads, hence the `Arc`.
+    fn create_run_list(
+        &self,
+        run_type: Option<RunType>,
+    ) -> Option<std::sync::Arc<crate::imod::etomo::r#type::run_list::RunList>> {
         let _ = run_type;
         None
     }
 
     /// Java package-private `getMessagesArray`.  The list is one object shared with the
     /// process layer, hence the `Arc<Mutex<..>>`.
-    fn get_messages_array(&self) -> Option<Arc<Mutex<Vec<ProcessMessages>>>> {
+    fn get_messages_array(&self) -> Option<MessagesArray> {
         None
     }
 
@@ -4828,12 +4949,35 @@ pub fn get_imod_bin_path() -> Option<String> {
 }
 
 /// Java `chunkComscriptAction(Container)`, a static method.
-// TODO(unit): needs etomo/storage/ChunkComscriptFileFilter.java - the body opens a
-// `FileChooser` (etomo/ui/swing/file_chooser.rs) on
-// `EtomoDirector.INSTANCE.getOriginalUserDir()` with that filter,
-// `setPreferredSize(FixedDim.fileChooser)` and `FILES_ONLY`, and returns the selected
-// file on `APPROVE_OPTION`.  The filter has no module, so no chooser is shown.
 pub fn chunk_comscript_action(root: Option<Rc<JComponent>>) -> Option<PathBuf> {
-    let _ = root;
+    // Open up the file chooser in the working directory
+    let chooser = crate::imod::etomo::ui::swing::file_chooser::FileChooser::new_base_manager_string(
+        None,
+        etomo_director::INSTANCE.get_original_user_dir().as_deref(),
+    );
+    let filter =
+        crate::imod::etomo::storage::chunk_comscript_file_filter::ChunkComscriptFileFilter::new();
+    chooser.set_file_filter(Some(Rc::new(filter)));
+    // Swing layout: chooser.setPreferredSize(FixedDim.fileChooser).
+    chooser.set_file_selection_mode(crate::imod::etomo::ui::swing::file_chooser::FILES_ONLY);
+    let return_val = chooser.show_open_dialog(root.as_ref());
+    if return_val == crate::imod::etomo::ui::swing::file_chooser::APPROVE_OPTION {
+        return chooser.get_selected_file();
+    }
     None
+}
+
+/// Java `BaseManager implements BrowsingDirectory`: a manager handed to a widget as
+/// its `BrowsingDirectory` (`setBrowsingDirectory(manager)`).  The two interface
+/// methods are `BaseManager::get_browsing_dir`/`set_browsing_dir`.
+pub struct ManagerBrowsingDirectory(pub &'static dyn BaseManager);
+
+impl crate::imod::etomo::ui::browsing_directory::BrowsingDirectory for ManagerBrowsingDirectory {
+    fn get_browsing_dir(&self) -> Option<PathBuf> {
+        self.0.get_browsing_dir()
+    }
+
+    fn set_browsing_dir(&self, file: Option<&Path>) {
+        self.0.set_browsing_dir(file);
+    }
 }

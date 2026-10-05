@@ -3,16 +3,6 @@
 //! Parameters of the tiltxcorr command in xcorr.com / xcorr_pt.com, read from and
 //! written to the com script both as PIP keyword/value pairs and (read only) as the
 //! old sequential standard input.
-//!
-// TODO(unit): needs etomo/comscript/ParamUtilities.java - `param_utilities` value,
-// parse and updateScriptParameter overloads.
-// TODO(unit): needs etomo/type/StringParameter.java - boundaryModel, skipViews,
-// prealignmentTransformFile, viewsWithMagChanges.
-// TODO(unit): needs etomo/type/TiltAngleSpec.java and etomo/type/TiltAngleType.java -
-// the sequential tilt angle specification.
-// TODO(unit): needs FortranInputString.validateAndSet(ComScriptCommand) and
-// FortranInputString.updateScriptParameter(ComScriptCommand) (both marked TODO in
-// comscript/fortran_input_string.rs).
 
 use std::cell::RefCell;
 use std::rc::Rc;

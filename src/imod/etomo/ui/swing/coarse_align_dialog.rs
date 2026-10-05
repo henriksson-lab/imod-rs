@@ -9,6 +9,7 @@ use super::blendmont_display::BlendmontDisplay;
 use super::check_box::CheckBox;
 use super::coarse_align_display::CoarseAlignDisplay;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::context_popup::{self, ContextPopup};
 use super::deferred_3dmod_button::Deferred3dmodButton;
 use super::etched_border::EtchedBorder;
@@ -222,7 +223,7 @@ impl CoarseAlignDialog {
     }
 
     /// Java private `addListeners()` (CoarseAlignDialog.java:396-405).
-    fn add_listeners(&self) {
+    fn add_listeners(self: &Rc<Self>) {
         // Action listener assignment for the buttons
         self.btn_midas
             .add_action_listener(self.action_listener.clone());
@@ -231,8 +232,11 @@ impl CoarseAlignDialog {
         self.btn_distortion_corrected_stack
             .add_action_listener(self.action_listener.clone());
 
-        // Mouse adapter for context menu: `pnlCoarseAlign.addMouseListener(new
-        // GenericMouseAdapter(this))` - mouse events are not modelled.
+        // Mouse adapter for context menu
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        self.pnl_coarse_align
+            .get_component()
+            .add_mouse_listener(GenericMouseAdapter::new(context_menu));
     }
 
     /// Java `setEnabledFixEdgesMidasButton()` (CoarseAlignDialog.java:412-421).

@@ -65,7 +65,11 @@ impl FileSizeProcessMonitorImpl for NewstProcessMonitor {
                         // mrctaper started
                         let axis_id = base.axis_id;
                         base.manager.post_main_panel(Box::new(move |panel| {
-                            panel.set_progress_bar_value_int_string_axis_id(0, Some("mrctaper"), axis_id);
+                            panel.set_progress_bar_value_int_string_axis_id(
+                                0,
+                                Some("mrctaper"),
+                                axis_id,
+                            );
                         }));
                         base.set_ending();
                         break;
@@ -119,7 +123,7 @@ impl FileSizeProcessMonitorImpl for NewstProcessMonitor {
         let mut raw_stack = raw_stack.borrow_mut();
         if !raw_stack
             .read_with_manager(manager)
-            .map_err(CalcFileSizeError::Io)?
+            .map_err(CalcFileSizeError::from)?
         {
             return Ok(false);
         }
@@ -155,7 +159,12 @@ impl FileSizeProcessMonitorImpl for NewstProcessMonitor {
         base.n_k_bytes.store(n_k_bytes, Ordering::SeqCst);
         let title = self.get_title(base);
         manager.post_main_panel(Box::new(move |panel| {
-            panel.set_progress_bar_string_int_boolean_axis_id(Some(&title), n_k_bytes, false, axis_id);
+            panel.set_progress_bar_string_int_boolean_axis_id(
+                Some(&title),
+                n_k_bytes,
+                false,
+                axis_id,
+            );
         }));
         Ok(true)
     }

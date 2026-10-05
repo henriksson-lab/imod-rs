@@ -5,23 +5,13 @@
 //! `_from_line_array`; the instance methods keep the plain names.  A Java `String[]`
 //! produced by `String.split` never holds a null element, so the array is
 //! `Option<Vec<String>>` (null array) with non-null elements.
-// TODO(unit): needs etomo/storage/DirectiveDescr.java - the interface this class
-// implements (`getName`, `getDescription`, `getValueType`, `isBatch`, `isTemplate`,
-// `getEtomoColumn`, `getLabel`, `getChoiceList`); the methods are inherent here.
-// TODO(unit): needs etomo/storage/DirectiveDescrChoiceList.java - static
-// `getChoiceList(String[])` returns
-// `DirectiveDescrChoiceList.getInstance(lineArray[CHOICES_COLUMN_INDEX])` when
-// `isChoiceList(lineArray)`, else null; instance `getChoiceList()` returns
-// `getChoiceList(lineArray)`.
-// TODO(unit): needs etomo/storage/DirectiveDescrEtomoColumn.java - static
-// `getEtomoColumn(String[])` returns
-// `DirectiveDescrEtomoColumn.getInstance(lineArray[ETOMO_COLUMN_INDEX])` when
-// `lineArray != null && lineArray.length > ETOMO_COLUMN_INDEX`, else null; instance
-// `getEtomoColumn()` returns `getEtomoColumn(lineArray)`.
 #![allow(dead_code)]
 
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::SEPARATOR_CHAR;
 use crate::imod::etomo::storage::directive_def::DirectiveDef;
+use crate::imod::etomo::storage::directive_descr::DirectiveDescr;
+use crate::imod::etomo::storage::directive_descr_choice_list::DirectiveDescrChoiceList;
+use crate::imod::etomo::storage::directive_descr_etomo_column::DirectiveDescrEtomoColumn;
 use crate::imod::etomo::storage::directive_value_type::DirectiveValueType;
 use crate::imod::etomo::r#type::directive_file_type::DirectiveFileType;
 
@@ -154,9 +144,39 @@ impl DirectiveDescrElement {
         })
     }
 
-    // Java static `getChoiceList(String[])`, `getChoiceList()`,
-    // `getEtomoColumn(String[])` and `getEtomoColumn()`: see the TODO(unit) notes at
-    // the top of this module.
+    /// Java static `getChoiceList(String[])`.
+    pub fn get_choice_list_from_line_array(
+        line_array: Option<&[String]>,
+    ) -> Option<DirectiveDescrChoiceList> {
+        if DirectiveDescrElement::is_choice_list(line_array) {
+            return DirectiveDescrChoiceList::get_instance(Some(
+                &line_array.unwrap()[CHOICES_COLUMN_INDEX],
+            ));
+        }
+        None
+    }
+
+    /// Java `getChoiceList()` (DirectiveDescr).
+    pub fn get_choice_list(&self) -> Option<DirectiveDescrChoiceList> {
+        DirectiveDescrElement::get_choice_list_from_line_array(self.line_array.as_deref())
+    }
+
+    /// Java static `getEtomoColumn(String[])`.
+    pub fn get_etomo_column_from_line_array(
+        line_array: Option<&[String]>,
+    ) -> Option<DirectiveDescrEtomoColumn> {
+        if let Some(line_array) = line_array
+            && line_array.len() > ETOMO_COLUMN_INDEX
+        {
+            return DirectiveDescrEtomoColumn::get_instance(&line_array[ETOMO_COLUMN_INDEX]);
+        }
+        None
+    }
+
+    /// Java `getEtomoColumn()` (DirectiveDescr).
+    pub fn get_etomo_column(&self) -> Option<DirectiveDescrEtomoColumn> {
+        DirectiveDescrElement::get_etomo_column_from_line_array(self.line_array.as_deref())
+    }
 
     /// Java static `getName(String[])`.
     pub fn get_name_from_line_array(line_array: Option<&[String]>) -> Option<String> {
@@ -283,6 +303,41 @@ impl DirectiveDescrElement {
     /// Java `isTemplate()` (DirectiveDescr).
     pub fn is_template(&self) -> bool {
         DirectiveDescrElement::is_template_from_line_array(self.line_array.as_deref())
+    }
+}
+
+/// Java `implements DirectiveDescr`: the interface methods are the inherent ones.
+impl DirectiveDescr for DirectiveDescrElement {
+    fn get_name(&self) -> Option<String> {
+        DirectiveDescrElement::get_name(self)
+    }
+
+    fn get_description(&self) -> Option<String> {
+        DirectiveDescrElement::get_description(self)
+    }
+
+    fn get_value_type(&self) -> Option<DirectiveValueType> {
+        DirectiveDescrElement::get_value_type(self)
+    }
+
+    fn is_batch(&self) -> bool {
+        DirectiveDescrElement::is_batch(self)
+    }
+
+    fn is_template(&self) -> bool {
+        DirectiveDescrElement::is_template(self)
+    }
+
+    fn get_etomo_column(&self) -> Option<DirectiveDescrEtomoColumn> {
+        DirectiveDescrElement::get_etomo_column(self)
+    }
+
+    fn get_label(&self) -> Option<String> {
+        DirectiveDescrElement::get_label(self)
+    }
+
+    fn get_choice_list(&self) -> Option<DirectiveDescrChoiceList> {
+        DirectiveDescrElement::get_choice_list(self)
     }
 }
 

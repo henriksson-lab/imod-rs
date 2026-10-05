@@ -514,8 +514,6 @@ impl CcdEraserBeadsPanel {
         let aligned_stack: &Arc<FileType> = &file_type::CLASS.aligned_stack;
         let manager: &'static dyn BaseManager = self.manager;
         if aligned_stack.exists(Some(manager), Some(self.axis_id)) {
-            // TODO(unit): needs etomo/util/Utilities.java getStackBinning(BaseManager,
-            // AxisID, FileType, boolean) - the throwing overload.
             match utilities::get_stack_binning_for_file_type_boolean(
                 manager,
                 self.axis_id,

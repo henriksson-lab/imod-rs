@@ -726,6 +726,11 @@ impl MultiLineButton {
         self.get_button()
     }
 
+    /// Java final `addMouseListener(MouseListener)`.
+    pub fn add_mouse_listener(&self, mouse_listener: Rc<dyn crate::imod::etomo::jdk::MouseListener>) {
+        self.get_button().add_mouse_listener(mouse_listener);
+    }
+
     /// Java `setVisible(boolean)`.
     pub fn set_visible(&self, visible: bool) {
         self.get_button().set_visible(visible);

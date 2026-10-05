@@ -64,6 +64,10 @@ use crate::imod::etomo::process::imod_process::Run3dmodMenuOptions;
 use crate::imod::etomo::storage::autodoc::autodoc::Autodoc;
 use crate::imod::etomo::storage::autodoc::autodoc_factory;
 use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use crate::imod::etomo::storage::autofidseed_init_file_filter;
+use crate::imod::etomo::storage::autofidseed_log::AutofidseedLog;
+use crate::imod::etomo::storage::autofidseed_selection_and_sorting;
+use crate::imod::etomo::storage::log_file::LogFileError;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::base_screen_state::BaseScreenState;
@@ -77,13 +81,6 @@ use crate::imod::etomo::r#type::file_type;
 use crate::imod::etomo::r#type::meta_data::MetaData;
 use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
 use crate::imod::etomo::r#type::recon_screen_state::ReconScreenState;
-// TODO(unit): needs etomo/storage/AutofidseedInitFileFilter.java,
-// etomo/storage/AutofidseedSelectionAndSorting.java and
-// etomo/storage/AutofidseedLog.java - called below by the naming rules.
-use crate::imod::etomo::storage::autofidseed_init_file_filter;
-use crate::imod::etomo::storage::autofidseed_log::AutofidseedLog;
-use crate::imod::etomo::storage::autofidseed_selection_and_sorting;
-use crate::imod::etomo::storage::log_file::LogFileError;
 use crate::imod::etomo::ui::field::Field;
 use crate::imod::etomo::ui::field_type::FieldType;
 use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;

@@ -4,6 +4,7 @@
 use super::attribute::Attribute;
 use super::read_only_autodoc::ReadOnlyAutodoc;
 use super::statement::Statement;
+use crate::imod::etomo::storage::log_file::LogFileError;
 use crate::imod::etomo::ui::swing::token::Token;
 
 /// Source `WritableAutodoc extends ReadOnlyAutodoc`.  It redeclares
@@ -58,9 +59,8 @@ pub trait WritableAutodoc: ReadOnlyAutodoc {
     /// # Safety
     /// `statement` must point to a live statement in this autodoc's list.
     unsafe fn remove_statement(&mut self, statement: *mut dyn Statement) -> *mut dyn Statement;
-    // TODO(unit): needs etomo/process/EmergencyMonitor.java - Java `write()`
-    // (WritableAutodoc.java:29) writes the autodoc through a `LogFile.Handle`, whose
-    // constructor requires an `EmergencyMonitor`; `Autodoc.write()` implements it.
+    /// Java `write() throws LogFileException, IOException, LockException`.
+    fn write(&self) -> Result<(), LogFileError>;
 
     /// Java `printStatementList()`.
     fn print_statement_list(&self);

@@ -8,7 +8,7 @@
 // direction at run time, so the two local panels below are declared once and
 // instantiated in each branch.
 
-import { EtomoStyle, CheckBox } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtomoStyle, EtomoBridge, CheckBox, BridgedLabel } from "../../etomo-ui-common/ui/widgets.slint";
 
 // `pnlParallelProcess` (`:128`, `:135-137`): the check box then a glue.
 component ParallelProcessPanel inherits HorizontalLayout {
@@ -16,7 +16,7 @@ component ParallelProcessPanel inherits HorizontalLayout {
     in property <bool> checked;
     in property <bool> enabled: true;
     spacing: EtomoStyle.gap;
-    CheckBox { text: root.label; checked: root.checked; enabled: root.enabled; }
+    CheckBox { text: root.label; name-label: "Parallel processing"; checked: root.checked; enabled: root.enabled; }
     Rectangle { }
 }
 
@@ -32,11 +32,10 @@ component UseGpuPanel inherits HorizontalLayout {
     // `lMaxGpus` is null when `maxGpu == -1` or the network has at most one
     // GPU (`:82-92`); `updateDisplay()` also hides it when `useMaxGpus` is
     // false (`:367-369`).
-    if root.max-gpus-label != "" && root.show-max-gpus: Text {
+    // Wired: the Swing `lMaxGpus` while it shows (`BridgedLabel`).
+    if EtomoBridge.wired || (root.max-gpus-label != "" && root.show-max-gpus): BridgedLabel {
+        prefix: ": Maximum number of GPUs recommended is ";
         text: root.max-gpus-label;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
     }
     Rectangle { }
 }
@@ -67,7 +66,7 @@ export component CpuGpuPanel inherits VerticalLayout {
     // the layout.
     in property <bool> use-gpu-enabled: true;
 
-    spacing: EtomoStyle.gap;
+    spacing: EtomoStyle.row-gap;
 
     if root.horizontal: HorizontalLayout {
         spacing: EtomoStyle.gap;
@@ -85,7 +84,7 @@ export component CpuGpuPanel inherits VerticalLayout {
     }
 
     if !root.horizontal: VerticalLayout {
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
         if !root.always-parallel: ParallelProcessPanel {
             label: root.parallel-process-label;
             checked: root.parallel-process;

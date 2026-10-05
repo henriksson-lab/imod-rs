@@ -6,13 +6,10 @@
 //! attribute, except for the last one, will also contain an AttributeList called
 //! children.  So Autodocs and sections each contain a tree structure of Attributes.
 //!
-//! **Limitation.**  `print` and `paramString` walk `map`, a `java.util.HashMap`, whose
-//! iteration order is a property of the JVM's bucket layout.  The Rust `HashMap` here
-//! keys and looks up identically but does not reproduce that order, so the *order* of
-//! the lines `print` emits and of the entries `paramString` renders is not matchable
-//! when a level holds more than one attribute.  Every other member is order-independent
-//! (`list` carries the source's insertion order and drives `iterator` and
-//! `getFirstAttribute`).
+//! `map` is a `java.util.HashMap<String, Attribute>`; `print` and `paramString` walk
+//! it, so it is a `JavaHashMap`, which iterates in Java's order (the keys are
+//! strings).  Everything else is order-independent (`list` carries the source's
+//! insertion order and drives `iterator` and `getFirstAttribute`).
 #![allow(dead_code)]
 
 use super::attribute::{self, Attribute};
@@ -22,7 +19,7 @@ use super::read_only_attribute_iterator::ReadOnlyAttributeIterator;
 use super::read_only_attribute_list::ReadOnlyAttributeList;
 use super::write_only_attribute_list::WriteOnlyAttributeList;
 use crate::imod::etomo::ui::swing::token::{self, Token};
-use std::collections::HashMap;
+use crate::imod::etomo::util::java_hash_map::JavaHashMap;
 
 /// Java package-private final `AttributeList implements ReadOnlyAttributeList`.
 pub struct AttributeList {
@@ -33,7 +30,7 @@ pub struct AttributeList {
     /// map contains Attributes.  Each Attribute instance stands for 0 or more
     /// occurrences of a name in this attribute list.  Attributes are never removed,
     /// but the number of occurrences they contain can be reduced to 0.
-    map: HashMap<String, *mut Attribute>,
+    map: JavaHashMap<String, *mut Attribute>,
     /// Java field `list`.
     /// Owns each attribute.  `map` and name/value pairs retain only borrowed stable
     /// addresses into these boxes.
@@ -52,7 +49,7 @@ impl AttributeList {
     pub fn new(parent: *mut dyn WriteOnlyAttributeList) -> AttributeList {
         AttributeList {
             parent,
-            map: HashMap::new(),
+            map: JavaHashMap::new(),
             list: Vec::new(),
             owned_tokens: Vec::new(),
         }
@@ -213,8 +210,7 @@ impl AttributeList {
         std::ptr::null_mut()
     }
 
-    /// Java package-private `print(int)`.  See the module header for the `HashMap`
-    /// iteration-order limitation.
+    /// Java package-private `print(int)`.
     ///
     /// # Safety
     /// Every attribute in the map must be live.
@@ -247,14 +243,14 @@ impl AttributeList {
     }
 
     /// Java package-private `paramString()`.  `"map=" + map` renders through
-    /// `java.util.AbstractMap.toString`; see the module header for its ordering.
+    /// `java.util.AbstractMap.toString`, in the map's iteration order.
     ///
     /// # Safety
     /// Every attribute in the map must be live.
     pub fn param_string(&self) -> String {
         let mut buffer = String::from("map={");
         let mut first = true;
-        for (key, attribute) in &self.map {
+        for (key, attribute) in self.map.iter() {
             if !first {
                 buffer.push_str(", ");
             }

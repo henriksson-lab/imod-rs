@@ -58,7 +58,3 @@ pub trait NewstackDisplay {
     /// Java `isFiducialess()`.
     fn is_fiducialess(&self) -> bool;
 }
-
-// TODO(unit): Newstack3dFindPanel.java and NewstackOrBlendmontPanel.java
-// implement NewstackDisplay (the Rust tree had it on `NewstackPanel` through a
-// local `NewstParam` boundary); the impls wait for faithful panel units.

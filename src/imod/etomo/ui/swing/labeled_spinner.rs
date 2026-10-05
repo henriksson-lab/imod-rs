@@ -842,8 +842,12 @@ impl LabeledSpinner {
         self.spinner.get_tool_tip_text()
     }
 
-    // Java `addMouseListener(MouseListener)`: adds the listener to the panel, label
-    // and spinner; mouse events are not modelled by the jdk stand-in.
+    /// Java `addMouseListener(MouseListener)`.
+    pub fn add_mouse_listener(&self, listener: Rc<dyn crate::imod::etomo::jdk::MouseListener>) {
+        self.panel.add_mouse_listener(listener.clone());
+        self.label.add_mouse_listener(listener.clone());
+        self.spinner.add_mouse_listener(listener);
+    }
 
     /// Java `addChangeListener(ChangeListener)`.
     pub fn add_change_listener(&self, listener: ChangeListener) {

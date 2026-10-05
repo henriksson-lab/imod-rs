@@ -6,10 +6,10 @@
 //! and writes the process-wide `etomo.type.UserConfiguration`
 //! (`src/imod/etomo/type/user_configuration.rs`), which `EtomoDirector` owns.
 //!
-//! Java `final class SettingsDialog extends JDialog`: the dialog is modelled,
-//! as `MainFrame_AboutBox` is, by the `JDialog` state the translation reads -
-//! its content pane (the root of its component tree), title, modality,
-//! location and visibility.  Layout (`BoxLayout`, rigid areas, glue, scroll
+//! Java `final class SettingsDialog extends JDialog`: the dialog is the Swing
+//! stand-in's `jdk::JDialog` (content pane, title, visibility; the Slint window
+//! draws a showing one over the frame), with the modality and location the Java
+//! sets kept here.  Layout (`BoxLayout`, rigid areas, glue, scroll
 //! bar increments, `pack`) is recorded as `// Swing layout:` comments.
 //!
 //! Object model (ui.md): the dialog is an `Rc<SettingsDialog>` living on the
@@ -69,14 +69,10 @@ const CENTER_ALIGNMENT: f32 = 0.5;
 /// Java `public final class SettingsDialog extends JDialog`.
 pub struct SettingsDialog {
     // --- javax.swing.JDialog state ---
-    /// `JDialog.getContentPane()`.
-    content_pane: Rc<JComponent>,
-    /// `Dialog.setTitle`.
-    title: RefCell<String>,
+    /// The `JDialog` itself (content pane, title, visibility).
+    dialog: Rc<crate::imod::etomo::jdk::JDialog>,
     /// `Dialog.setModal`.
     modal: Cell<bool>,
-    /// `Window.isVisible` (a `JDialog` is created invisible).
-    visible: Cell<bool>,
     /// `Component.setLocation`.
     location: Cell<Point>,
 
@@ -186,10 +182,9 @@ impl SettingsDialog {
                 }
             });
             SettingsDialog {
-                content_pane: JComponent::new_panel(),
-                title: RefCell::new(String::new()),
+                // A JDialog is created invisible (and, with `super()`, not modal).
+                dialog: crate::imod::etomo::jdk::JDialog::new("", false),
                 modal: Cell::new(false),
-                visible: Cell::new(false),
                 location: Cell::new(Point { x: 0, y: 0 }),
                 font_families,
                 list_font_family,
@@ -294,8 +289,6 @@ impl SettingsDialog {
                 manager,
             }
         });
-        // A JDialog is created invisible.
-        instance.content_pane.set_visible(false);
         // templatePanel = TemplatePanel.getInstance(manager, AxisID.ONLY, listener,
         // "Default Templates", this, false);
         let template_panel = TemplatePanel::get_instance(
@@ -351,7 +344,7 @@ impl SettingsDialog {
         self.set_scroll_bar_increments(&scroll_pane);
         // Swing layout: scrollPane horizontal and vertical scroll bar policies
         // AS_NEEDED.
-        self.content_pane.add(&scroll_pane);
+        self.dialog.get_content_pane().add(&scroll_pane);
         pnl_main.set_box_layout(spaced_panel::Y_AXIS);
         // Layout the font panel
         let panel_font_select = SpacedPanel::get_instance_void();
@@ -823,17 +816,17 @@ impl SettingsDialog {
 
     /// Java `JDialog.getContentPane()`.
     pub fn get_content_pane(&self) -> Rc<JComponent> {
-        Rc::clone(&self.content_pane)
+        self.dialog.get_content_pane()
     }
 
     /// Java `Dialog.setTitle(String)`.
     pub fn set_title(&self, title: &str) {
-        *self.title.borrow_mut() = title.to_owned();
+        self.dialog.set_title(title);
     }
 
     /// Java `Dialog.getTitle()`.
     pub fn get_title(&self) -> String {
-        self.title.borrow().clone()
+        self.dialog.get_title()
     }
 
     /// Java `Component.setLocation(int, int)`.
@@ -856,22 +849,19 @@ impl SettingsDialog {
         self.modal.get()
     }
 
-    /// Java `Dialog.setVisible(boolean)`.  The content pane mirrors the dialog's
-    /// visibility so that a search limited to showing components skips it.
+    /// Java `Dialog.setVisible(boolean)`.
     pub fn set_visible(&self, visible: bool) {
-        self.visible.set(visible);
-        self.content_pane.set_visible(visible);
+        self.dialog.set_visible(visible);
     }
 
     /// Java `Window.isVisible()`.
     pub fn is_visible(&self) -> bool {
-        self.visible.get()
+        self.dialog.is_visible()
     }
 
     /// Java `Window.dispose()`.
     pub fn dispose(&self) {
-        self.visible.set(false);
-        self.content_pane.set_visible(false);
+        self.dialog.dispose();
     }
 }
 

@@ -94,6 +94,7 @@ export component MainTomogramPanel inherits Rectangle {
         if !root.showing-setup && root.showing-axis == "B": TomogramProcessPanel {
             axis-id: "SECOND";
             compact-display: root.compact-display;
+            show-status-panel: root.show-status-panel;
             // `showAxisB()` (`TomogramProcessPanel.java:386-401`) sets the
             // jade background and relabels the axis buttons "Axis A" / "Both".
             panel-background: Colors.background-b;

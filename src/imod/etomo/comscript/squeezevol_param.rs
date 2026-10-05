@@ -17,6 +17,7 @@ use super::process_details::ProcessDetails;
 use super::trimvol_param::TrimvolParam;
 use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::storage::storable::StorableValue;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{
@@ -27,7 +28,6 @@ use crate::imod::etomo::r#type::file_key::FileKey;
 use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::image_file_type::ImageFileType;
 use crate::imod::etomo::r#type::process_name::ProcessName;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 
 /// Java private static `GROUP_STRING`.
 const GROUP_STRING: &str = "Squeezevol";
@@ -247,12 +247,12 @@ impl StorableValue for SqueezevolParam {
 
     /// Java `load(Properties)`.  Get the objects attributes from the properties
     /// object.
-    fn load(&mut self, props: &BTreeMap<String, String>) {
+    fn load(&mut self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
     /// Java `load(Properties, String)`.
-    fn load_with_prepend(&mut self, props: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, props: &mut BTreeMap<String, String>, prepend: &str) {
         self.reset();
         let prepend = SqueezevolParam::create_prepend(prepend);
         let _group = format!("{prepend}.");
@@ -366,7 +366,10 @@ impl ProcessDetails for SqueezevolParam {
         None
     }
 
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
@@ -374,7 +377,10 @@ impl ProcessDetails for SqueezevolParam {
         None
     }
 
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -386,7 +392,10 @@ impl ProcessDetails for SqueezevolParam {
         None
     }
 
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 }

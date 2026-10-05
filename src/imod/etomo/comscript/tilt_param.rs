@@ -16,20 +16,6 @@
 //! **Java `IllegalArgumentException` in the `ProcessDetails` getters** (an unknown
 //! field) is `None` here: the trait's return is `Option`, and no caller passes a
 //! field this class does not handle.
-//!
-//! TODO(unit): needs etomo/type/StringParameter.java - `StringParameter` self.
-//! TODO(unit): needs etomo/comscript/StringList.java - `excludeList`/`excludeList2`.
-//! TODO(unit): needs etomo/comscript/SharedConstants.java -
-//! `ACTION_IF_GPU_FAILS_DEFAULT`, `USE_GPU_BEST`.
-//! TODO(unit): needs etomo/comscript/Utilities.java - `is90DegreeImageRotation`,
-//! `getGoodframeFromMontageSize`.
-//! TODO(unit): needs etomo/util/Goodframe.java - `getOutput`.
-//! TODO(unit): needs etomo/comscript/ConstTiltalignParam.java -
-//! static `getOutputZFactorFileName`.
-//! TODO(unit): needs etomo/type/MetaData.java - `ApplicationManager.getConstMetaData()
-//! .getImageRotation(AxisID)`.
-//! TODO(unit): needs etomo/ui/swing/UIExpertUtilities.java - the manager form of
-//! `getStackBinningFromFileName(BaseManager, AxisID, String, boolean)`.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -54,6 +40,7 @@ use super::string_list::StringList;
 use super::utilities;
 use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{
     ConstEtomoNumber, Type, java_lang_double_to_string, java_lang_double_value_of,
@@ -66,7 +53,6 @@ use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::script_parameter::ScriptParameter;
 use crate::imod::etomo::r#type::string_parameter::StringParameter;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::ui::swing::ui_expert_utilities::UIExpertUtilities;
 use crate::imod::etomo::ui::swing::ui_harness;
 use crate::imod::etomo::util::dataset_files;
@@ -1569,7 +1555,10 @@ impl ProcessDetails for TiltParam {
         None
     }
 
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -1577,11 +1566,17 @@ impl ProcessDetails for TiltParam {
         None
     }
 
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 }

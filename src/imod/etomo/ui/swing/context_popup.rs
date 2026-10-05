@@ -25,8 +25,6 @@ use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::comscript::tomodataplots_param::Task;
 use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent, MouseEvent};
 use crate::imod::etomo::process::base_process_manager::BaseProcessManager;
-// TODO(unit): needs etomo/process/ImodqtassistProcess.java - `INSTANCE.open(manager,
-// action, axisID)` starts/feeds the imodqtassist help viewer.
 use crate::imod::etomo::process::imodqtassist_process;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::process_name::ProcessName;
@@ -96,13 +94,7 @@ impl ContextPopup {
     /// The Java field initializers, which run first in every constructor.
     fn init_fields(mouse_event: &MouseEvent) -> ContextPopup {
         ContextPopup {
-            // new JPopupMenu("Help Documents"): the stand-in has no popup kind; the
-            // label is kept as the component's text.
-            context_menu: {
-                let context_menu = JComponent::new_other();
-                context_menu.set_text("Help Documents");
-                context_menu
-            },
+            context_menu: JComponent::new_popup_menu("Help Documents"),
             serial_sections_guide_item: MenuItem::new_string("Serial Section Guide ..."),
             model_guide_item: MenuItem::new_string("IMOD Users Guide ..."),
             it_3dmod_guide: MenuItem::new_string("3dmod Users Guide ..."),
@@ -248,7 +240,7 @@ impl ContextPopup {
         let _ = this.action_listener.set(action_listener);
 
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, guide_to_anchor.as_deref());
         this.show_menu(component);
         Ok(this)
@@ -304,7 +296,7 @@ impl ContextPopup {
         });
         let _ = this.action_listener.set(action_listener);
 
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, guide_to_anchor.as_deref());
         this.show_menu(component);
         this
@@ -425,9 +417,9 @@ impl ContextPopup {
         let _ = this.action_listener.set(action_listener);
 
         this.add_log_file_menu_items(log_file_label, log_file);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, guide_to_anchor.as_deref());
         this.show_menu(component);
         Ok(this)
@@ -555,9 +547,9 @@ impl ContextPopup {
         let _ = this.action_listener.set(action_listener);
 
         this.add_log_file_menu_items(log_file_label, log_file);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, Some(guide_to_anchor));
         this.show_menu(component);
         Ok(this)
@@ -715,12 +707,12 @@ impl ContextPopup {
         if let Some(graph) = graph
             && !graph.is_empty()
         {
-            this.context_menu.add(&JComponent::new_other());
+            this.context_menu.add(&JComponent::new_popup_separator());
             this.add_graph_menu_items(manager, axis_id, graph, graph_input_file);
         }
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, guide_to_anchor.as_deref());
         this.show_menu(component);
         Ok(this)
@@ -854,12 +846,12 @@ impl ContextPopup {
         if let Some(graph) = graph
             && !graph.is_empty()
         {
-            this.context_menu.add(&JComponent::new_other());
+            this.context_menu.add(&JComponent::new_popup_separator());
             this.add_graph_menu_items(manager, axis_id, graph, None);
         }
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, guide_to_anchor.as_deref());
         this.show_menu(component);
         Ok(this)
@@ -973,9 +965,9 @@ impl ContextPopup {
         let _ = this.action_listener.set(action_listener);
 
         this.add_log_file_menu_items(Some(log_file_label), Some(log_file));
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, guide_to_anchor.as_deref());
         this.show_menu(component);
         Ok(this)
@@ -1061,7 +1053,7 @@ impl ContextPopup {
         let _ = this.action_listener.set(action_listener);
 
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(add_peet_guide, None);
         this.show_menu(component);
         Ok(this)
@@ -1142,7 +1134,7 @@ impl ContextPopup {
         });
         let _ = this.action_listener.set(action_listener);
 
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, None);
         this.show_menu(component);
         this
@@ -1357,12 +1349,12 @@ impl ContextPopup {
         if let Some(graph) = graph
             && !graph.is_empty()
         {
-            this.context_menu.add(&JComponent::new_other());
+            this.context_menu.add(&JComponent::new_popup_separator());
             this.add_graph_menu_items(manager, axis_id, graph, graph_input_file);
         }
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_man_page_menu_items(man_page_label, man_page);
-        this.context_menu.add(&JComponent::new_other());
+        this.context_menu.add(&JComponent::new_popup_separator());
         this.add_standard_menu_items(false, None);
         this.show_menu(component);
         Ok(this)
@@ -1769,10 +1761,8 @@ impl ContextPopup {
 
     /// Java private `showMenu(Component)`.
     fn show_menu(self: &Rc<Self>, component: &Rc<JComponent>) {
-        // Swing layout: contextMenu.show(component, mouseEvent.getX(),
-        // mouseEvent.getY()) positions the popup over the invoker.
-        let _ = (component, self.mouse_event.x, self.mouse_event.y);
-        self.context_menu.set_visible(true);
+        self.context_menu
+            .show(component, self.mouse_event.x, self.mouse_event.y);
         // The Swing popup layer now holds the showing popup (see SHOWING).
         SHOWING.with(|showing| *showing.borrow_mut() = Some(self.clone()));
     }

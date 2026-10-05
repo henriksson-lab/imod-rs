@@ -495,11 +495,11 @@ impl StorableValue for EtomoNumber {
         self.base.store_with_prepend(properties, Some(prepend));
     }
 
-    fn load(&mut self, properties: &BTreeMap<String, String>) {
+    fn load(&mut self, properties: &mut BTreeMap<String, String>) {
         EtomoNumber::load(self, properties);
     }
 
-    fn load_with_prepend(&mut self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         EtomoNumber::load_with_prepend(self, properties, Some(prepend));
     }
 }

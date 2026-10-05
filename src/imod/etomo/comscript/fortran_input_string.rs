@@ -7,20 +7,17 @@
 //! Implementation details: `Double.NaN` is used internaly to represent David's remaining
 //! default input specifier `/`.  `Double.NEGATIVE_INFINITY` is used to represent an
 //! uninitialized value.
-//!
-//! **Boundaries.**  `updateScriptParameter` (both overloads) and
-//! `validateAndSet(ComScriptCommand)` need `etomo/comscript/ComScriptCommand.java` and
-//! `etomo/comscript/ParamUtilities.java`; `regressionTest` (both overloads) needs
-//! `EtomoDirector.INSTANCE`.  Each carries a `TODO(unit)` marker below.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
 
 use super::fortran_input_syntax_exception::FortranInputSyntaxException;
+use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::r#type::const_etomo_number::{
     ConstEtomoNumber, java_lang_double_to_string, java_lang_double_value_of,
     java_lang_string_matches_whitespace,
 };
+use crate::imod::etomo::util::regression_test_failed_error::RegressionTestFailedError;
 
 /// Java `rcsid`.
 pub const RCSID: &str = "$Id$";
@@ -682,13 +679,31 @@ impl FortranInputString {
         buffer
     }
 
-    // TODO(unit): needs etomo/EtomoDirector.java - both Java `regressionTest` overloads
-    // (FortranInputString.java:635-651) open with
-    // `EtomoDirector.INSTANCE.getArguments().isTest()`, and the crate's etomo_director
-    // module has no `INSTANCE` singleton with an `Arguments` attached.  Every call site
-    // below carries an inline marker where the check would run; the value each caller
-    // returns is unaffected, because the check only throws
-    // `etomo/util/RegressionTestFailedError.java` when the two agree.
+    /// Java `regressionTest(String, String)` (FortranInputString.java:604-613).
+    /// `RegressionTestFailedError` is a `java.lang.Error`, so it unwinds; it is raised
+    /// with `panic_any` carrying the error.
+    fn regression_test_string(&self, expected: &str, actual: &str) {
+        if !etomo_director::ARGUMENTS.lock().unwrap().is_test() {
+            return;
+        }
+        if expected != actual {
+            std::panic::panic_any(RegressionTestFailedError::new(&format!(
+                "Expected:{}, actual value was:{}.",
+                expected, actual
+            )));
+        }
+    }
+
+    /// Java `regressionTest(boolean, boolean)` (FortranInputString.java:615-621).
+    fn regression_test_boolean(&self, expected: bool, actual: bool) {
+        if !etomo_director::ARGUMENTS.lock().unwrap().is_test() || expected == actual {
+            return;
+        }
+        std::panic::panic_any(RegressionTestFailedError::new(&format!(
+            "Expected:{}, actual value was:{}.",
+            expected, actual
+        )));
+    }
 
     /// Java `toStringForRegressionTest()`.  Return the string representation of the
     /// parameters.  Does NOT return null.  Deprecated 5/24/21: for unit test only,
@@ -773,9 +788,10 @@ impl FortranInputString {
     pub fn to_string_default_is_blank(&self, default_is_blank: bool) -> String {
         let substring =
             self.substring_default_is_blank(0, self.value.len() as i32, default_is_blank);
-        // TODO(unit): needs etomo/EtomoDirector.java - Java calls
-        // `regressionTest(toStringForRegressionTest(defaultIsBlank), substring)` here.
-        let _ = self.to_string_for_regression_test_default_is_blank(default_is_blank);
+        self.regression_test_string(
+            &self.to_string_for_regression_test_default_is_blank(default_is_blank),
+            &substring,
+        );
         substring
     }
 
@@ -955,9 +971,7 @@ impl FortranInputString {
     /// Java `isDefault()`.  Are all of the values set to their defaults.
     pub(crate) fn is_default(&self) -> bool {
         let is_default = self.is_substring_default(0, self.n_params);
-        // TODO(unit): needs etomo/EtomoDirector.java - Java calls
-        // `regressionTest(isDefaultForRegressionTest(), isDefault)` here.
-        let _ = self.is_default_for_regression_test();
+        self.regression_test_boolean(self.is_default_for_regression_test(), is_default);
         is_default
     }
 
@@ -1090,9 +1104,7 @@ impl FortranInputString {
     /// element of value does not contain infinity or NaN.
     pub fn is_null(&self) -> bool {
         let is_null = self.is_substring_null(0, self.n_params);
-        // TODO(unit): needs etomo/EtomoDirector.java - Java calls
-        // `regressionTest(isNullForRegressionTest(), isNull)` here.
-        let _ = self.is_null_for_regression_test();
+        self.regression_test_boolean(self.is_null_for_regression_test(), is_null);
         is_null
     }
 
@@ -1131,9 +1143,7 @@ impl FortranInputString {
     /// Java `isEmpty()`.  Returns false if any value is set.
     pub(crate) fn is_empty(&self) -> bool {
         let empty = self.is_substring_empty(0, self.n_params);
-        // TODO(unit): needs etomo/EtomoDirector.java - Java calls
-        // `regressionTest(isEmptyForRegressionTest(), empty)` here.
-        let _ = self.is_empty_for_regression_test();
+        self.regression_test_boolean(self.is_empty_for_regression_test(), empty);
         empty
     }
 
@@ -1204,9 +1214,7 @@ impl FortranInputString {
 impl std::fmt::Display for FortranInputString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let substring = self.substring(0, self.value.len() as i32);
-        // TODO(unit): needs etomo/EtomoDirector.java - Java calls
-        // `regressionTest(toStringForRegressionTest(), substring)` here.
-        let _ = self.to_string_for_regression_test();
+        self.regression_test_string(&self.to_string_for_regression_test(), &substring);
         f.write_str(&substring)
     }
 }

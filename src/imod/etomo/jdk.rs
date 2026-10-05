@@ -54,6 +54,8 @@ pub enum ComponentKind {
     CheckBoxMenuItem,
     Menu,
     PopupMenu,
+    /// `JPopupMenu.Separator` (`JSeparator`).
+    Separator,
     ProgressBar,
     Other,
 }
@@ -485,6 +487,9 @@ pub struct JComponent {
     spinner_model: RefCell<Option<SpinnerNumberModel>>,
     items: RefCell<Vec<Option<String>>>,
     selected_index: Cell<i32>,
+    /// `DefaultComboBoxModel.selectedObject` when it is not one of the items:
+    /// text entered in an editable `JComboBox` (`setSelectedItem`).
+    entered_item: RefCell<Option<String>>,
     /// `JTabbedPane` tab titles; the tab components are `children`.
     tab_titles: RefCell<Vec<String>>,
     tab_enabled: RefCell<Vec<bool>>,
@@ -508,6 +513,14 @@ pub struct JComponent {
     property_change_listeners: RefCell<Vec<(String, PropertyChangeListener)>>,
     /// `addFocusListener(FocusListener)`.
     focus_listeners: RefCell<Vec<FocusListener>>,
+    /// `GridBagLayout.setConstraints(component, constraints)`: the constraints the
+    /// component was laid out with in its `GridBagLayout` parent.
+    layout_constraints: Cell<Option<GridBagConstraints>>,
+    /// `getInputMap(...).put(keyStroke, key)` + `getActionMap().put(key, action)`: the
+    /// component's key bindings, by key stroke (`"alt UP"`).
+    key_bindings: RefCell<Vec<(String, Rc<dyn Fn()>)>>,
+    /// `setFocusable(boolean)`.
+    focusable: Cell<bool>,
 }
 
 impl JComponent {
@@ -533,6 +546,7 @@ impl JComponent {
             spinner_model: RefCell::new(None),
             items: RefCell::new(Vec::new()),
             selected_index: Cell::new(-1),
+            entered_item: RefCell::new(None),
             tab_titles: RefCell::new(Vec::new()),
             tab_enabled: RefCell::new(Vec::new()),
             minimum: Cell::new(0),
@@ -547,6 +561,9 @@ impl JComponent {
             popup_invoker: RefCell::new(None),
             property_change_listeners: RefCell::new(Vec::new()),
             focus_listeners: RefCell::new(Vec::new()),
+            layout_constraints: Cell::new(None),
+            key_bindings: RefCell::new(Vec::new()),
+            focusable: Cell::new(true),
         })
     }
 
@@ -590,7 +607,10 @@ impl JComponent {
     }
     /// `new JComboBox()`.
     pub fn new_combo_box() -> Rc<JComponent> {
-        Self::with_kind(ComponentKind::ComboBox, "")
+        let combo_box = Self::with_kind(ComponentKind::ComboBox, "");
+        // `JComboBox.isEditable` is false until `setEditable(true)`.
+        combo_box.editable.set(false);
+        combo_box
     }
     /// `new JTabbedPane()`.
     pub fn new_tabbed_pane() -> Rc<JComponent> {
@@ -616,14 +636,29 @@ impl JComponent {
     pub fn new_menu(text: &str) -> Rc<JComponent> {
         Self::with_kind(ComponentKind::Menu, text)
     }
-    /// `new JPopupMenu(label)`.
+    /// `new JPopupMenu(label)`.  A popup menu is not visible until shown.
     pub fn new_popup_menu(label: &str) -> Rc<JComponent> {
-        Self::with_kind(ComponentKind::PopupMenu, label)
+        let popup_menu = Self::with_kind(ComponentKind::PopupMenu, label);
+        popup_menu.visible.set(false);
+        popup_menu
+    }
+    /// `new JPopupMenu.Separator()`.
+    pub fn new_popup_separator() -> Rc<JComponent> {
+        Self::with_kind(ComponentKind::Separator, "")
     }
     /// Java `JPopupMenu.show(Component invoker, int x, int y)`: the menu is
-    /// visible over its invoker; a driver finds its items by name.
-    pub fn show(&self, invoker: &Rc<JComponent>, _x: i32, _y: i32) {
+    /// visible over its invoker, at `(x, y)` in the invoker's coordinates; a
+    /// driver finds its items by name.  Swing shows one popup menu at a time
+    /// (`MenuSelectionManager`), so a popup already showing is hidden.
+    pub fn show(self: &Rc<Self>, invoker: &Rc<JComponent>, x: i32, y: i32) {
         *self.popup_invoker.borrow_mut() = Some(Rc::downgrade(invoker));
+        let previous =
+            SHOWING_POPUP.with(|showing| showing.borrow_mut().replace((self.clone(), x, y)));
+        if let Some((previous, _, _)) = previous
+            && !Rc::ptr_eq(&previous, self)
+        {
+            previous.visible.set(false);
+        }
         self.visible.set(true);
     }
     /// The component a popup menu was last shown over.
@@ -685,6 +720,18 @@ impl JComponent {
     /// Java `setVisible`.
     pub fn set_visible(&self, visible: bool) {
         self.visible.set(visible);
+        // A hidden popup menu leaves Swing's popup layer.
+        if !visible && self.kind == ComponentKind::PopupMenu {
+            SHOWING_POPUP.with(|showing| {
+                let mut showing = showing.borrow_mut();
+                if showing
+                    .as_ref()
+                    .is_some_and(|(popup, _, _)| std::ptr::eq(popup.as_ref(), self))
+                {
+                    *showing = None;
+                }
+            });
+        }
     }
     /// Java `isVisible`.
     pub fn is_visible(&self) -> bool {
@@ -925,6 +972,11 @@ impl JComponent {
     pub fn add_mouse_listener(&self, listener: Rc<dyn MouseListener>) {
         self.mouse_listeners.borrow_mut().push(listener);
     }
+    /// Whether a mouse listener is registered (Swing's `MOUSE_EVENT_MASK`
+    /// test when it picks the event's target).
+    pub fn has_mouse_listeners(&self) -> bool {
+        !self.mouse_listeners.borrow().is_empty()
+    }
     /// Delivers a mouse press to the mouse listeners (a driver's right click).
     pub fn fire_mouse_pressed(&self, event: &MouseEvent) {
         let listeners: Vec<_> = self.mouse_listeners.borrow().clone();
@@ -964,6 +1016,45 @@ impl JComponent {
         };
         for listener in listeners.iter() {
             listener(&event);
+        }
+    }
+    /// `GridBagLayout.getConstraints(component)`, as set by
+    /// [`GridBagLayout::set_constraints`]; `None` outside a `GridBagLayout`.
+    pub fn get_layout_constraints(&self) -> Option<GridBagConstraints> {
+        self.layout_constraints.get()
+    }
+    /// Java `setFocusable(boolean)`.
+    pub fn set_focusable(&self, focusable: bool) {
+        self.focusable.set(focusable);
+    }
+    /// Java `isFocusable()`.
+    pub fn is_focusable(&self) -> bool {
+        self.focusable.get()
+    }
+    /// `getInputMap(condition).put(KeyStroke, key)` together with
+    /// `getActionMap().put(key, action)`: binds `key_stroke` (`"alt UP"`) to
+    /// `action`.  A later binding of the same stroke replaces the earlier one, as
+    /// the maps do.
+    pub fn put_key_binding(&self, key_stroke: &str, action: Rc<dyn Fn()>) {
+        let mut key_bindings = self.key_bindings.borrow_mut();
+        key_bindings.retain(|(stroke, _)| stroke != key_stroke);
+        key_bindings.push((key_stroke.to_owned(), action));
+    }
+    /// Delivers a key stroke to the component's key binding (Swing's
+    /// `processKeyBinding`).  Returns true when a binding handled it.
+    pub fn fire_key_binding(&self, key_stroke: &str) -> bool {
+        let action = self
+            .key_bindings
+            .borrow()
+            .iter()
+            .find(|(stroke, _)| stroke == key_stroke)
+            .map(|(_, action)| action.clone());
+        match action {
+            Some(action) => {
+                action();
+                true
+            }
+            None => false,
         }
     }
     /// Java `getDocument().addDocumentListener`.
@@ -1065,7 +1156,7 @@ impl JComponent {
     /// renders a null item as empty).
     pub fn add_item_nullable(self: &Rc<Self>, item: Option<&str>) {
         self.items.borrow_mut().push(item.map(str::to_owned));
-        if self.selected_index.get() < 0 {
+        if self.selected_index.get() < 0 && self.entered_item.borrow().is_none() {
             self.set_selected_index(0);
         }
     }
@@ -1073,6 +1164,7 @@ impl JComponent {
     pub fn remove_all_items(&self) {
         self.items.borrow_mut().clear();
         self.selected_index.set(-1);
+        *self.entered_item.borrow_mut() = None;
     }
     /// Java `JComboBox.getItemCount`.
     pub fn get_item_count(&self) -> usize {
@@ -1090,12 +1182,14 @@ impl JComponent {
     pub fn get_selected_item(&self) -> Option<String> {
         let index = self.selected_index.get();
         if index < 0 {
-            return None;
+            return self.entered_item.borrow().clone();
         }
         self.items.borrow().get(index as usize).cloned().flatten()
     }
     /// Java `JComboBox.setSelectedItem(Object)`: selects the first equal item;
-    /// an item not in a non-editable combo box leaves the selection unchanged.
+    /// an item not in a non-editable combo box leaves the selection unchanged;
+    /// in an editable one it becomes the selected object
+    /// (`DefaultComboBoxModel.setSelectedItem`), with no index.
     pub fn set_selected_item(self: &Rc<Self>, item: Option<&str>) {
         let index = self
             .items
@@ -1104,6 +1198,20 @@ impl JComponent {
             .position(|candidate| candidate.as_deref() == item);
         if let Some(index) = index {
             self.set_selected_index(index as i32);
+        } else if self.editable.get() || item.is_none() {
+            let old = self.get_selected_item();
+            if old.as_deref() != item {
+                self.selected_index.set(-1);
+                *self.entered_item.borrow_mut() = item.map(str::to_owned);
+                // `JComboBox.selectedItemChanged`
+                if old.is_some() {
+                    self.fire_item_state_changed(ItemState::Deselected);
+                }
+                if item.is_some() {
+                    self.fire_item_state_changed(ItemState::Selected);
+                }
+            }
+            self.fire_action_performed();
         }
     }
     /// Java `JComboBox.setSelectedIndex`: item listeners then action
@@ -1111,8 +1219,9 @@ impl JComponent {
     pub fn set_selected_index(self: &Rc<Self>, index: i32) {
         let old = self.selected_index.get();
         self.selected_index.set(index);
-        if old != index {
-            if old >= 0 {
+        let had_entered = self.entered_item.borrow_mut().take().is_some();
+        if old != index || had_entered {
+            if old >= 0 || had_entered {
                 self.fire_item_state_changed(ItemState::Deselected);
             }
             if index >= 0 {
@@ -1242,6 +1351,286 @@ impl JComponent {
         };
         Some(format!("{}%", (percent * 100.0).round_ties_even() as i64))
     }
+}
+
+/// `java.awt.GridBagConstraints.REMAINDER`.
+pub const GRID_BAG_REMAINDER: i32 = 0;
+/// `java.awt.GridBagConstraints.RELATIVE`.
+pub const GRID_BAG_RELATIVE: i32 = -1;
+/// `java.awt.GridBagConstraints.CENTER`.
+pub const GRID_BAG_CENTER: i32 = 10;
+/// `java.awt.GridBagConstraints.NONE`.
+pub const GRID_BAG_NONE: i32 = 0;
+/// `java.awt.GridBagConstraints.BOTH`.
+pub const GRID_BAG_BOTH: i32 = 1;
+
+/// `java.awt.GridBagConstraints`: the fields eTomo's tables set.  The row
+/// structure of a table (which cell ends a row, `gridwidth == REMAINDER`) is
+/// read back from them by the Slint bridge, which draws the table from the
+/// component tree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GridBagConstraints {
+    pub gridwidth: i32,
+    pub gridheight: i32,
+    pub weightx: f64,
+    pub weighty: f64,
+    pub anchor: i32,
+    pub fill: i32,
+}
+
+impl Default for GridBagConstraints {
+    /// `new GridBagConstraints()`.
+    fn default() -> GridBagConstraints {
+        GridBagConstraints {
+            gridwidth: 1,
+            gridheight: 1,
+            weightx: 0.0,
+            weighty: 0.0,
+            anchor: GRID_BAG_CENTER,
+            fill: GRID_BAG_NONE,
+        }
+    }
+}
+
+/// `java.awt.GridBagLayout`.  Only `setConstraints` is modelled: it records a
+/// copy of the constraints on the component.
+#[derive(Default)]
+pub struct GridBagLayout;
+
+impl GridBagLayout {
+    /// `new GridBagLayout()`.
+    pub fn new() -> GridBagLayout {
+        GridBagLayout
+    }
+    /// `setConstraints(Component, GridBagConstraints)`: a copy.
+    pub fn set_constraints(&self, component: &Rc<JComponent>, constraints: &GridBagConstraints) {
+        component.layout_constraints.set(Some(*constraints));
+    }
+}
+
+/// `java.awt.event.WindowListener`.  Every method defaults to Java's empty
+/// `WindowAdapter` body.
+pub trait WindowListener {
+    fn window_activated(&self) {}
+    fn window_closed(&self) {}
+    fn window_closing(&self) {}
+    fn window_deactivated(&self) {}
+    fn window_deiconified(&self) {}
+    fn window_iconified(&self) {}
+    fn window_opened(&self) {}
+}
+
+/// `WindowConstants.DO_NOTHING_ON_CLOSE`.
+pub const DO_NOTHING_ON_CLOSE: i32 = 0;
+/// `WindowConstants.HIDE_ON_CLOSE` (the `JDialog` default).
+pub const HIDE_ON_CLOSE: i32 = 1;
+/// `WindowConstants.DISPOSE_ON_CLOSE`.
+pub const DISPOSE_ON_CLOSE: i32 = 2;
+
+thread_local! {
+    /// The showing `JPopupMenu` with the point it was shown at (Swing's popup
+    /// layer holds one popup menu at a time).
+    static SHOWING_POPUP: RefCell<Option<(Rc<JComponent>, i32, i32)>> = const { RefCell::new(None) };
+}
+
+/// The showing popup menu (`JPopupMenu.show`) and the point in its invoker it
+/// was shown at.
+pub fn showing_popup_menu() -> Option<(Rc<JComponent>, i32, i32)> {
+    SHOWING_POPUP.with(|showing| showing.borrow().clone())
+}
+
+/// A mouse press at `component`: Swing's `LightweightDispatcher` gives the
+/// event to the deepest component under the pointer that takes mouse events,
+/// so a component that does not passes it to the nearest ancestor that does.
+/// Besides the components with an application `MouseListener`, Swing's own
+/// look and feel listens on every button, check box, radio button, menu item,
+/// text component, spinner, combo box and tabbed pane, and `ToolTipManager`
+/// on every component with a tool tip; such a component takes the press (and
+/// a right press does nothing there) unless the application also listens.
+/// Pressing anywhere hides a showing popup menu first (`BasicPopupMenuUI`'s
+/// `MouseGrabber` cancels the menu on a press outside it).
+pub fn dispatch_mouse_pressed(component: &Rc<JComponent>, event: &MouseEvent) {
+    if let Some((popup, _, _)) = showing_popup_menu() {
+        popup.set_visible(false);
+    }
+    let mut target = Some(component.clone());
+    while let Some(candidate) = target {
+        let takes_mouse_events = candidate.has_mouse_listeners()
+            || candidate
+                .get_tool_tip_text()
+                .is_some_and(|tip| !tip.is_empty())
+            || matches!(
+                candidate.kind(),
+                ComponentKind::Button
+                    | ComponentKind::ToggleButton
+                    | ComponentKind::CheckBox
+                    | ComponentKind::RadioButton
+                    | ComponentKind::TextField
+                    | ComponentKind::TextArea
+                    | ComponentKind::Spinner
+                    | ComponentKind::ComboBox
+                    | ComponentKind::TabbedPane
+                    | ComponentKind::MenuItem
+                    | ComponentKind::CheckBoxMenuItem
+                    | ComponentKind::Menu
+            );
+        if takes_mouse_events {
+            candidate.fire_mouse_pressed(event);
+            return;
+        }
+        target = candidate.get_parent();
+    }
+}
+
+thread_local! {
+    /// The showing `JDialog`s, in the order they were shown (`Window.getWindows()`
+    /// lists them; the driver and the Slint bridge look for components in them).
+    static SHOWING_DIALOGS: RefCell<Vec<Rc<JDialog>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A value moved through `invoke_later` that is only touched on the event
+/// dispatch thread, which both posts and runs it.
+struct EdtOnly<T>(T);
+// SAFETY: created on the EDT and consumed by a job that `invoke_later` runs on
+// the EDT; no other thread touches it.
+unsafe impl<T> Send for EdtOnly<T> {}
+
+/// `javax.swing.JDialog`: its content pane (the root of its component tree),
+/// title, modality, visibility, default close operation and window listeners.
+/// Painting and layout (`pack`) are the Slint side's.
+///
+/// **Modality.**  `setVisible(true)` on a modal Swing dialog does not return
+/// until the dialog is hidden: Swing runs a secondary event loop.  This
+/// stand-in has no secondary loop (the Slint event loop cannot be nested), so
+/// `set_visible(true)` returns at once, and code the Java runs *after* the
+/// blocking `setVisible(true)` is handed to [`JDialog::after_modal_return`],
+/// which runs it once the dialog is hidden - after the event that hid it has
+/// finished, as the Java's return from the secondary loop happens.
+pub struct JDialog {
+    content_pane: Rc<JComponent>,
+    title: RefCell<String>,
+    modal: bool,
+    visible: Cell<bool>,
+    default_close_operation: Cell<i32>,
+    window_listeners: RefCell<Vec<Rc<dyn WindowListener>>>,
+    modal_return: RefCell<Vec<Box<dyn FnOnce()>>>,
+    this: RefCell<Weak<JDialog>>,
+}
+
+impl JDialog {
+    /// `new JDialog(Frame owner, String title, boolean modal)`.  A dialog is
+    /// created invisible.
+    pub fn new(title: &str, modal: bool) -> Rc<JDialog> {
+        let content_pane = JComponent::new_panel();
+        content_pane.set_visible(false);
+        let dialog = Rc::new(JDialog {
+            content_pane,
+            title: RefCell::new(title.to_owned()),
+            modal,
+            visible: Cell::new(false),
+            default_close_operation: Cell::new(HIDE_ON_CLOSE),
+            window_listeners: RefCell::new(Vec::new()),
+            modal_return: RefCell::new(Vec::new()),
+            this: RefCell::new(Weak::new()),
+        });
+        *dialog.this.borrow_mut() = Rc::downgrade(&dialog);
+        dialog
+    }
+    /// `getContentPane()`.
+    pub fn get_content_pane(&self) -> Rc<JComponent> {
+        self.content_pane.clone()
+    }
+    /// `getTitle()`.
+    pub fn get_title(&self) -> String {
+        self.title.borrow().clone()
+    }
+    /// `setTitle(String)`.
+    pub fn set_title(&self, title: &str) {
+        *self.title.borrow_mut() = title.to_owned();
+    }
+    /// `isModal()`.
+    pub fn is_modal(&self) -> bool {
+        self.modal
+    }
+    /// `isVisible()`.
+    pub fn is_visible(&self) -> bool {
+        self.visible.get()
+    }
+    /// `setDefaultCloseOperation(int)`.
+    pub fn set_default_close_operation(&self, operation: i32) {
+        self.default_close_operation.set(operation);
+    }
+    /// `addWindowListener(WindowListener)`.
+    pub fn add_window_listener(&self, listener: Rc<dyn WindowListener>) {
+        self.window_listeners.borrow_mut().push(listener);
+    }
+    /// `pack()`: layout only.
+    pub fn pack(&self) {}
+    /// `setVisible(boolean)`.  See the type comment on modality.
+    pub fn set_visible(&self, visible: bool) {
+        let was_visible = self.visible.replace(visible);
+        self.content_pane.set_visible(visible);
+        let Some(this) = self.this.borrow().upgrade() else {
+            return;
+        };
+        if visible && !was_visible {
+            SHOWING_DIALOGS.with(|dialogs| dialogs.borrow_mut().push(this));
+            let listeners = self.window_listeners.borrow().clone();
+            for listener in listeners {
+                listener.window_opened();
+            }
+        } else if !visible && was_visible {
+            SHOWING_DIALOGS.with(|dialogs| {
+                dialogs
+                    .borrow_mut()
+                    .retain(|dialog| !Rc::ptr_eq(dialog, &this))
+            });
+            let jobs: Vec<Box<dyn FnOnce()>> = self.modal_return.borrow_mut().drain(..).collect();
+            for job in jobs {
+                let job = EdtOnly(job);
+                crate::imod::etomo::util::event_queue::invoke_later(move || {
+                    let job = job;
+                    (job.0)()
+                });
+            }
+        }
+    }
+    /// `dispose()`: hides the dialog and releases it.
+    pub fn dispose(&self) {
+        self.set_visible(false);
+        let listeners = self.window_listeners.borrow().clone();
+        for listener in listeners {
+            listener.window_closed();
+        }
+    }
+    /// The code the Java runs after a blocking `setVisible(true)` on this
+    /// modal dialog; run once the dialog is hidden (at once when it is not
+    /// showing or not modal).
+    pub fn after_modal_return(&self, job: Box<dyn FnOnce()>) {
+        if self.modal && self.visible.get() {
+            self.modal_return.borrow_mut().push(job);
+        } else {
+            job();
+        }
+    }
+    /// The window system's close request (the title bar's close button):
+    /// `WINDOW_CLOSING` to the listeners, then the default close operation.
+    pub fn process_window_closing(&self) {
+        let listeners = self.window_listeners.borrow().clone();
+        for listener in listeners {
+            listener.window_closing();
+        }
+        match self.default_close_operation.get() {
+            HIDE_ON_CLOSE => self.set_visible(false),
+            DISPOSE_ON_CLOSE => self.dispose(),
+            _ => {}
+        }
+    }
+}
+
+/// The showing `JDialog`s, oldest first.  EDT only.
+pub fn showing_dialogs() -> Vec<Rc<JDialog>> {
+    SHOWING_DIALOGS.with(|dialogs| dialogs.borrow().clone())
 }
 
 /// Finds the first component named `name` under `root` (depth first, the

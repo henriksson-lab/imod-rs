@@ -266,5 +266,9 @@ impl InputCellVirtual for ButtonCell {
     }
 }
 
-// TODO(unit): needs etomo/ui/TableComponent.java - `implements TableComponent`
-// (getPreferredWidth); the method is the inherent `get_preferred_width` above.
+/// The `etomo.ui.TableComponent` interface the Java class implements.
+impl crate::imod::etomo::ui::table_component::TableComponent for ButtonCell {
+    fn get_preferred_width(&self) -> i32 {
+        ButtonCell::get_preferred_width(self)
+    }
+}

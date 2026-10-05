@@ -1,101 +1,229 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/HighlighterButton.java`.
 //!
-//! `HeaderCell`, Swing listeners, GridBag placement, and platform detection are
-//! explicit GUI boundaries.  This source unit retains toggle, group, tooltip,
-//! listener, and header-identity state.
-#![allow(dead_code)]
+//! The "=>" toggle at the start of a table row: selecting it highlights the row
+//! (its parent) and turns off the other rows' highlighters in the same group (the
+//! table).  An event dispatch thread object, created as `Rc<Self>`; the action
+//! listener is a closure holding a weak reference to the button.
+//!
+//! **Groups.**  Java keeps a static `HashedLists` from each group to the
+//! highlighters in it, keyed by the group object.  Groups and buttons are EDT
+//! objects, so the lists are a thread-local keyed by the group's address; the lists
+//! hold weak references (Java's static lists keep the buttons alive for the run,
+//! which only matters to the groups that still exist).
 
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+
+use super::cell::CellVirtual;
+use super::header_cell::HeaderCell;
 use super::highlightable::Highlightable;
+use super::ui_parameters::UIParameters;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, GridBagConstraints, GridBagLayout, JComponent};
+use crate::imod::etomo::util::utilities;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+thread_local! {
+    /// Java private static final `groupLists = new HashedLists()`.
+    static GROUP_LISTS: RefCell<Vec<(*const (), Vec<Weak<HighlighterButton>>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// The address a group is keyed by (Java's `Hashtable` uses the group object).
+fn group_key(group: &Weak<dyn Highlightable>) -> *const () {
+    group.as_ptr() as *const ()
+}
+
+/// Java package-private `final class HighlighterButton`.
 pub struct HighlighterButton {
-    pub selected: bool,
-    pub displayed: bool,
-    pub enabled: bool,
-    pub focusable: bool,
-    pub width: i32,
-    pub tooltip: String,
-    pub table_header: Option<String>,
-    pub row_header: Option<String>,
-    pub column_header: Option<String>,
-    pub border_raised: bool,
-    pub listener_count: usize,
-    pub parent_key: usize,
-    pub group_key: Option<usize>,
+    /// Java private final `parent`.
+    parent: Weak<dyn Highlightable>,
+    /// Java private final `group`.
+    group: Option<Weak<dyn Highlightable>>,
+    /// Java private final `cell`.
+    cell: Rc<HeaderCell>,
+    /// Rust-only: Java `this` for the listeners and the group lists.
+    self_ref: Weak<HighlighterButton>,
 }
 
 impl HighlighterButton {
-    /// Java private constructor plus `getInstance` listener installation.
-    pub fn get_instance(parent_key: usize, group_key: Option<usize>) -> Self {
-        let mut button = Self {
-            enabled: true,
-            focusable: true,
-            width: 40,
-            border_raised: true,
-            parent_key,
-            group_key,
-            ..Default::default()
-        };
-        button.set_tool_tip_text_default(false);
-        button.add_listeners();
-        button
+    /// Java private `HighlighterButton(Highlightable, Highlightable)`.  Lazy
+    /// constructor.
+    fn new(
+        parent: Weak<dyn Highlightable>,
+        group: Option<Weak<dyn Highlightable>>,
+    ) -> Rc<HighlighterButton> {
+        let this = Rc::new_cyclic(|self_ref: &Weak<HighlighterButton>| {
+            // button
+            let cell = HeaderCell::get_toggle_instance(
+                Some("=>"),
+                (40.0 * UIParameters::get_instance_void().get_font_size_adjustment()) as i32,
+            );
+            HighlighterButton {
+                parent,
+                group: group.clone(),
+                cell,
+                self_ref: self_ref.clone(),
+            }
+        });
+        // group
+        if let Some(group) = &this.group {
+            let key = group_key(group);
+            GROUP_LISTS.with(|group_lists| {
+                let mut group_lists = group_lists.borrow_mut();
+                match group_lists.iter_mut().find(|(k, _)| *k == key) {
+                    Some((_, list)) => list.push(Rc::downgrade(&this)),
+                    None => group_lists.push((key, vec![Rc::downgrade(&this)])),
+                }
+            });
+        }
+        // Swing painting: cell.setBorder(BorderFactory.createBevelBorder(RAISED)).
+        CellVirtual::set_enabled(&*this.cell, true);
+        this.cell.add_action_listener(this.hb_action_listener());
+        this.cell.set_focusable(true);
+        this.set_tool_tip_text_void();
+        this
     }
-    pub fn set_headers(&mut self, table_header: &str, row_header: &str, column_header: &str) {
-        self.table_header = Some(table_header.to_owned());
-        self.row_header = Some(row_header.to_owned());
-        self.column_header = Some(column_header.to_owned());
+
+    /// Java private static final class `HBActionListener`.
+    fn hb_action_listener(&self) -> ActionListener {
+        let highlighter_button = self.self_ref.clone();
+        Rc::new(move |_event: &ActionEvent| {
+            if let Some(highlighter_button) = highlighter_button.upgrade() {
+                highlighter_button.action();
+            }
+        })
     }
-    pub fn is_highlighted(&self) -> bool {
-        self.selected
+
+    /// Java static `getInstance(Highlightable, Highlightable)`.
+    pub fn get_instance(
+        parent: Weak<dyn Highlightable>,
+        group: Option<Weak<dyn Highlightable>>,
+    ) -> Rc<HighlighterButton> {
+        let instance = HighlighterButton::new(parent, group);
+        instance.add_listeners();
+        instance
     }
-    pub fn get_width(&self) -> i32 {
-        self.width
-    }
-    pub fn set_tool_tip_text(&mut self, text: impl Into<String>) {
-        self.tooltip = text.into();
-    }
-    pub fn add(&mut self) {
-        self.displayed = true;
-    }
-    pub fn remove(&mut self) {
-        self.displayed = false;
-    }
-    /// Java `setSelected`; `parent.highlight` is deliberately performed by the
-    /// caller owning that parent because native listener dispatch is a boundary.
-    pub fn set_selected(&mut self, select: bool) -> bool {
-        self.selected = select;
-        self.action()
-    }
-    pub fn action(&self) -> bool {
-        self.selected
-    }
-    pub fn get_component(&self) -> bool {
-        self.displayed
-    }
-    /// Java has an empty body.
-    pub fn set_foreground(&mut self) {}
-    pub fn set_tool_tip_text_default(&mut self, mac_os: bool) {
-        let mask = if mac_os { "[alt option]" } else { "[Alt]" };
-        self.tooltip =
-            format!("Press to highlight row.  Hotkeys: {mask}+[Up_Arrow] and {mask}+[Down_Arrow]");
-    }
-    pub fn add_listeners(&mut self) {
-        self.listener_count += 1;
-    }
-    pub fn turn_off_highlight(&mut self, parent: &mut dyn Highlightable) {
-        self.selected = false;
-        parent.highlight(false);
-    }
-    /// Java `HBActionListener.actionPerformed` observable dispatch.
-    pub fn action_performed(
+
+    /// Java `setHeaders(String, HeaderCell, HeaderCell)`.
+    pub fn set_headers(
         &self,
-        parent: &mut dyn Highlightable,
-        group: Option<&mut dyn Highlightable>,
+        table_header: Option<&str>,
+        row_header: &Rc<HeaderCell>,
+        column_header: &Rc<HeaderCell>,
     ) {
-        let highlight = self.action();
-        parent.highlight(highlight);
-        if let Some(group) = group {
+        self.cell.set_table_header(table_header);
+        self.cell.set_row_header(Some(Rc::clone(row_header)));
+        self.cell.set_column_header(Some(Rc::clone(column_header)));
+        self.cell.set_name(None);
+        let cell: Rc<dyn CellVirtual> = self.cell.clone();
+        row_header.add_child(Rc::downgrade(&cell));
+        column_header.add_child(Rc::downgrade(&cell));
+    }
+
+    /// Java `isHighlighted()`.
+    pub fn is_highlighted(&self) -> bool {
+        self.cell.is_selected()
+    }
+
+    /// Java `getWidth()`.
+    pub fn get_width(&self) -> i32 {
+        self.cell.get_width()
+    }
+
+    /// Java `setToolTipText(String)`.
+    pub fn set_tool_tip_text(&self, text: Option<&str>) {
+        self.cell.set_tool_tip_text(text);
+    }
+
+    /// Java `add(JPanel, GridBagLayout, GridBagConstraints)`.
+    pub fn add(
+        &self,
+        panel: &Rc<JComponent>,
+        layout: &GridBagLayout,
+        constraints: &mut GridBagConstraints,
+    ) {
+        let old_weightx = constraints.weightx;
+        constraints.weightx = 0.0;
+        CellVirtual::add(&*self.cell, panel);
+        layout.set_constraints(&self.cell.get_component(), constraints);
+        constraints.weightx = old_weightx;
+    }
+
+    /// Java `remove()`.
+    pub fn remove(&self) {
+        self.cell.remove();
+    }
+
+    /// Java `setSelected(boolean)`.
+    pub fn set_selected(&self, select: bool) {
+        self.cell.set_selected(select);
+        self.action();
+    }
+
+    /// Java private `action()`.
+    fn action(&self) {
+        let highlight = self.cell.is_selected();
+        if let Some(parent) = self.parent.upgrade() {
+            parent.highlight(highlight);
+        }
+        let Some(group) = &self.group else {
+            return;
+        };
+        // If turning on the highlight, all other highlighters in the group must be
+        // turned off
+        let key = group_key(group);
+        let list: Option<Vec<Weak<HighlighterButton>>> = GROUP_LISTS.with(|group_lists| {
+            group_lists
+                .borrow()
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map(|(_, list)| list.clone())
+        });
+        let Some(list) = list else {
+            panic!("Should be in the list.  group={:p}", key);
+        };
+        for highlighter_button in list.iter().filter_map(Weak::upgrade) {
+            if !std::ptr::eq(&*highlighter_button, self) {
+                highlighter_button.turn_off_highlight();
+            }
+        }
+        // The group may also need to respond to the highlight
+        if let Some(group) = group.upgrade() {
             group.highlight(highlight);
+        }
+    }
+
+    /// Java final `getComponent()`.
+    pub fn get_component(&self) -> Rc<JComponent> {
+        self.cell.get_component()
+    }
+
+    /// Java `setForeground()`, empty.
+    pub fn set_foreground(&self) {}
+
+    /// Java private `setToolTipText()`.
+    fn set_tool_tip_text_void(&self) {
+        let mask = if utilities::is_mac_os() {
+            "[alt option]"
+        } else {
+            "[Alt]"
+        };
+        self.cell.set_tool_tip_text(Some(&format!(
+            "Press to highlight row.  Hotkeys: {mask}+[Up_Arrow] and {mask}+[Down_Arrow]"
+        )));
+    }
+
+    /// Java private `addListeners()`.  (The constructor has already added one
+    /// `HBActionListener`; the source adds a second, so a click runs `action()`
+    /// twice, which is idempotent.)
+    fn add_listeners(&self) {
+        self.cell.add_action_listener(self.hb_action_listener());
+    }
+
+    /// Java private `turnOffHighlight()`.
+    fn turn_off_highlight(&self) {
+        self.cell.set_selected(false);
+        if let Some(parent) = self.parent.upgrade() {
+            parent.highlight(false);
         }
     }
 }
@@ -103,25 +231,31 @@ impl HighlighterButton {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[derive(Default)]
-    struct Target(Vec<bool>);
+    use std::cell::Cell;
+
+    struct Target(Cell<i32>, Cell<bool>);
     impl Highlightable for Target {
-        fn highlight(&mut self, highlight: bool) {
-            self.0.push(highlight);
+        fn highlight(&self, highlight: bool) {
+            self.0.set(self.0.get() + 1);
+            self.1.set(highlight);
         }
     }
+
     #[test]
-    fn source_toggle_listener_and_headers_are_retained() {
-        let mut button = HighlighterButton::get_instance(1, Some(2));
-        button.set_headers("Table", "1", "Column");
-        assert_eq!(button.listener_count, 1);
-        assert!(button.set_selected(true));
-        let mut parent = Target::default();
-        let mut group = Target::default();
-        button.action_performed(&mut parent, Some(&mut group));
-        assert_eq!(parent.0, vec![true]);
-        assert_eq!(group.0, vec![true]);
-        button.turn_off_highlight(&mut parent);
-        assert!(!button.is_highlighted());
+    fn selecting_one_row_turns_the_other_off() {
+        let group: Rc<dyn Highlightable> = Rc::new(Target(Cell::new(0), Cell::new(false)));
+        let row1 = Rc::new(Target(Cell::new(0), Cell::new(false)));
+        let row2 = Rc::new(Target(Cell::new(0), Cell::new(false)));
+        let row1_dyn: Rc<dyn Highlightable> = row1.clone();
+        let row2_dyn: Rc<dyn Highlightable> = row2.clone();
+        let button1 =
+            HighlighterButton::get_instance(Rc::downgrade(&row1_dyn), Some(Rc::downgrade(&group)));
+        let button2 =
+            HighlighterButton::get_instance(Rc::downgrade(&row2_dyn), Some(Rc::downgrade(&group)));
+        button1.set_selected(true);
+        assert!(button1.is_highlighted() && row1.1.get());
+        button2.get_component().do_click();
+        assert!(button2.is_highlighted() && row2.1.get());
+        assert!(!button1.is_highlighted() && !row1.1.get());
     }
 }

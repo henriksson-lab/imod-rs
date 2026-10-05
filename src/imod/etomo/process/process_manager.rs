@@ -14,6 +14,7 @@
 //! (`Command`), as in the Java.  A Java `ConstXxxParam` argument is the
 //! concrete `XxxParam` here.
 
+use crate::imod::etomo::process::process_messages::MessagesArray;
 use super::align_log_generator::{self, AlignLogGenerator};
 use super::background_process::BackgroundProcess;
 use super::base_process_manager::{
@@ -236,7 +237,7 @@ impl ProcessManager {
         let exit_value = copy_tomo_coms.run();
         // process messages
         let messages = copy_tomo_coms.get_process_messages()?;
-        if !messages.is_empty(MessageType::Info) {
+        if !messages.is_empty(Some(MessageType::Info)) {
             // smallest signed 16-bit integer (amount that needs to be added to
             // make everything positive).
             let info_value = "32768";
@@ -256,7 +257,7 @@ impl ProcessManager {
                 }
             }
         }
-        if !messages.is_empty(MessageType::Error) {
+        if !messages.is_empty(Some(MessageType::Error)) {
             let mut error_message = String::from("Error running Copytomocoms");
             for i in 0..messages.size(MessageType::Error) {
                 error_message.push_str(&format!(
@@ -334,7 +335,7 @@ impl ProcessManager {
             let Some(messages) = param.get_process_messages() else {
                 return false;
             };
-            retval = messages.is_empty(MessageType::Error);
+            retval = messages.is_empty(Some(MessageType::Error));
             if !retval {
                 let mut error_message = String::from(
                     "The template validation has failed because of invalid directive(s).\nBatchruntomo error message:",
@@ -379,7 +380,7 @@ impl ProcessManager {
         let Some(messages) = param.get_process_messages() else {
             return false;
         };
-        let err = !messages.is_empty(MessageType::Error);
+        let err = !messages.is_empty(Some(MessageType::Error));
         if err {
             let mut error_message = String::from("Error running Makecomfile");
             for i in 0..messages.size(MessageType::Error) {
@@ -2094,7 +2095,7 @@ impl BaseProcessManagerHooks for ProcessManager {
         multi_line_messages: bool,
         run_type: Option<RunType>,
         managed_process_data: Option<Arc<Mutex<ProcessData>>>,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
     ) -> Result<String, AxisBusyException> {
         if param.equals_root_name(Some(ProcessName::VOLCOMBINE), Some(axis_id)) {
             return base.processchunks_monitor(

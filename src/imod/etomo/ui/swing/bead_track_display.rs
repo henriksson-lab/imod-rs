@@ -34,7 +34,3 @@ pub trait BeadTrackDisplay {
         do_validation: bool,
     ) -> Result<bool, BeadTrackDisplayException>;
 }
-
-// TODO(unit): BeadtrackPanel.java implements BeadTrackDisplay; the Rust
-// `beadtrack_panel.rs` takes a boundary param and a manager argument, so the
-// impl waits for that unit.

@@ -1,381 +1,464 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/BoundaryTable.java`.
 //!
-//! Swing construction and GridBag insertion, `JoinManager`, `JoinDialog`, and repaint
-//! are boundaries.  The source table's headers, `RowList`, paging, reset and transfer
-//! behavior are retained directly; `BoundaryRow.java` remains its own source unit.
-#![allow(dead_code)]
+//! The Join dialog's boundary table (Model and Rejoin tabs): one `BoundaryRow` per
+//! boundary between consecutive sections.  An event dispatch thread object, created
+//! as `Rc<Self>`; the dialog owns it.  Cells record their `GridBagConstraints` as
+//! they are added (see `section_table_panel.rs`), which is how the Slint window draws
+//! the rows.
 
-use super::boundary_row::{
-    BoundaryRow, BoundaryRowMetaData, BoundaryRowScreenState, BoundaryTable as BoundaryRowTable,
-    XfjointomoLog,
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+
+use super::boundary_row::BoundaryRow;
+use super::cell::CellVirtual;
+use super::etched_border::EtchedBorder;
+use super::etomo_panel::EtomoPanel;
+use super::header_cell::HeaderCell;
+use super::join_dialog::{JoinDialog, Tab};
+use super::viewable::Viewable;
+use super::viewport::Viewport;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::jdk::{
+    GRID_BAG_BOTH, GRID_BAG_CENTER, GRID_BAG_REMAINDER, GridBagConstraints, GridBagLayout,
+    JComponent,
 };
-use super::section_table_panel::{HeaderCell, Tab, Viewport};
+use crate::imod::etomo::join_manager::JoinManager;
+use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::r#type::const_join_meta_data::ConstJoinMetaData;
+use crate::imod::etomo::r#type::join_meta_data::JoinMetaData;
+use crate::imod::etomo::r#type::join_screen_state::JoinScreenState;
 
+/// Java package-private static final `TABLE_LABEL`.
 pub const TABLE_LABEL: &str = "Boundary Table";
 
-/// Java private static final `BoundaryTable.RowList`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct RowList {
-    pub list: Vec<BoundaryRow>,
-}
-impl RowList {
-    pub fn clear(&mut self, _viewport: &Viewport) {
-        self.list.clear();
-    }
-    pub fn size(&self) -> usize {
-        self.list.len()
-    }
-    pub fn remove_display(&mut self) {
-        for row in &mut self.list {
-            row.remove_display();
-        }
-    }
-    pub fn display(&mut self, tab: Tab, viewport: &Viewport) {
-        for (index, row) in self.list.iter_mut().enumerate() {
-            row.display(index, viewport, tab);
-        }
-    }
-    pub fn set_xfjointomo_result(&mut self, log: &XfjointomoLog) {
-        for row in &mut self.list {
-            row.set_xfjointomo_result(log);
-        }
-    }
-    pub fn get_screen_state(&self, state: &mut BoundaryRowScreenState) {
-        for row in &self.list {
-            row.get_screen_state(state);
-        }
-    }
-    pub fn get_meta_data(&self, data: &mut BoundaryRowMetaData) {
-        for row in &self.list {
-            row.get_meta_data(data);
-        }
-    }
-    pub fn add(
-        &mut self,
-        size: usize,
-        data: &BoundaryRowMetaData,
-        state: &BoundaryRowScreenState,
-        table: BoundaryRowTable,
-    ) {
-        for index in 0..size {
-            let mut row = BoundaryRow::new(index as i32 + 1, data, state, table.clone());
-            row.set_names();
-            self.list.push(row);
-        }
-    }
-    pub fn get(&self, index: usize) -> Option<&BoundaryRow> {
-        self.list.get(index)
-    }
+/// Java package-private `final class BoundaryTable implements Viewable`.
+pub struct BoundaryTable {
+    // header
+    // first row
+    header1_boundaries: Rc<HeaderCell>,
+    header1_sections: Rc<HeaderCell>,
+    header1_best_gap: Rc<HeaderCell>,
+    header1_error: Rc<HeaderCell>,
+    header1_original: Rc<HeaderCell>,
+    header1_adjusted: Rc<HeaderCell>,
+    // second row
+    header2_boundaries: Rc<HeaderCell>,
+    header2_sections: Rc<HeaderCell>,
+    header2_best_gap: Rc<HeaderCell>,
+    header2_mean_error: Rc<HeaderCell>,
+    header2_max_error: Rc<HeaderCell>,
+    header2_original_end: Rc<HeaderCell>,
+    header2_original_start: Rc<HeaderCell>,
+    header2_adjusted_end: Rc<HeaderCell>,
+    header2_adjusted_start: Rc<HeaderCell>,
+    // third row
+    header3_sections: Rc<HeaderCell>,
+    header3_best_gap: Rc<HeaderCell>,
+    header3_original_end: Rc<HeaderCell>,
+    header3_original_start: Rc<HeaderCell>,
+    header3_adjusted_end: Rc<HeaderCell>,
+    header3_adjusted_start: Rc<HeaderCell>,
+
+    /// Java private final `rowList`.
+    row_list: RefCell<Vec<Rc<BoundaryRow>>>,
+    /// Java private final `rootPanel = new JPanel()`.
+    root_panel: Rc<JComponent>,
+    /// Java private final `constraints = new GridBagConstraints()`.
+    constraints: RefCell<GridBagConstraints>,
+    /// Java private final `pnlTable = new JPanel()`.
+    pnl_table: Rc<JComponent>,
+    /// Java private final `layout = new GridBagLayout()`.
+    layout: GridBagLayout,
+    /// Java private final `viewport`.
+    viewport: Rc<Viewport>,
+
+    /// Java private final `manager`.
+    manager: &'static JoinManager,
+    /// Java private final `parent` (the dialog owns the table).
+    parent: Weak<JoinDialog>,
+    /// Java private final `screenState`.
+    screen_state: &'static JoinScreenState,
+    /// Java private final `metaData`.
+    meta_data: &'static JoinMetaData,
+    /// Java private final `focusableParents`.
+    focusable_parents: Vec<Rc<JComponent>>,
+
+    /// Java private `rowChange`, initially true.
+    row_change: Cell<bool>,
+    /// Java private `tab`, initially null.
+    tab: Cell<Option<Tab>>,
+    /// Rust-only: Java `this`.
+    self_ref: Weak<BoundaryTable>,
 }
 
-/// Java final `BoundaryTable`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct BoundaryTable {
-    pub header1_boundaries: HeaderCell,
-    pub header1_sections: HeaderCell,
-    pub header1_best_gap: HeaderCell,
-    pub header1_error: HeaderCell,
-    pub header1_original: HeaderCell,
-    pub header1_adjusted: HeaderCell,
-    pub header2_boundaries: HeaderCell,
-    pub header2_sections: HeaderCell,
-    pub header2_best_gap: HeaderCell,
-    pub header2_mean_error: HeaderCell,
-    pub header2_max_error: HeaderCell,
-    pub header2_original_end: HeaderCell,
-    pub header2_original_start: HeaderCell,
-    pub header2_adjusted_end: HeaderCell,
-    pub header2_adjusted_start: HeaderCell,
-    pub header3_sections: HeaderCell,
-    pub header3_best_gap: HeaderCell,
-    pub header3_original_end: HeaderCell,
-    pub header3_original_start: HeaderCell,
-    pub header3_adjusted_end: HeaderCell,
-    pub header3_adjusted_start: HeaderCell,
-    pub row_list: RowList,
-    pub viewport: Viewport,
-    pub row_change: bool,
-    pub tab: Option<Tab>,
-    /// Java `getFocusableParents`' two tab components.
-    pub focusable_parents: [bool; 2],
-    /// Native Swing panels/layout remain boundary-owned.
-    pub root_panel_present: bool,
-    pub table_panel_present: bool,
-    /// `manager.getMainPanel().repaint()` notification.
-    pub repaint_requested: bool,
-    /// Source header insertion order at the Swing layout boundary.
-    pub displayed_headers: Vec<String>,
-}
 impl BoundaryTable {
-    /// Java package-private constructor after the manager/dialog inputs cross boundaries.
-    pub fn new(table_size: usize) -> Self {
-        let mut table = Self {
-            header1_boundaries: HeaderCell::new("Boundaries"),
-            header1_sections: HeaderCell::new("Sections"),
-            header1_best_gap: HeaderCell::new("Best"),
-            header1_error: HeaderCell::new("Error"),
-            header1_original: HeaderCell::new("Original"),
-            header1_adjusted: HeaderCell::new("Adjusted"),
-            header2_boundaries: HeaderCell::default(),
-            header2_sections: HeaderCell::default(),
-            header2_best_gap: HeaderCell::new("Gap"),
-            header2_mean_error: HeaderCell::new("Mean"),
-            header2_max_error: HeaderCell::new("Max"),
-            header2_original_end: HeaderCell::default(),
-            header2_original_start: HeaderCell::default(),
-            header2_adjusted_end: HeaderCell::default(),
-            header2_adjusted_start: HeaderCell::default(),
-            header3_sections: HeaderCell::default(),
-            header3_best_gap: HeaderCell::default(),
-            header3_original_end: HeaderCell::new("End"),
-            header3_original_start: HeaderCell::new("Start"),
-            header3_adjusted_end: HeaderCell::new("End"),
-            header3_adjusted_start: HeaderCell::new("Start"),
-            row_list: RowList::default(),
-            viewport: Viewport::new(table_size),
-            row_change: true,
-            tab: None,
-            focusable_parents: [true, true],
-            root_panel_present: true,
-            table_panel_present: true,
-            repaint_requested: false,
-            displayed_headers: Vec::new(),
-        };
-        table.viewport.init_paging();
-        table.set_tool_tip_text();
-        table
+    /// Java package-private `BoundaryTable(JoinManager, JoinDialog)`.
+    pub fn new(manager: &'static JoinManager, join_dialog: &Rc<JoinDialog>) -> Rc<BoundaryTable> {
+        let this = Rc::new_cyclic(|self_ref: &Weak<BoundaryTable>| {
+            let viewable: Weak<dyn Viewable> = self_ref.clone();
+            let join_table_size = etomo_director::INSTANCE
+                .with_user_configuration(|user_config| user_config.get_join_table_size().get_int());
+            BoundaryTable {
+                header1_boundaries: HeaderCell::new_string(Some("Boundaries")),
+                header1_sections: HeaderCell::new_string(Some("Sections")),
+                header1_best_gap: HeaderCell::new_string(Some("Best")),
+                header1_error: HeaderCell::new_string(Some("Error")),
+                header1_original: HeaderCell::new_string(Some("Original")),
+                header1_adjusted: HeaderCell::new_string(Some("Adjusted")),
+                header2_boundaries: HeaderCell::new_void(),
+                header2_sections: HeaderCell::new_void(),
+                header2_best_gap: HeaderCell::new_string(Some("Gap")),
+                header2_mean_error: HeaderCell::new_string(Some("Mean")),
+                header2_max_error: HeaderCell::new_string(Some("Max")),
+                header2_original_end: HeaderCell::new_void(),
+                header2_original_start: HeaderCell::new_void(),
+                header2_adjusted_end: HeaderCell::new_void(),
+                header2_adjusted_start: HeaderCell::new_void(),
+                header3_sections: HeaderCell::new_void(),
+                header3_best_gap: HeaderCell::new_void(),
+                header3_original_end: HeaderCell::new_string(Some("End")),
+                header3_original_start: HeaderCell::new_string(Some("Start")),
+                header3_adjusted_end: HeaderCell::new_string(Some("End")),
+                header3_adjusted_start: HeaderCell::new_string(Some("Start")),
+                row_list: RefCell::new(Vec::new()),
+                root_panel: JComponent::new_panel(),
+                constraints: RefCell::new(GridBagConstraints::default()),
+                pnl_table: JComponent::new_panel(),
+                layout: GridBagLayout::new(),
+                viewport: Viewport::new(viewable, join_table_size, Some("Boundary")),
+                manager,
+                parent: Rc::downgrade(join_dialog),
+                screen_state: manager.get_screen_state(),
+                meta_data: manager.get_join_meta_data(),
+                focusable_parents: vec![
+                    join_dialog.get_model_tab_j_component(),
+                    join_dialog.get_rejoin_tab_j_component(),
+                ],
+                row_change: Cell::new(true),
+                tab: Cell::new(None),
+                self_ref: self_ref.clone(),
+            }
+        });
+        // construct panels
+        let pnl_border = EtomoPanel::new();
+        // init
+        this.viewport.init_paging();
+        // root panel
+        this.root_panel.set_focusable(true);
+        // Swing layout: rootPanel BoxLayout Y_AXIS.
+        this.root_panel.add(&pnl_border.get_component());
+        // Swing layout: Box.createRigidArea(FixedDim.x0_y40), Box.createRigidArea(x0_y20).
+        // border pane
+        // Swing layout: pnlBorder BoxLayout X_AXIS.
+        pnl_border.set_border(&EtchedBorder::new(Some(TABLE_LABEL)).get_border());
+        pnl_border.get_component().add(&this.pnl_table);
+        if let Some(paging_panel) = this.viewport.get_paging_panel() {
+            pnl_border.get_component().add(&paging_panel);
+        }
+        // table panel
+        // Swing painting: pnlTable LineBorder.createBlackLineBorder(); layout.
+        this.constraints.borrow_mut().fill = GRID_BAG_BOTH;
+        this.header1_best_gap.pad();
+        this.header3_original_end.pad();
+        this.header3_original_start.pad();
+        this.set_tool_tip_text();
+        this
     }
-    pub fn get_focusable_parents(&self) -> &[bool; 2] {
-        &self.focusable_parents
+
+    /// Java field read `parent`.
+    fn parent(&self) -> Rc<JoinDialog> {
+        self.parent.upgrade().expect("the join dialog owns its boundary table")
     }
-    pub fn set_xfjointomo_result(&mut self, log: &XfjointomoLog) {
-        self.row_list.set_xfjointomo_result(log);
+
+    /// Java `pnlTable` read by the rows (Java passes it to each row).
+    pub fn get_table_panel(&self) -> Rc<JComponent> {
+        self.pnl_table.clone()
     }
-    pub fn display(
-        &mut self,
-        tab: Tab,
-        section_table_size: usize,
-        data: &BoundaryRowMetaData,
-        state: &BoundaryRowScreenState,
-    ) {
-        self.display_force(false, tab, section_table_size, data, state);
+
+    /// Java `layout` read by the rows.
+    pub fn get_layout(&self) -> &GridBagLayout {
+        &self.layout
     }
-    pub fn msg_viewport_paged(
-        &mut self,
-        tab: Tab,
-        section_table_size: usize,
-        data: &BoundaryRowMetaData,
-        state: &BoundaryRowScreenState,
-    ) {
-        self.display_force(true, tab, section_table_size, data, state);
+
+    /// Java `constraints` read by the rows: a copy.
+    pub fn get_constraints(&self) -> GridBagConstraints {
+        *self.constraints.borrow()
     }
-    pub fn size(&self) -> usize {
-        self.row_list.size()
+
+    /// Java `constraints` mutated by the rows.
+    pub fn with_constraints<R>(&self, f: impl FnOnce(&mut GridBagConstraints) -> R) -> R {
+        let mut constraints = *self.constraints.borrow();
+        let result = f(&mut constraints);
+        *self.constraints.borrow_mut() = constraints;
+        result
     }
-    pub fn display_force(
-        &mut self,
-        force: bool,
-        tab: Tab,
-        section_table_size: usize,
-        data: &BoundaryRowMetaData,
-        state: &BoundaryRowScreenState,
-    ) {
-        let old_tab = self.tab;
-        self.tab = Some(tab);
-        if !force && old_tab == self.tab && !self.row_change {
+
+    /// Java package-private `setXfjointomoResult() throws LogFileException,
+    /// IOException, LockException`.
+    pub fn set_xfjointomo_result(&self) -> Result<(), LogFileError> {
+        let rows = self.row_list.borrow().clone();
+        for row in rows {
+            row.set_xfjointomo_result(self.manager)?;
+        }
+        Ok(())
+    }
+
+    /// Java package-private `display()`.  Updates and displays the table as
+    /// necessary.  Does nothing if the tab has not changed and rowChange is false.
+    pub fn display(&self) {
+        self.display_force(false);
+    }
+
+    /// Java package-private `display(boolean)`.  Updates and displays the table as
+    /// necessary.  Does nothing if the tab has not changed and rowChange is false.
+    /// Always updates if force is true.
+    pub fn display_force(&self, force: bool) {
+        let old_tab = self.tab.get();
+        self.tab.set(Some(self.parent().get_tab()));
+        if !force && old_tab == self.tab.get() && !self.row_change.get() {
             return;
         }
-        self.row_list.remove_display();
-        self.remove_all();
-        self.add_header(tab);
-        self.add_rows(section_table_size, data, state);
-        self.repaint_requested = true;
+        let rows = self.row_list.borrow().clone();
+        for row in rows {
+            row.remove_display();
+        }
+        self.pnl_table.remove_all();
+        self.add_header(self.tab.get());
+        self.add_rows();
+        if let Some(main_panel) = self.manager.get_main_panel() {
+            main_panel.main_panel().repaint();
+        }
     }
-    pub fn msg_row_change(
-        &mut self,
-        state: &mut BoundaryRowScreenState,
-        data: &mut BoundaryRowMetaData,
-    ) {
-        self.row_change = true;
-        BoundaryRow::reset_screen_state(state);
-        BoundaryRow::reset_meta_data(data);
+
+    /// Java package-private `msgRowChange()`.  Causes the rows in the table to be
+    /// deleted and recreated when the table is displayed.
+    pub fn msg_row_change(&self) {
+        self.row_change.set(true);
+        // when addRows() is called, it will load from screenState and metaData, so
+        // they need to be empty if they are out of date.
+        BoundaryRow::reset_screen_state(self.screen_state);
+        BoundaryRow::reset_meta_data(self.meta_data);
     }
-    pub fn get_screen_state(&self, state: &mut BoundaryRowScreenState) {
-        BoundaryRow::reset_screen_state(state);
-        self.row_list.get_screen_state(state);
+
+    /// Java package-private `getScreenState()`.
+    pub fn get_screen_state(&self) {
+        BoundaryRow::reset_screen_state(self.screen_state);
+        let rows = self.row_list.borrow().clone();
+        for row in rows {
+            row.get_screen_state(self.screen_state);
+        }
     }
-    /// The sole real `BoundaryTable` member read from `BoundaryRow.setNames`.
-    pub fn get_adjusted_header_cell(&self) -> &HeaderCell {
-        &self.header1_adjusted
+
+    /// Java package-private `getAdjustedHeaderCell()`.
+    pub fn get_adjusted_header_cell(&self) -> Rc<HeaderCell> {
+        self.header1_adjusted.clone()
     }
-    pub fn get_meta_data(&self, data: &mut BoundaryRowMetaData) {
-        BoundaryRow::reset_meta_data(data);
-        self.row_list.get_meta_data(data);
+
+    /// Java package-private `getMetaData()`.
+    pub fn get_meta_data(&self) {
+        BoundaryRow::reset_meta_data(self.meta_data);
+        let rows = self.row_list.borrow().clone();
+        for row in rows {
+            row.get_meta_data(self.meta_data);
+        }
     }
-    pub fn get_container(&self) -> bool {
-        self.root_panel_present
+
+    /// Java package-private `getContainer()`.
+    pub fn get_container(&self) -> Rc<JComponent> {
+        self.root_panel.clone()
     }
-    pub fn add_header(&mut self, tab: Tab) {
-        if tab == Tab::Model {
+
+    /// `header.add(pnlTable, layout, constraints)`: the cell's `add` and the
+    /// `layout.setConstraints` it makes.
+    fn add_header_cell(&self, cell: &Rc<HeaderCell>) {
+        CellVirtual::add(&**cell, &self.pnl_table);
+        self.layout
+            .set_constraints(&cell.get_component(), &self.constraints.borrow());
+    }
+
+    /// Java private `addHeader(JoinDialog.Tab)`.
+    fn add_header(&self, tab: Option<Tab>) {
+        if tab == Some(Tab::Model) {
             self.add_model_header();
-        } else if tab == Tab::Rejoin {
+        } else if tab == Some(Tab::Rejoin) {
             self.add_rejoin_header();
         }
     }
-    pub fn add_model_header(&mut self) {
-        self.displayed_headers.extend([
-            self.header1_boundaries.text.clone(),
-            self.header1_best_gap.text.clone(),
-            self.header1_error.text.clone(),
-            self.header2_boundaries.text.clone(),
-            self.header2_best_gap.text.clone(),
-            self.header2_mean_error.text.clone(),
-            self.header2_max_error.text.clone(),
-        ]);
+
+    /// Java private `addModelHeader()`.
+    fn add_model_header(&self) {
+        // Header
+        // First row
+        {
+            let mut constraints = self.constraints.borrow_mut();
+            constraints.anchor = GRID_BAG_CENTER;
+            constraints.weightx = 0.0;
+            constraints.weighty = 0.0;
+            constraints.gridheight = 1;
+            constraints.gridwidth = 1;
+        }
+        self.add_header_cell(&self.header1_boundaries);
+        self.constraints.borrow_mut().weightx = 0.1;
+        self.add_header_cell(&self.header1_best_gap);
+        self.constraints.borrow_mut().gridwidth = GRID_BAG_REMAINDER;
+        self.add_header_cell(&self.header1_error);
+        // second row
+        {
+            let mut constraints = self.constraints.borrow_mut();
+            constraints.weightx = 0.0;
+            constraints.gridwidth = 1;
+        }
+        self.add_header_cell(&self.header2_boundaries);
+        self.constraints.borrow_mut().weightx = 0.1;
+        self.add_header_cell(&self.header2_best_gap);
+        self.add_header_cell(&self.header2_mean_error);
+        self.constraints.borrow_mut().gridwidth = GRID_BAG_REMAINDER;
+        self.add_header_cell(&self.header2_max_error);
     }
-    pub fn add_rejoin_header(&mut self) {
-        self.displayed_headers.extend([
-            self.header1_sections.text.clone(),
-            self.header1_original.text.clone(),
-            self.header1_best_gap.text.clone(),
-            self.header1_adjusted.text.clone(),
-            self.header2_sections.text.clone(),
-            self.header2_original_end.text.clone(),
-            self.header2_original_start.text.clone(),
-            self.header2_best_gap.text.clone(),
-            self.header2_adjusted_end.text.clone(),
-            self.header2_adjusted_start.text.clone(),
-            self.header3_sections.text.clone(),
-            self.header3_original_end.text.clone(),
-            self.header3_original_start.text.clone(),
-            self.header3_best_gap.text.clone(),
-            self.header3_adjusted_end.text.clone(),
-            self.header3_adjusted_start.text.clone(),
-        ]);
+
+    /// Java private `addRejoinHeader()`.
+    fn add_rejoin_header(&self) {
+        // Header
+        // First row
+        {
+            let mut constraints = self.constraints.borrow_mut();
+            constraints.anchor = GRID_BAG_CENTER;
+            constraints.weightx = 0.0;
+            constraints.weighty = 0.0;
+            constraints.gridheight = 1;
+            constraints.gridwidth = 1;
+        }
+        self.add_header_cell(&self.header1_sections);
+        {
+            let mut constraints = self.constraints.borrow_mut();
+            constraints.weightx = 0.1;
+            constraints.gridwidth = 2;
+        }
+        self.add_header_cell(&self.header1_original);
+        self.constraints.borrow_mut().gridwidth = 1;
+        self.add_header_cell(&self.header1_best_gap);
+        self.constraints.borrow_mut().gridwidth = GRID_BAG_REMAINDER;
+        self.add_header_cell(&self.header1_adjusted);
+        // second row
+        {
+            let mut constraints = self.constraints.borrow_mut();
+            constraints.weightx = 0.0;
+            constraints.gridwidth = 1;
+        }
+        self.add_header_cell(&self.header2_sections);
+        self.constraints.borrow_mut().weightx = 0.1;
+        self.add_header_cell(&self.header2_original_end);
+        self.add_header_cell(&self.header2_original_start);
+        self.add_header_cell(&self.header2_best_gap);
+        self.add_header_cell(&self.header2_adjusted_end);
+        self.constraints.borrow_mut().gridwidth = GRID_BAG_REMAINDER;
+        self.add_header_cell(&self.header2_adjusted_start);
+        // third row
+        {
+            let mut constraints = self.constraints.borrow_mut();
+            constraints.weightx = 0.0;
+            constraints.gridwidth = 1;
+        }
+        self.add_header_cell(&self.header3_sections);
+        self.constraints.borrow_mut().weightx = 0.1;
+        self.add_header_cell(&self.header3_original_end);
+        self.add_header_cell(&self.header3_original_start);
+        self.add_header_cell(&self.header3_best_gap);
+        self.add_header_cell(&self.header3_adjusted_end);
+        self.constraints.borrow_mut().gridwidth = GRID_BAG_REMAINDER;
+        self.add_header_cell(&self.header3_adjusted_start);
     }
-    pub fn set_tool_tip_text(&mut self) {
+
+    /// Java private `setToolTipText()`.
+    fn set_tool_tip_text(&self) {
         let text = "Boundaries between sections.";
-        self.header1_boundaries.set_tool_tip_text(text);
-        self.header2_boundaries.set_tool_tip_text(text);
+        self.header1_boundaries.set_tool_tip_text(Some(text));
+        self.header2_boundaries.set_tool_tip_text(Some(text));
         let text = "The pairs of sections which define each boundary.";
-        self.header1_sections.set_tool_tip_text(text);
-        self.header2_sections.set_tool_tip_text(text);
-        self.header3_sections.set_tool_tip_text(text);
-        let text = "Describes how the final start and end values will change when the join is recreated, with a positive gap adding slices and a negative gap removing slices at the corresponding boundary.";
-        self.header1_best_gap.set_tool_tip_text(text);
-        self.header2_best_gap.set_tool_tip_text(text);
-        self.header3_best_gap.set_tool_tip_text(text);
-        self.header1_error.set_tool_tip_text("Deviations between transformed points extrapolated from above and below the corresponding boundary.");
+        self.header1_sections.set_tool_tip_text(Some(text));
+        self.header2_sections.set_tool_tip_text(Some(text));
+        self.header3_sections.set_tool_tip_text(Some(text));
+        let text = "Describes how the final start and end values will change when the join is \
+                    recreated, with a positive gap adding slices and a negative gap removing \
+                    slices at the corresponding boundary.";
+        self.header1_best_gap.set_tool_tip_text(Some(text));
+        self.header2_best_gap.set_tool_tip_text(Some(text));
+        self.header3_best_gap.set_tool_tip_text(Some(text));
+        self.header1_error.set_tool_tip_text(Some(
+            "Deviations between transformed points extrapolated from above and below the \
+             corresponding boundary.",
+        ));
         self.header2_mean_error
-            .set_tool_tip_text("Mean deviations.");
+            .set_tool_tip_text(Some("Mean deviations."));
         self.header2_max_error
-            .set_tool_tip_text("Maximum deviations.");
+            .set_tool_tip_text(Some("Maximum deviations."));
         let text = "End and start values used to create the original join.";
-        self.header1_original.set_tool_tip_text(text);
-        self.header2_original_end.set_tool_tip_text(text);
-        self.header2_original_start.set_tool_tip_text(text);
+        self.header1_original.set_tool_tip_text(Some(text));
+        self.header2_original_end.set_tool_tip_text(Some(text));
+        self.header2_original_start.set_tool_tip_text(Some(text));
         self.header3_original_end
-            .set_tool_tip_text("End values used to create the original join.");
+            .set_tool_tip_text(Some("End values used to create the original join."));
         self.header3_original_start
-            .set_tool_tip_text("Start values used to create the original join.");
+            .set_tool_tip_text(Some("Start values used to create the original join."));
         let text = "End and start values which will be used to create the new join.";
-        self.header1_adjusted.set_tool_tip_text(text);
-        self.header2_adjusted_end.set_tool_tip_text(text);
-        self.header2_adjusted_start.set_tool_tip_text(text);
+        self.header1_adjusted.set_tool_tip_text(Some(text));
+        self.header2_adjusted_end.set_tool_tip_text(Some(text));
+        self.header2_adjusted_start.set_tool_tip_text(Some(text));
         self.header3_adjusted_end
-            .set_tool_tip_text("End values which will be used to create the new join.");
-        self.header3_adjusted_start
-            .set_tool_tip_text("Start values which will be used to create the new join.");
+            .set_tool_tip_text(Some("End values which will be used to create the new join."));
+        self.header3_adjusted_start.set_tool_tip_text(Some(
+            "Start values which will be used to create the new join.",
+        ));
     }
-    pub fn add_rows(
-        &mut self,
-        section_table_size: usize,
-        data: &BoundaryRowMetaData,
-        state: &BoundaryRowScreenState,
-    ) {
-        if self.row_change {
-            self.row_change = false;
-            self.row_list.clear(&self.viewport);
-            self.row_list.add(
-                section_table_size.saturating_sub(1),
-                data,
-                state,
-                BoundaryRowTable {
-                    adjusted_header_cell: self.header1_adjusted.clone(),
-                },
-            );
+
+    /// Java private `addRows()`.  Displays the rows.  Updates the rows when rowChange
+    /// is true.  The number of rows to add is the section table size minus 1.
+    fn add_rows(&self) {
+        if self.row_change.get() {
+            self.row_change.set(false);
+            // RowList.clear(Viewport)
+            self.row_list.borrow_mut().clear();
+            self.parent().get_section_table().get_meta_data(self.meta_data);
+            // RowList.add(int, ConstJoinMetaData, JoinScreenState, JPanel,
+            // GridBagLayout, GridBagConstraints, Viewport): adds new BoundaryRow
+            // instances; the number parameter in the BoundaryRow constructor starts
+            // at 1.
+            let size = self.parent().get_section_table_size() - 1;
+            let this = self.self_ref.upgrade().expect("BoundaryTable");
+            for i in 0..size {
+                let row = BoundaryRow::new(
+                    i + 1,
+                    self.meta_data as &dyn ConstJoinMetaData,
+                    self.screen_state,
+                    &this,
+                );
+                self.row_list.borrow_mut().push(Rc::clone(&row));
+                row.set_names();
+            }
         }
-        if let Some(tab) = self.tab {
-            self.row_list.display(tab, &self.viewport);
+        // RowList.display(JoinDialog.Tab, Viewport): BoundaryRow.display() on rows
+        // that are in the viewer.
+        let rows = self.row_list.borrow().clone();
+        for (i, row) in rows.iter().enumerate() {
+            row.display(i as i32, &self.viewport, self.tab.get());
         }
-    }
-    pub fn remove_all(&mut self) {
-        self.displayed_headers.clear();
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::ui::swing::section_table_panel::SectionTableRowData;
-    use std::collections::BTreeMap;
-    fn data() -> BoundaryRowMetaData {
-        BoundaryRowMetaData {
-            section_table_data: vec![
-                SectionTableRowData {
-                    join_final_end: 10,
-                    join_final_start: 1,
-                    z_max: 20,
-                    ..Default::default()
-                },
-                SectionTableRowData {
-                    join_final_end: 11,
-                    join_final_start: 2,
-                    z_max: 20,
-                    ..Default::default()
-                },
-                SectionTableRowData {
-                    join_final_end: 12,
-                    join_final_start: 3,
-                    z_max: 20,
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        }
+impl Viewable for BoundaryTable {
+    /// Java `getFocusableParents()`.
+    fn get_focusable_parents(&self) -> Vec<Rc<JComponent>> {
+        self.focusable_parents.clone()
     }
-    #[test]
-    fn headers_and_canonical_rows_follow_source_tabs() {
-        let mut table = BoundaryTable::new(2);
-        let data = data();
-        let state = BoundaryRowScreenState::default();
-        table.display(Tab::Model, 3, &data, &state);
-        assert_eq!(
-            table.displayed_headers,
-            ["Boundaries", "Best", "Error", "", "Gap", "Mean", "Max"]
-        );
-        assert_eq!(table.size(), 2);
-        assert!(table.row_list.list.iter().all(|row| row.model_displayed));
-        table.display(Tab::Rejoin, 3, &data, &state);
-        assert_eq!(table.displayed_headers.len(), 16);
-        assert!(table.row_list.list.iter().all(|row| row.rejoin_displayed));
+
+    /// Java `msgViewportPaged()`.
+    fn msg_viewport_paged(&self) {
+        self.display_force(true);
     }
-    #[test]
-    fn reset_and_metadata_round_trip_use_boundary_row_source_types() {
-        let mut table = BoundaryTable::new(2);
-        let mut data = data();
-        data.boundary_row_end.insert(1, 7);
-        let mut state = BoundaryRowScreenState {
-            best_gap: BTreeMap::from([(1, 5.0)]),
-            mean_error: BTreeMap::from([(1, 6.0)]),
-            max_error: BTreeMap::from([(1, 7.0)]),
-        };
-        table.msg_row_change(&mut state, &mut data);
-        assert_eq!(state, BoundaryRowScreenState::default());
-        assert!(data.boundary_row_end.is_empty());
-        table.display(Tab::Rejoin, 3, &data, &state);
-        table.row_list.list[0].adjusted_end.set_value(13);
-        table.get_meta_data(&mut data);
-        assert_eq!(data.boundary_row_end.get(&1), Some(&13));
+
+    /// Java `size()`.
+    fn size(&self) -> i32 {
+        self.row_list.borrow().len() as i32
     }
 }

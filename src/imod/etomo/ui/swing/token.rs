@@ -181,11 +181,6 @@ impl Token {
         buffer
     }
 
-    // TODO(unit): needs etomo/process/EmergencyMonitor.java - Java
-    // `write(LogFile.Handle, LogFile.WriterId)` writes each token's value through
-    // `LogFile.Handle.write`/`newLine`, and `etomo/storage/log_file.rs` cannot construct
-    // a `Handle` because `Handle`'s constructor takes an `EmergencyMonitor`.
-
     /// Java `write(LogFile.Handle, LogFile.WriterId)`.
     ///
     /// # Safety
@@ -692,17 +687,18 @@ pub enum Type {
 impl Type {
     /// Java field `descr`, a `private final String` that is null for every constant
     /// built with the no-argument constructor.  The five that are not are built from
-    /// `AutodocTokenizer.SEPARATOR_CHAR` (`"."`), `OPEN_CHAR` (`'['`) and `CLOSE_CHAR`
-    /// (`']'`) - `IMOD/Etomo/src/etomo/storage/autodoc/AutodocTokenizer.java:72-74`.
-    /// `AutodocTokenizer.java` has no module of its own yet; these are its three
-    /// declared constants, quoted at their declaration.
-    fn descr(self) -> Option<&'static str> {
+    /// `AutodocTokenizer.SEPARATOR_CHAR`, `OPEN_CHAR` and `CLOSE_CHAR`
+    /// (Token.java:547-558).
+    fn descr(self) -> Option<String> {
+        use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::{
+            CLOSE_CHAR, OPEN_CHAR, SEPARATOR_CHAR,
+        };
         match self {
-            Self::Separator => Some("."),
-            Self::Open => Some("["),
-            Self::Close => Some("]"),
-            Self::Subopen => Some("[["),
-            Self::Subclose => Some("]]"),
+            Self::Separator => Some(SEPARATOR_CHAR.to_string()),
+            Self::Open => Some(OPEN_CHAR.to_string()),
+            Self::Close => Some(CLOSE_CHAR.to_string()),
+            Self::Subopen => Some(OPEN_CHAR.to_string() + &OPEN_CHAR.to_string()),
+            Self::Subclose => Some(CLOSE_CHAR.to_string() + &CLOSE_CHAR.to_string()),
             _ => None,
         }
     }
@@ -711,7 +707,7 @@ impl Type {
     pub fn get_descr(self) -> String {
         match self.descr() {
             None => self.to_string(),
-            Some(descr) => descr.to_string(),
+            Some(descr) => descr,
         }
     }
 }

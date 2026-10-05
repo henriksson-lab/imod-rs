@@ -8,13 +8,7 @@
 //! with no value.  The source then calls `.equals("")` on them, which throws
 //! NullPointerException (CCDEraserParam.java:118, :185-331; uncaught in
 //! `updateComScriptCommand`).  Fixed in translation: a null value is treated as the
-//! empty string by those tests, so its keyword is deleted (BUGS.md entry requested).
-//!
-// TODO(unit): needs etomo/type/StringParameter.java - `lineObjects`, `boundaryObjects`,
-// `allSectionObjects` (r#type::string_parameter::StringParameter).
-// TODO(unit): needs etomo/comscript/Utilities.java - `MONTAGE_SEPARATION`
-// (comscript::utilities::MONTAGE_SEPARATION: &str = "-10").
-// TODO(unit): needs etomo/type/MetaData.java - `manager.getConstMetaData().getViewType()`.
+//! empty string by those tests, so its keyword is deleted (BUGS.md).
 
 use std::path::PathBuf;
 use std::sync::Arc;

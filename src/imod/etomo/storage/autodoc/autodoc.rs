@@ -21,9 +21,7 @@
 //!
 //! `@notthreadsafe`
 //!
-//! `BaseManager` has no module; every caller that reaches an `initialize...` member
-//! passes a null one, so the parameter is typed `Option<Infallible>`.  Java's
-//! `initialize...` members are instance methods that assign `this.parser`; a Rust
+//! Java's `initialize...` members are instance methods that assign `this.parser`; a Rust
 //! `&mut self` would alias the `*mut Autodoc` the parser stores, so each takes the raw
 //! pointer instead.
 #![allow(dead_code)]
@@ -1041,6 +1039,11 @@ impl ReadOnlyAutodoc for Autodoc {
 }
 
 impl WritableAutodoc for Autodoc {
+    /// Java `write()`.
+    fn write(&self) -> Result<(), LogFileError> {
+        Autodoc::write(self)
+    }
+
     /// Java `addNameValuePairAttribute(String, String)`.
     fn add_name_value_pair_attribute(&mut self, name: Option<&str>, value: Option<&str>) {
         {

@@ -1,25 +1,10 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SphericalSamplingForThetaAndPsiParent.java`.
-#![allow(dead_code)]
+//!
+//! The implementor (`PeetDialog`) is an event dispatch thread object reached through
+//! `Rc`, so the method takes `&self`.
 
-/// Java package-private `SphericalSamplingForThetaAndPsiParent`.
+/// Java package-private `interface SphericalSamplingForThetaAndPsiParent`.
 pub trait SphericalSamplingForThetaAndPsiParent {
     /// Java `updateDisplay(boolean)`.
-    fn update_display(&mut self, init: bool);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    struct Parent(bool);
-    impl SphericalSamplingForThetaAndPsiParent for Parent {
-        fn update_display(&mut self, init: bool) {
-            self.0 = init;
-        }
-    }
-    #[test]
-    fn update_display_preserves_init_argument() {
-        let mut parent = Parent(false);
-        parent.update_display(true);
-        assert!(parent.0);
-    }
+    fn update_display(&self, init: bool);
 }

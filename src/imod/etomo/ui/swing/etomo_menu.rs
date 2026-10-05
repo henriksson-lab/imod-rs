@@ -23,8 +23,6 @@ use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::jdk::{ActionEvent, ActionListener, JComponent};
 use crate::imod::etomo::process::base_process_manager::BaseProcessManager;
-// TODO(unit): needs etomo/process/ImodqtassistProcess.java - `INSTANCE.open(manager,
-// action, axisID)` starts/feeds the imodqtassist help viewer.
 use crate::imod::etomo::process::imodqtassist_process;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;

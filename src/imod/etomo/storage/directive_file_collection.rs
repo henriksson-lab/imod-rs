@@ -1,45 +1,17 @@
 //! `IMOD/Etomo/src/etomo/storage/DirectiveFileCollection.java`.
 //!
-//! **Shape.**  The Java class implements `SetupReconInterface` and
-//! `DirectiveFileInterface`; neither interface has a Rust trait yet, so their methods
-//! are inherent methods here.  Java overloads carry descriptive suffixes naming the
+//! **Shape.**  The Java class implements `SetupReconInterface`
+//! (`ui/setup_recon_interface.rs`, through `DirectiveFileCollectionHandle`) and
+//! `DirectiveFileInterface` (`directive_file_interface.rs`).  Java overloads carry descriptive suffixes naming the
 //! extra parameters (`contains_axis_template`, `get_value_index`, ...).  A null Java
 //! `DirectiveDef` argument is `None`.  The directive files are shared
 //! (`Arc<DirectiveFile>`), as the Java array holds references.
 //!
 //! The two value maps (`copyArgExtraValues`, `copyArgCommandLineValues`) and
 //! `CopyArgEntrySet.pairMap` are `HashMap`s in Java whose values may be null; they are
-//! `BTreeMap<String, Option<String>>` here, so their iteration order is key order
-//! instead of Java's hash-bucket order.  `CopyArgEntrySet.init` walks
-//! `copyArgExtraValues` while adding to `pairMap`, and the tilt angle directives
-//! exclude each other there, so when the extra values hold more than one tilt angle
-//! directive for an axis, which one survives follows key order.
-// TODO(unit): needs etomo/storage/DirectiveFile.java - `getInstance(BaseManager, AxisID,
-// File, DirectiveFileType)` (DirectiveFile::get_instance(&'static dyn BaseManager,
-// Option<AxisID>, Option<&Path>, DirectiveFileType) -> Option<DirectiveFile>),
-// `getAttribute(Match, DirectiveDef, AxisID, boolean)`
-// (get_attribute_with_match(&self, Match, Option<DirectiveDef>, Option<AxisID>, bool) ->
-// Option<AttributeMatch>), `getAttribute(DirectiveDef, AxisID, boolean, boolean)`
-// (get_attribute(&self, Option<DirectiveDef>, Option<AxisID>, bool, bool) ->
-// Option<AttributeMatch>), `iterator(boolean)` (iterator(&self, bool) ->
-// Option<directive_file::StatementIterator<'_>>, an `Iterator`),
-// `getCopyArgIterator()` (get_copy_arg_iterator(&self) ->
-// Option<ReadOnlyAttributeIterator<'_>>), and Display for `toString`.
-// TODO(unit): needs etomo/storage/DirectiveAttribute.java - `AttributeMatch`
-// (storage::directive_attribute::AttributeMatch: DirectiveValue + 'static, with
-// is_empty(), is_override(), is_value()), `Match` (variants Primary, Secondary) and
-// static `toBoolean` (directive_attribute::to_boolean(Option<&str>) -> bool).
-// TODO(unit): needs etomo/logic/UserEnv.java - `isGpuProcessing`,
-// `isParallelProcessing` (logic::user_env::is_gpu_processing / is_parallel_processing
-// (&'static dyn BaseManager, Option<AxisID>, Option<&str>) -> bool).
-// TODO(unit): needs etomo/logic/DatasetTool.java - `validateTiltAngle`
-// (logic::dataset_tool::validate_tilt_angle(&'static dyn BaseManager, AxisID,
-// Option<&str>, Option<AxisID>, bool, Option<&str>, Option<&str>) -> bool).
-// TODO(unit): needs etomo/ui/SetupReconInterface.java and
-// etomo/storage/DirectiveFileInterface.java - the interfaces this class implements.
-#![allow(dead_code)]
+//! `JavaHashMap<String, Option<String>>` here, which iterates in Java's `HashMap` order.
 
-use std::collections::BTreeMap;
+use crate::imod::etomo::util::java_hash_map::JavaHashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -69,10 +41,10 @@ use crate::imod::etomo::r#type::file_type;
 use crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle;
 use crate::imod::etomo::r#type::tilt_angle_spec::TiltAngleSpec;
 use crate::imod::etomo::r#type::tilt_angle_type::TiltAngleType;
+use crate::imod::etomo::r#type::user_configuration::UserConfiguration;
 use crate::imod::etomo::r#type::view_type::ViewType;
 use crate::imod::etomo::ui::field_type::CollectionType;
 use crate::imod::etomo::ui::field_validation_failed_exception::FieldValidationFailedException;
-use crate::imod::etomo::r#type::user_configuration::UserConfiguration;
 use crate::imod::etomo::util::utilities::java_lang_string_split;
 
 /// Java `DirectiveFileCollection`.
@@ -83,10 +55,10 @@ pub struct DirectiveFileCollection {
     binning_validation_set: Option<ValidationSet>,
     /// Java field `copyArgExtraValues`: scan header and user preference values - lowest
     /// priority.
-    copy_arg_extra_values: Option<BTreeMap<String, Option<String>>>,
+    copy_arg_extra_values: Option<JavaHashMap<String, Option<String>>>,
     /// Java field `copyArgCommandLineValues`: command line copyarg directive values -
     /// highest priority.
-    copy_arg_command_line_values: Option<BTreeMap<String, Option<String>>>,
+    copy_arg_command_line_values: Option<JavaHashMap<String, Option<String>>>,
     /// Java field `overrideSkipA`.
     override_skip_a: bool,
     /// Java field `overrideSkipB`.
@@ -825,7 +797,8 @@ impl DirectiveFileCollection {
             tilt_angle_spec.set_type(TiltAngleType::File);
         } else {
             // Must set something here, so use the settings values
-            let tilt_angles_rawtlt_file = etomo_director::INSTANCE.with_user_configuration(|c| c.is_tilt_angles_rawtlt_file());
+            let tilt_angles_rawtlt_file = etomo_director::INSTANCE
+                .with_user_configuration(|c| c.is_tilt_angles_rawtlt_file());
             if tilt_angles_rawtlt_file {
                 tilt_angle_spec.set_type(TiltAngleType::File);
             } else {
@@ -867,7 +840,7 @@ impl DirectiveFileCollection {
         };
         let values = self
             .copy_arg_command_line_values
-            .get_or_insert_with(BTreeMap::new);
+            .get_or_insert_with(JavaHashMap::new);
         values.insert(
             directive_def.get_name_for_axis(None),
             value.map(|value| value.to_string()),
@@ -886,7 +859,9 @@ impl DirectiveFileCollection {
             None => return,
             Some(directive_def) => directive_def.get_axis_id_instance(axis_id),
         };
-        let values = self.copy_arg_extra_values.get_or_insert_with(BTreeMap::new);
+        let values = self
+            .copy_arg_extra_values
+            .get_or_insert_with(JavaHashMap::new);
         values.insert(
             directive_def.get_name_for_axis(axis_id),
             value.map(|value| value.to_string()),
@@ -946,7 +921,7 @@ impl DirectiveFileCollection {
         user_configuration: &UserConfiguration,
     ) {
         if self.copy_arg_extra_values.is_none() {
-            self.copy_arg_extra_values = Some(BTreeMap::new());
+            self.copy_arg_extra_values = Some(JavaHashMap::new());
         }
         if tilt_angle_spec.get_type() == TiltAngleType::File
             || user_configuration.is_tilt_angles_rawtlt_file()
@@ -1575,7 +1550,7 @@ impl DirectiveValue for CopyArgValue {
 /// Java public static nested class `CopyArgEntrySet`.
 pub struct CopyArgEntrySet<'a> {
     /// Java field `pairMap`.
-    pair_map: BTreeMap<String, Option<String>>,
+    pair_map: JavaHashMap<String, Option<String>>,
     /// Java field `directiveFileCollection`.
     directive_file_collection: &'a DirectiveFileCollection,
 }
@@ -1585,7 +1560,7 @@ impl<'a> CopyArgEntrySet<'a> {
     /// directly.
     fn new(directive_file_collection: &'a DirectiveFileCollection) -> CopyArgEntrySet<'a> {
         CopyArgEntrySet {
-            pair_map: BTreeMap::new(),
+            pair_map: JavaHashMap::new(),
             directive_file_collection,
         }
     }

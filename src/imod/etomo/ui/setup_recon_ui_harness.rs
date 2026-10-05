@@ -81,7 +81,7 @@ pub struct SetupReconUIHarness {
     /// Java private `setFEIPixelSize`.
     set_fei_pixel_size: Cell<bool>,
     /// Java private `header`.
-    header: RefCell<Option<Rc<RefCell<MRCHeader>>>>,
+    header: RefCell<Option<std::sync::Arc<crate::imod::etomo::util::mrc_header::SharedMRCHeader>>>,
     /// Rust-only: the `this` the Java hands to `SetupDialogExpert.getInstance`.
     this: Weak<SetupReconUIHarness>,
 }
@@ -692,7 +692,7 @@ impl SetupReconUIHarness {
         &self,
         input_image_file_path: Option<&str>,
         no_popups: bool,
-    ) -> Option<Rc<RefCell<MRCHeader>>> {
+    ) -> Option<std::sync::Arc<crate::imod::etomo::util::mrc_header::SharedMRCHeader>> {
         // Run header on the dataset to the extract whatever information is
         // available
         if input_image_file_path.is_none_or(str::is_empty) {
@@ -711,15 +711,24 @@ impl SetupReconUIHarness {
         match result {
             Ok(false) => return None,
             Ok(true) => {}
-            // `catch (InvalidParameterException)` / `catch (IOException)`:
-            // `read_with_manager` carries either one's message in the same
-            // `Err`, so the two titles cannot be told apart; the IO title is
-            // used.
-            Err(message) => {
+            // `catch (final InvalidParameterException except)`.
+            Err(crate::imod::etomo::util::mrc_header::ReadError::InvalidParameter(message)) => {
                 if !no_popups {
                     ui_harness::open_message_dialog_from_process(
                         Some(self.manager),
                         &message,
+                        "Invalid Parameter Exception",
+                        Some(AxisID::Only),
+                    );
+                }
+            }
+            // `catch (final IOException except)`; the unchecked NumberFormatException
+            // of a header whose size is not a number is reported the same way.
+            Err(message) => {
+                if !no_popups {
+                    ui_harness::open_message_dialog_from_process(
+                        Some(self.manager),
+                        &message.to_string(),
                         "IO Exception",
                         Some(AxisID::Only),
                     );

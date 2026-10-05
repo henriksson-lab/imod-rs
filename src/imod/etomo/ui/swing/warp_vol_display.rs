@@ -7,6 +7,3 @@ pub trait WarpVolDisplay {
     /// Java `getParameters(WarpVolParam, boolean)`.
     fn get_parameters(&self, param: &mut WarpVolParam, do_validation: bool) -> bool;
 }
-
-// TODO(unit): FlattenVolumePanel.java implements WarpVolDisplay; the Rust
-// `flatten_volume_panel.rs` takes an explicit manager and a boundary param.

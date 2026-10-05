@@ -3,11 +3,11 @@
 //! Java's typesafe-enum pattern is mirrored as a Rust enum with one variant per
 //! `public static final` singleton.
 //!
-//! Deviation: the Java class implements `EnumeratedType`, whose `getValue()` returns a
-//! `ConstEtomoNumber`.  `EnumeratedType` itself is not translated, so the methods it
-//! declares are inherent methods here.  The `index` field is the source's `EtomoNumber`;
-//! because a Rust enum variant carries no per-instance storage, `index()` builds the
-//! field's value on demand and `get_value` returns it by value rather than by reference.
+//! The Java class implements `EnumeratedType` (the trait impl at the end of this file;
+//! the inherent methods of the same names are what it delegates to).  The `index` field
+//! is the source's `EtomoNumber`; because a Rust enum variant carries no per-instance
+//! storage, `index()` builds the field's value on demand and `get_value` returns it by
+//! value rather than by reference.
 #![allow(dead_code)]
 
 use super::const_etomo_number::ConstEtomoNumber;
@@ -95,9 +95,9 @@ impl ViewType {
         None
     }
 
-    /// Java `getInstance`.  The parameter is declared `EnumeratedType` in the source
-    /// and compared by identity against the two singletons; with `EnumeratedType`
-    /// untranslated the parameter is narrowed to `ViewType` here.
+    /// Java `getInstance(EnumeratedType)`.  The parameter is compared by identity
+    /// against the two singletons, so only a `ViewType` can match; every caller passes
+    /// the selected radio button's enumerated type, which is a `ViewType`.
     pub fn get_instance(enumerated_type: ViewType) -> ViewType {
         if enumerated_type == Self::SingleView {
             return Self::SingleView;
@@ -113,5 +113,18 @@ impl ViewType {
 impl std::fmt::Display for ViewType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.title())
+    }
+}
+
+/// Java `ViewType implements EnumeratedType`.
+impl super::enumerated_type::EnumeratedType for ViewType {
+    fn is_default(&self) -> bool {
+        ViewType::is_default(*self)
+    }
+    fn get_value(&self) -> ConstEtomoNumber {
+        ViewType::get_value(*self)
+    }
+    fn get_label(&self) -> Option<String> {
+        ViewType::get_label(*self).map(str::to_owned)
     }
 }

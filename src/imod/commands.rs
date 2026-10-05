@@ -162,6 +162,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("etomo-gui", etomo_gui, false),
     #[cfg(feature = "gui")]
     cmd("etomo-popup", etomo_popup, false),
+    #[cfg(feature = "gui")]
+    cmd("etomo-filechooser", etomo_filechooser, false),
     cmd("header", crate::imod::flib::image::header::header, true),
     cmd(
         "imodchopconts",
@@ -516,6 +518,14 @@ fn etomo_popup() {
     exit(crate::imod::etomo::ui::swing::slint_bridge::etomo_popup(
         &arguments,
     ))
+}
+
+/// Rust-only: the modal file chooser dialog `etomo-gui` shows in a child
+/// process (`ui/swing/slint_bridge.rs`).
+#[cfg(feature = "gui")]
+fn etomo_filechooser() {
+    let arguments = program_args().into_iter().skip(1).collect::<Vec<_>>();
+    exit(crate::imod::etomo::ui::swing::slint_bridge::etomo_filechooser(&arguments))
 }
 
 #[cfg(feature = "gui")]

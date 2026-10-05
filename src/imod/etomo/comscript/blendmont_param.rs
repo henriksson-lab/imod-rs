@@ -2,18 +2,6 @@
 //!
 //! Parameters for the blendmont command in xcorr, preblend, blend, undistort and the
 //! 3dfind/whole-tomogram/serial-section variants.
-//!
-//! TODO(unit): needs etomo/type/StringParameter.java - `distortionField`,
-//! `imageInputFile`, `pieceListInput`, `rootNameForEdges`, `transformFile`,
-//! `otherSumGradientFile` (r#type::string_parameter::StringParameter).
-//! TODO(unit): needs etomo/comscript/Utilities.java - `is90DegreeImageRotation` and
-//! `getGoodframeFromMontageSize` (comscript::utilities).
-//! TODO(unit): needs etomo/util/Goodframe.java - `getOutput`.
-//! TODO(unit): needs etomo/util/Montagesize.java - `getInstance`, `read`, `getX`, `getY`.
-//! TODO(unit): needs etomo/type/EtomoState.java - `TRUE_VALUE`.
-//! TODO(unit): needs etomo/logic/TomogramTool.java - `PairXAndY`.
-//! TODO(unit): needs FortranInputString.validateAndSet(ComScriptCommand) and
-//! updateScriptParameter(ComScriptCommand) (TODOs in fortran_input_string.rs).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -31,6 +19,7 @@ use super::process_details::ProcessDetails;
 use super::utilities;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::logic::tomogram_tool::PairXAndY;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::axis_type::AxisType;
 use crate::imod::etomo::r#type::const_etomo_number::{ConstEtomoNumber, Number, Type};
@@ -42,7 +31,6 @@ use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::script_parameter::ScriptParameter;
 use crate::imod::etomo::r#type::string_parameter::StringParameter;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::ui::swing::ui_harness;
 use crate::imod::etomo::util::montagesize::Montagesize;
 use crate::imod::etomo::util::utilities::java_io_file_last_modified;
@@ -1204,7 +1192,10 @@ impl ProcessDetails for BlendmontParam {
     }
 
     /// Java `getIteratorElementList(FieldInterface)`.
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 
@@ -1241,7 +1232,10 @@ impl ProcessDetails for BlendmontParam {
     }
 
     /// Java `getHashtable(FieldInterface)`.
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
@@ -1264,7 +1258,10 @@ impl ProcessDetails for BlendmontParam {
     }
 
     /// Java `getIntKeyList(FieldInterface)`.
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 }

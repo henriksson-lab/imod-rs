@@ -418,12 +418,12 @@ impl ReconScreenState {
 
     /// Java `load(Properties)`: `super.load(props)`, which dispatches to this class's
     /// `load(props, "")`.
-    pub fn load(&self, props: &BTreeMap<String, String>) {
+    pub fn load(&self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
     /// Java `load(Properties, String)`.
-    pub fn load_with_prepend(&self, props: &BTreeMap<String, String>, prepend: &str) {
+    pub fn load_with_prepend(&self, props: &mut BTreeMap<String, String>, prepend: &str) {
         self.base.load_with_prepend(props, prepend);
         let prepend = self.base.get_prepend(prepend);
         // backwards compatibility
@@ -622,11 +622,11 @@ impl Storable for ReconScreenState {
         ReconScreenState::store_with_prepend(self, properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         ReconScreenState::load(self, properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         ReconScreenState::load_with_prepend(self, properties, prepend);
     }
 }
@@ -690,9 +690,9 @@ Pre.ScreenStateA.TomoGen.Tilt.Header.AdvancedBasic=advanced"#;
 
     #[test]
     fn load_store_round_trip() {
-        let java = parse(JAVA_STORE);
+        let mut java = parse(JAVA_STORE);
         let rs = ReconScreenState::new(AxisID::First, AxisType::DualAxis);
-        rs.load(&java);
+        rs.load(&mut java);
         assert_eq!(rs.get_patchcorr_kernel_sigma().unwrap().get_double(), 1.5);
         assert!(rs.get_button_state(Some("Button1")));
         let mut props = BTreeMap::new();
@@ -700,7 +700,7 @@ Pre.ScreenStateA.TomoGen.Tilt.Header.AdvancedBasic=advanced"#;
         assert_eq!(props, java);
         // A single-axis state reads the "ScreenState" group, and has no combine state.
         let single = ReconScreenState::new(AxisID::Only, AxisType::SingleAxis);
-        single.load(&java);
+        single.load(&mut java);
         assert!(single.get_patchcorr_kernel_sigma().is_none());
     }
 }

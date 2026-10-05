@@ -1,139 +1,240 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/IterationRow.java`.
 //!
-//! Swing panel/grid placement and the manager's autodoc and message-dialog
-//! services remain frontend boundaries.  This module retains every row field,
-//! its source validation rules, row highlighting, and parameter transfer.
-#![allow(dead_code)]
+//! One row of the PEET dialog's iteration table: the angular search ranges, search
+//! distance, low- and high-pass filters, reference threshold and duplicate
+//! tolerances of one alignment iteration.  An event dispatch thread object, created
+//! as `Rc<Self>`; the table owns it (the row keeps weak references to the table,
+//! which is also its highlight group `parent`).  The table's panel, layout and
+//! shared constraints are the table's (`IterationTable::with_constraints`).
 
+use std::cell::Cell as StdCell;
+use std::rc::{Rc, Weak};
+
+use super::cell::CellVirtual;
 use super::field_cell::FieldCell;
 use super::header_cell::HeaderCell;
+use super::highlightable::Highlightable;
 use super::highlighter_button::HighlighterButton;
-use super::iteration_table::{
-    ConstPeetMetaData, D_PHI_D_THETA_D_PSI_HEADER1, DUPLICATE_ANGULAR_TOLERANCE_HEADER3,
-    DUPLICATE_SHIFT_TOLERANCE_HEADER3, DUPLICATE_TOLERANCE_HEADER1, DUPLICATE_TOLERANCE_HEADER2,
-    HICUTOFF_CUTOFF_HEADER3, HICUTOFF_HEADER1, HICUTOFF_HEADER2, HICUTOFF_SIGMA_HEADER3,
-    INCR_HEADER3, Iteration, LABEL, LOW_CUTOFF_DEFAULT, LOW_CUTOFF_SIGMA_DEFAULT,
-    LOWCUTOFF_CUTOFF_HEADER3, LOWCUTOFF_HEADER1, LOWCUTOFF_HEADER2, LOWCUTOFF_SIGMA_HEADER3,
-    MAX_HEADER3, MatlabParam, PeetMetaData, REF_THRESHOLD_HEADER1, REF_THRESHOLD_HEADER2,
-    SEARCH_RADIUS_HEADER1, SEARCH_RADIUS_HEADER2,
-};
+use super::iteration_table::{self, IterationTable};
+use super::ui_harness;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::{GRID_BAG_REMAINDER, JComponent};
+use crate::imod::etomo::logic::converter;
+use crate::imod::etomo::storage::autodoc::autodoc_factory;
+use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
+use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::storage::matlab_param::{self, MatlabParam};
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::const_etomo_number::Type;
+use crate::imod::etomo::r#type::const_peet_meta_data::ConstPeetMetaData;
+use crate::imod::etomo::r#type::etomo_autodoc;
+use crate::imod::etomo::r#type::etomo_number::EtomoNumber;
+use crate::imod::etomo::r#type::peet_meta_data::PeetMetaData;
+use crate::imod::etomo::ui::shared_strings;
 
-/// Java package-private final `IterationRow`.
-#[derive(Clone, Debug)]
+/// Java package-private `final class IterationRow implements Highlightable`.
 pub struct IterationRow {
-    pub number: HeaderCell,
-    pub d_phi_max: FieldCell,
-    pub d_phi_increment: FieldCell,
-    pub d_theta_max: FieldCell,
-    pub d_theta_increment: FieldCell,
-    pub d_psi_max: FieldCell,
-    pub d_psi_increment: FieldCell,
-    pub search_radius: FieldCell,
-    pub hi_cutoff: FieldCell,
-    pub hi_cutoff_sigma: FieldCell,
-    pub low_cutoff: FieldCell,
-    pub low_cutoff_sigma: FieldCell,
-    pub ref_threshold: FieldCell,
-    pub duplicate_shift_tolerance: FieldCell,
-    pub duplicate_angular_tolerance: FieldCell,
-    pub btn_highlighter: HighlighterButton,
-    pub index: usize,
-    pub displayed: bool,
-    pub last_message: Option<(String, String)>,
+    /// Java private final `number = new HeaderCell()`.
+    number: Rc<HeaderCell>,
+    /// Java private final `dPhiMax`.
+    d_phi_max: Rc<FieldCell>,
+    /// Java private final `dPhiIncrement`.
+    d_phi_increment: Rc<FieldCell>,
+    /// Java private final `dThetaMax`.
+    d_theta_max: Rc<FieldCell>,
+    /// Java private final `dThetaIncrement`.
+    d_theta_increment: Rc<FieldCell>,
+    /// Java private final `dPsiMax`.
+    d_psi_max: Rc<FieldCell>,
+    /// Java private final `dPsiIncrement`.
+    d_psi_increment: Rc<FieldCell>,
+    /// Java private final `searchRadius`.
+    search_radius: Rc<FieldCell>,
+    /// Java private final `hiCutoff`.
+    hi_cutoff: Rc<FieldCell>,
+    /// Java private final `hiCutoffSigma`.
+    hi_cutoff_sigma: Rc<FieldCell>,
+    /// Java private final `lowCutoff`.
+    low_cutoff: Rc<FieldCell>,
+    /// Java private final `lowCutoffSigma`.
+    low_cutoff_sigma: Rc<FieldCell>,
+    /// Java private final `refThreshold`.
+    ref_threshold: Rc<FieldCell>,
+    /// Java private final `duplicateShiftTolerance`.
+    duplicate_shift_tolerance: Rc<FieldCell>,
+    /// Java private final `duplicateAngularTolerance`.
+    duplicate_angular_tolerance: Rc<FieldCell>,
+
+    /// Java private final `panel` (the table's).
+    panel: Rc<JComponent>,
+    /// Java private final `btnHighlighter`.
+    btn_highlighter: Rc<HighlighterButton>,
+    /// Java private final `parent` (the highlight group: the table).
+    parent: Weak<dyn Highlightable>,
+    /// Java private final `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private final `table`.
+    table: Weak<IterationTable>,
+
+    /// Java private `index`.
+    index: StdCell<i32>,
 }
 
 impl IterationRow {
-    /// Java `IterationRow(int, Highlightable, JPanel, GridBagLayout,
+    /// The field initializers and the assignments both Java constructors make.
+    fn construct(
+        index: i32,
+        parent: Weak<dyn Highlightable>,
+        panel: &Rc<JComponent>,
+        manager: &'static dyn BaseManager,
+        table: Weak<IterationTable>,
+    ) -> Rc<IterationRow> {
+        Rc::new_cyclic(|self_ref: &Weak<IterationRow>| {
+            let this: Weak<dyn Highlightable> = self_ref.clone();
+            let number = HeaderCell::new_void();
+            number.set_text_string(Some(&(index + 1).to_string()));
+            IterationRow {
+                number,
+                d_phi_max: FieldCell::get_editable_matlab_instance(),
+                d_phi_increment: FieldCell::get_editable_matlab_instance(),
+                d_theta_max: FieldCell::get_editable_matlab_instance(),
+                d_theta_increment: FieldCell::get_editable_matlab_instance(),
+                d_psi_max: FieldCell::get_editable_matlab_instance(),
+                d_psi_increment: FieldCell::get_editable_matlab_instance(),
+                search_radius: FieldCell::get_editable_matlab_instance(),
+                hi_cutoff: FieldCell::get_editable_matlab_instance(),
+                hi_cutoff_sigma: FieldCell::get_editable_matlab_instance(),
+                low_cutoff: FieldCell::get_editable_matlab_instance(),
+                low_cutoff_sigma: FieldCell::get_editable_matlab_instance(),
+                ref_threshold: FieldCell::get_editable_matlab_instance(),
+                duplicate_shift_tolerance: FieldCell::get_editable_matlab_instance(),
+                duplicate_angular_tolerance: FieldCell::get_editable_matlab_instance(),
+                panel: panel.clone(),
+                btn_highlighter: HighlighterButton::get_instance(this, Some(parent.clone())),
+                parent,
+                manager,
+                table,
+                index: StdCell::new(index),
+            }
+        })
+    }
+
+    /// Java package-private `IterationRow(int, Highlightable, JPanel, GridBagLayout,
     /// GridBagConstraints, BaseManager, IterationTable)`.
-    pub fn new(index: usize, _is_low_cutoff: bool) -> Self {
-        let mut number = HeaderCell::default();
-        number.set_text_int((index + 1) as i32);
-        let mut value = Self {
-            number,
-            d_phi_max: FieldCell::get_editable_matlab_instance(),
-            d_phi_increment: FieldCell::get_editable_matlab_instance(),
-            d_theta_max: FieldCell::get_editable_matlab_instance(),
-            d_theta_increment: FieldCell::get_editable_matlab_instance(),
-            d_psi_max: FieldCell::get_editable_matlab_instance(),
-            d_psi_increment: FieldCell::get_editable_matlab_instance(),
-            search_radius: FieldCell::get_editable_matlab_instance(),
-            hi_cutoff: FieldCell::get_editable_matlab_instance(),
-            hi_cutoff_sigma: FieldCell::get_editable_matlab_instance(),
-            low_cutoff: FieldCell::get_editable_matlab_instance(),
-            low_cutoff_sigma: FieldCell::get_editable_matlab_instance(),
-            ref_threshold: FieldCell::get_editable_matlab_instance(),
-            duplicate_shift_tolerance: FieldCell::get_editable_matlab_instance(),
-            duplicate_angular_tolerance: FieldCell::get_editable_matlab_instance(),
-            btn_highlighter: HighlighterButton::get_instance(index, None),
-            index,
-            displayed: false,
-            last_message: None,
-        };
-        value.set_tooltips();
-        value
+    pub fn new(
+        index: i32,
+        parent: Weak<dyn Highlightable>,
+        panel: &Rc<JComponent>,
+        manager: &'static dyn BaseManager,
+        table: Weak<IterationTable>,
+    ) -> Rc<IterationRow> {
+        let this = IterationRow::construct(index, parent, panel, manager, table);
+        this.set_tooltips();
+        this
     }
 
-    /// Java copy constructor `IterationRow(int, IterationRow, BaseManager,
+    /// Java package-private `IterationRow(int, IterationRow, BaseManager,
     /// IterationTable)`.
-    pub fn copy(index: usize, iteration_row: &Self) -> Self {
-        let mut value = iteration_row.clone();
-        value.index = index;
-        value.number.set_text_int((index + 1) as i32);
-        value.btn_highlighter = HighlighterButton::get_instance(index, None);
-        value.displayed = false;
-        value.last_message = None;
-        value.set_tooltips();
-        value
-    }
-
-    /// Java `setNames()`; table header identities are supplied by the caller's
-    /// canonical header text because the Swing table is a frontend boundary.
-    pub fn set_names(&mut self) {
-        let row = self.number.to_string().to_owned();
-        self.btn_highlighter.set_headers(LABEL, &row, "Run #");
-        for (field, column) in [
-            (&mut self.d_phi_max, "Angular Search Range, Phi, Max"),
-            (&mut self.d_phi_increment, "Angular Search Range, Phi, Step"),
-            (&mut self.d_theta_max, "Angular Search Range, Theta, Max"),
+    pub fn new_copy(
+        index: i32,
+        iteration_row: &IterationRow,
+        manager: &'static dyn BaseManager,
+        table: Weak<IterationTable>,
+    ) -> Rc<IterationRow> {
+        let this = IterationRow::construct(
+            index,
+            iteration_row.parent.clone(),
+            &iteration_row.panel,
+            manager,
+            table,
+        );
+        for (to, from) in [
+            (&this.d_phi_max, &iteration_row.d_phi_max),
+            (&this.d_phi_increment, &iteration_row.d_phi_increment),
+            (&this.d_theta_max, &iteration_row.d_theta_max),
+            (&this.d_theta_increment, &iteration_row.d_theta_increment),
+            (&this.d_psi_max, &iteration_row.d_psi_max),
+            (&this.d_psi_increment, &iteration_row.d_psi_increment),
+            (&this.search_radius, &iteration_row.search_radius),
+            (&this.hi_cutoff, &iteration_row.hi_cutoff),
+            (&this.hi_cutoff_sigma, &iteration_row.hi_cutoff_sigma),
+            (&this.low_cutoff, &iteration_row.low_cutoff),
+            (&this.low_cutoff_sigma, &iteration_row.low_cutoff_sigma),
+            (&this.ref_threshold, &iteration_row.ref_threshold),
             (
-                &mut self.d_theta_increment,
-                "Angular Search Range, Theta, Step",
-            ),
-            (&mut self.d_psi_max, "Angular Search Range, Psi, Max"),
-            (&mut self.d_psi_increment, "Angular Search Range, Psi, Step"),
-            (&mut self.search_radius, "Search, Distance"),
-            (&mut self.hi_cutoff, "Low-pass, Filter, Cutoff"),
-            (&mut self.hi_cutoff_sigma, "Low-pass, Filter, Sigma"),
-            (&mut self.low_cutoff, "High-pass, Filter, Cutoff"),
-            (&mut self.low_cutoff_sigma, "High-pass, Filter, Sigma"),
-            (&mut self.ref_threshold, "Ref, Threshold"),
-            (
-                &mut self.duplicate_shift_tolerance,
-                "Duplicate, Tolerance, Shift",
+                &this.duplicate_shift_tolerance,
+                &iteration_row.duplicate_shift_tolerance,
             ),
             (
-                &mut self.duplicate_angular_tolerance,
-                "Duplicate, Tolerance, Angle",
+                &this.duplicate_angular_tolerance,
+                &iteration_row.duplicate_angular_tolerance,
             ),
         ] {
-            field.set_name_three(Some(LABEL), Some(&row), Some(column));
+            to.set_value_string(from.get_value().as_deref());
         }
+        this.set_tooltips();
+        this
     }
 
-    /// Java `highlight(boolean)`.
-    pub fn highlight(&mut self, highlight: bool) {
-        for field in self.fields_mut() {
-            field.set_field_highlight(highlight);
-        }
+    /// Java field read `table`.
+    fn table(&self) -> Rc<IterationTable> {
+        self.table
+            .upgrade()
+            .expect("the iteration table owns its rows")
     }
 
-    /// Java `setHighlighterSelected(boolean)`.
-    pub fn set_highlighter_selected(&mut self, select: bool) {
+    /// Java package-private `setNames()`.
+    pub fn set_names(&self) {
+        let table = self.table();
+        let label = Some(iteration_table::LABEL);
+        self.btn_highlighter.set_headers(
+            label,
+            &self.number,
+            &table.get_iteration_number_header_cell(),
+        );
+        let angles = table.get_d_phi_d_theta_d_psi_header_cell();
+        self.d_phi_max.set_headers(label, &self.number, &angles);
+        self.d_phi_increment
+            .set_headers(label, &self.number, &angles);
+        self.d_theta_max.set_headers(label, &self.number, &angles);
+        self.d_theta_increment
+            .set_headers(label, &self.number, &angles);
+        self.d_psi_max.set_headers(label, &self.number, &angles);
+        self.d_psi_increment
+            .set_headers(label, &self.number, &angles);
+        self.search_radius
+            .set_headers(label, &self.number, &table.get_search_radius_header_cell());
+        self.hi_cutoff
+            .set_headers(label, &self.number, &table.get_hi_cutoff_header_cell());
+        self.hi_cutoff_sigma
+            .set_headers(label, &self.number, &table.get_hi_cutoff_header_cell());
+        self.low_cutoff
+            .set_headers(label, &self.number, &table.get_low_cutoff_header_cell());
+        self.low_cutoff_sigma
+            .set_headers(label, &self.number, &table.get_low_cutoff_header_cell());
+        self.ref_threshold
+            .set_headers(label, &self.number, &table.get_ref_threshold_header_cell());
+        self.duplicate_shift_tolerance.set_headers(
+            label,
+            &self.number,
+            &table.get_duplicate_tolerance_header_cell(),
+        );
+        self.duplicate_angular_tolerance.set_headers(
+            label,
+            &self.number,
+            &table.get_duplicate_tolerance_header_cell(),
+        );
+    }
+
+    /// Java package-private `setHighlighterSelected(boolean)`.
+    pub fn set_highlighter_selected(&self, select: bool) {
         self.btn_highlighter.set_selected(select);
     }
 
-    /// Java `updateDisplay(boolean, boolean)`.
-    pub fn update_display(&mut self, sample_sphere: bool, flg_remove_duplicates: bool) {
+    /// Java package-private `updateDisplay(boolean, boolean)`.  In the first row, turn
+    /// off theta and psi when sampleSphere is on.  In all rows turn off duplicates
+    /// columns when flgRemoveDuplicates is off.
+    pub fn update_display(&self, sample_sphere: bool, flg_remove_duplicates: bool) {
         if self.get_index() == 0 {
             self.d_theta_max.set_enabled(!sample_sphere);
             self.d_theta_increment.set_enabled(!sample_sphere);
@@ -146,555 +247,660 @@ impl IterationRow {
             .set_enabled(flg_remove_duplicates);
     }
 
-    /// Java `getParameters(MatlabParam, boolean)`.
-    pub fn get_parameters_matlab(&self, iteration: &mut Iteration, low_cutoff_active: bool) {
+    /// Java package-private `getParameters(MatlabParam, boolean)`.
+    pub fn get_parameters_matlab_param(
+        &self,
+        matlab_param_file: &mut MatlabParam,
+        low_cutoff_active: bool,
+    ) {
+        let iteration = matlab_param_file.get_iteration(self.index.get());
         if !self.d_phi_max.is_empty() || !self.d_phi_increment.is_empty() {
-            iteration
-                .values
-                .insert("dPhiEnd".into(), self.d_phi_max.get_value().into());
-            iteration.values.insert(
-                "dPhiIncrement".into(),
-                self.d_phi_increment.get_value().into(),
-            );
+            iteration.set_d_phi_end(self.d_phi_max.get_value().as_deref());
+            iteration.set_d_phi_increment(self.d_phi_increment.get_value().as_deref());
         } else {
-            iteration.values.remove("dPhiEnd");
-            iteration.values.remove("dPhiIncrement");
+            iteration.clear_d_phi();
         }
         if !self.d_theta_max.is_empty() || !self.d_theta_increment.is_empty() {
-            iteration
-                .values
-                .insert("dThetaEnd".into(), self.d_theta_max.get_value().into());
-            iteration.values.insert(
-                "dThetaIncrement".into(),
-                self.d_theta_increment.get_value().into(),
-            );
+            iteration.set_d_theta_end(self.d_theta_max.get_value().as_deref());
+            iteration.set_d_theta_increment(self.d_theta_increment.get_value().as_deref());
         } else {
-            iteration.values.remove("dThetaEnd");
-            iteration.values.remove("dThetaIncrement");
+            iteration.clear_d_theta();
         }
         if !self.d_psi_max.is_empty() || !self.d_psi_increment.is_empty() {
-            iteration
-                .values
-                .insert("dPsiEnd".into(), self.d_psi_max.get_value().into());
-            iteration.values.insert(
-                "dPsiIncrement".into(),
-                self.d_psi_increment.get_value().into(),
-            );
+            iteration.set_d_psi_end(self.d_psi_max.get_value().as_deref());
+            iteration.set_d_psi_increment(self.d_psi_increment.get_value().as_deref());
         } else {
-            iteration.values.remove("dPsiEnd");
-            iteration.values.remove("dPsiIncrement");
+            iteration.clear_d_psi();
         }
+        iteration.set_search_radius(self.search_radius.get_value().as_deref());
+        iteration.set_hi_cutoff_cutoff(self.hi_cutoff.get_value().as_deref());
+        iteration.set_hi_cutoff_sigma(self.hi_cutoff_sigma.get_value().as_deref());
+        if low_cutoff_active {
+            iteration.set_low_cutoff_cutoff(self.low_cutoff.get_value().as_deref());
+            iteration.set_low_cutoff_sigma(self.low_cutoff_sigma.get_value().as_deref());
+        } else {
+            iteration.set_low_cutoff_cutoff(Some(matlab_param::LOW_CUTOFF_DEFAULT));
+            iteration.set_low_cutoff_sigma(Some(matlab_param::LOW_CUTOFF_SIGMA_DEFAULT));
+        }
+        iteration.set_ref_threshold(self.ref_threshold.get_value().as_deref());
         iteration
-            .values
-            .insert("searchRadius".into(), self.search_radius.get_value().into());
-        iteration
-            .values
-            .insert("hiCutoffCutoff".into(), self.hi_cutoff.get_value().into());
-        iteration.values.insert(
-            "hiCutoffSigma".into(),
-            self.hi_cutoff_sigma.get_value().into(),
-        );
-        iteration.values.insert(
-            "lowCutoffCutoff".into(),
-            if low_cutoff_active {
-                self.low_cutoff.get_value()
-            } else {
-                LOW_CUTOFF_DEFAULT
-            }
-            .into(),
-        );
-        iteration.values.insert(
-            "lowCutoffSigma".into(),
-            if low_cutoff_active {
-                self.low_cutoff_sigma.get_value()
-            } else {
-                LOW_CUTOFF_SIGMA_DEFAULT
-            }
-            .into(),
-        );
-        iteration
-            .values
-            .insert("refThreshold".into(), self.ref_threshold.get_value().into());
-        iteration.values.insert(
-            "duplicateShiftTolerance".into(),
-            self.duplicate_shift_tolerance.get_value().into(),
-        );
-        iteration.values.insert(
-            "duplicateAngularTolerance".into(),
-            self.duplicate_angular_tolerance.get_value().into(),
+            .set_duplicate_shift_tolerance(self.duplicate_shift_tolerance.get_value().as_deref());
+        iteration.set_duplicate_angular_tolerance(
+            self.duplicate_angular_tolerance.get_value().as_deref(),
         );
     }
 
-    /// Java `getParameters(PeetMetaData)`.
-    pub fn get_parameters_peet(&self, meta_data: &mut PeetMetaData) {
-        if meta_data.low_cutoff_values.len() <= self.index {
-            meta_data
-                .low_cutoff_values
-                .resize_with(self.index + 1, Default::default);
-        }
-        let values = &mut meta_data.low_cutoff_values[self.index];
-        values.insert("lowCutoffCutoff".into(), self.low_cutoff.get_value().into());
-        values.insert(
-            "lowCutoffSigma".into(),
-            self.low_cutoff_sigma.get_value().into(),
-        );
+    /// Java package-private `getParameters(PeetMetaData)`.
+    pub fn get_parameters_meta_data(&self, meta_data: &PeetMetaData) {
+        let index = self.index.get();
+        meta_data.set_low_cutoff_cutoff(self.low_cutoff.get_value().as_deref(), index);
+        meta_data.set_low_cutoff_sigma(self.low_cutoff_sigma.get_value().as_deref(), index);
     }
 
-    /// Java `setParameters(ConstPeetMetaData)`.
-    pub fn set_parameters_peet(&mut self, meta_data: Option<&ConstPeetMetaData>) {
-        let Some(meta_data) = meta_data else { return };
-        let Some(values) = meta_data.low_cutoff_values.get(self.index) else {
+    /// Java package-private `setParameters(ConstPeetMetaData)`.
+    pub fn set_parameters_meta_data(&self, meta_data: Option<&dyn ConstPeetMetaData>) {
+        let Some(meta_data) = meta_data else {
             return;
         };
-        self.set_low_cutoff_cutoff(values.get("lowCutoffCutoff").map(String::as_str));
-        self.set_low_cutoff_sigma(values.get("lowCutoffSigma").map(String::as_str));
+        let index = self.index.get();
+        self.set_low_cutoff_cutoff(meta_data.get_low_cutoff_cutoff(index).as_deref());
+        self.set_low_cutoff_sigma(meta_data.get_low_cutoff_sigma(index).as_deref());
     }
 
-    /// Java `checkLowCutoffBackwardsCompatibility(MatlabParam)`.
-    pub fn check_low_cutoff_backwards_compatibility(&self, matlab: &MatlabParam) -> bool {
-        let Some(iteration) = matlab.iterations.get(self.index) else {
-            return false;
-        };
-        iteration
-            .values
-            .get("lowCutoffCutoff")
-            .is_some_and(|v| v.parse::<f64>().ok() == Some(0.0))
-            && iteration
-                .values
-                .get("lowCutoffSigma")
-                .is_some_and(|v| v.parse::<f64>().ok() == Some(0.05))
+    /// Java package-private `checkLowCutoffBackwardsCompatibility(MatlabParam)`.
+    pub fn check_low_cutoff_backwards_compatibility(
+        &self,
+        matlab_param_file: &mut MatlabParam,
+    ) -> bool {
+        let iteration = matlab_param_file.get_iteration(self.index.get());
+        let low_cutoff = converter::to_double(iteration.get_low_cutoff_cutoff().as_deref());
+        let low_cutoff_sigma = converter::to_double(iteration.get_low_cutoff_sigma().as_deref());
+        // `Double.equals`: bit-wise equality of the two doubles.
+        match low_cutoff {
+            Some(low_cutoff)
+                if low_cutoff.to_bits() == matlab_param::DOUBLE_LOW_CUTOFF_DEFAULT.to_bits() => {}
+            _ => return false,
+        }
+        match low_cutoff_sigma {
+            Some(low_cutoff_sigma)
+                if low_cutoff_sigma.to_bits()
+                    == matlab_param::DOUBLE_LOW_CUTOFF_SIGMA_DEFAULT.to_bits() => {}
+            _ => return false,
+        }
+        true
     }
 
-    /// Java `setParameters(MatlabParam, boolean)`.
-    pub fn set_parameters_matlab(&mut self, matlab: &MatlabParam, is_low_cutoff: bool) {
-        let Some(iteration) = matlab.iterations.get(self.index) else {
-            return;
-        };
-        Self::set_field_value(&iteration.values, "dPhiEnd", &mut self.d_phi_max);
-        Self::set_field_value(
-            &iteration.values,
-            "dPhiIncrement",
-            &mut self.d_phi_increment,
-        );
-        Self::set_field_value(&iteration.values, "dThetaEnd", &mut self.d_theta_max);
-        Self::set_field_value(
-            &iteration.values,
-            "dThetaIncrement",
-            &mut self.d_theta_increment,
-        );
-        Self::set_field_value(&iteration.values, "dPsiEnd", &mut self.d_psi_max);
-        Self::set_field_value(
-            &iteration.values,
-            "dPsiIncrement",
-            &mut self.d_psi_increment,
-        );
-        Self::set_field_value(&iteration.values, "searchRadius", &mut self.search_radius);
-        Self::set_field_value(&iteration.values, "hiCutoffCutoff", &mut self.hi_cutoff);
-        Self::set_field_value(
-            &iteration.values,
-            "hiCutoffSigma",
-            &mut self.hi_cutoff_sigma,
-        );
+    /// Java package-private `setParameters(MatlabParam, boolean)`.
+    pub fn set_parameters_matlab_param(
+        &self,
+        matlab_param_file: &mut MatlabParam,
+        is_low_cutoff: bool,
+    ) {
+        let iteration = matlab_param_file.get_iteration(self.index.get());
+        self.d_phi_max
+            .set_value_string(iteration.get_d_phi_end().as_deref());
+        self.d_phi_increment
+            .set_value_string(iteration.get_d_phi_increment().as_deref());
+        self.d_theta_max
+            .set_value_string(iteration.get_d_theta_end().as_deref());
+        self.d_theta_increment
+            .set_value_string(iteration.get_d_theta_increment().as_deref());
+        self.d_psi_max
+            .set_value_string(iteration.get_d_psi_end().as_deref());
+        self.d_psi_increment
+            .set_value_string(iteration.get_d_psi_increment().as_deref());
+        self.search_radius
+            .set_value_string(iteration.get_search_radius_string().as_deref());
+        self.hi_cutoff
+            .set_value_string(iteration.get_hi_cutoff_cutoff().as_deref());
+        self.hi_cutoff_sigma
+            .set_value_string(iteration.get_hi_cutoff_sigma().as_deref());
         if is_low_cutoff {
-            Self::set_field_value(&iteration.values, "lowCutoffCutoff", &mut self.low_cutoff);
-            Self::set_field_value(
-                &iteration.values,
-                "lowCutoffSigma",
-                &mut self.low_cutoff_sigma,
-            );
+            self.low_cutoff
+                .set_value_string(iteration.get_low_cutoff_cutoff().as_deref());
+            self.low_cutoff_sigma
+                .set_value_string(iteration.get_low_cutoff_sigma().as_deref());
         }
         if self.low_cutoff_sigma.is_empty() {
-            self.set_low_cutoff_sigma(Some(LOW_CUTOFF_SIGMA_DEFAULT));
+            self.set_low_cutoff_sigma(Some(matlab_param::LOW_CUTOFF_SIGMA_DEFAULT));
         }
-        Self::set_field_value(&iteration.values, "refThreshold", &mut self.ref_threshold);
-        Self::set_field_value(
-            &iteration.values,
-            "duplicateShiftTolerance",
-            &mut self.duplicate_shift_tolerance,
-        );
-        Self::set_field_value(
-            &iteration.values,
-            "duplicateAngularTolerance",
-            &mut self.duplicate_angular_tolerance,
+        self.ref_threshold
+            .set_value_string(iteration.get_ref_threshold_string().as_deref());
+        self.duplicate_shift_tolerance
+            .set_value_string(iteration.get_duplicate_shift_tolerance_string().as_deref());
+        self.duplicate_angular_tolerance.set_value_string(
+            iteration
+                .get_duplicate_angular_tolerance_string()
+                .as_deref(),
         );
     }
 
-    /// Java `isHighlighted()`.
+    /// Java package-private `isHighlighted()`.
     pub fn is_highlighted(&self) -> bool {
         self.btn_highlighter.is_highlighted()
     }
-    /// Java `getIndex()`.
-    pub fn get_index(&self) -> usize {
-        self.index
+
+    /// Java package-private `getIndex()`.
+    pub fn get_index(&self) -> i32 {
+        self.index.get()
     }
-    /// Java `setIndex(int)`.
-    pub fn set_index(&mut self, index: usize) {
-        self.index = index;
-        self.number.set_text_int((index + 1) as i32);
+
+    /// Java package-private `setIndex(int)`.
+    pub fn set_index(&self, index: i32) {
+        self.index.set(index);
+        self.number.set_text_string(Some(&(index + 1).to_string()));
     }
-    /// Java `remove()`.
-    pub fn remove(&mut self) {
+
+    /// Java package-private `remove()`.
+    pub fn remove(&self) {
         self.number.remove();
         self.btn_highlighter.remove();
-        self.displayed = false;
+        self.d_phi_max.remove();
+        self.d_phi_increment.remove();
+        self.d_theta_max.remove();
+        self.d_theta_increment.remove();
+        self.d_psi_max.remove();
+        self.d_psi_increment.remove();
+        self.search_radius.remove();
+        self.hi_cutoff.remove();
+        self.hi_cutoff_sigma.remove();
+        self.low_cutoff.remove();
+        self.low_cutoff_sigma.remove();
+        self.ref_threshold.remove();
+        self.duplicate_shift_tolerance.remove();
+        self.duplicate_angular_tolerance.remove();
     }
-    /// Java `display()`.
-    pub fn display(&mut self) {
-        self.number.add();
-        self.btn_highlighter.add();
-        self.displayed = true;
+
+    /// Java package-private `display()`.
+    pub fn display(&self) {
+        let table = self.table();
+        let panel = &self.panel;
+        // `cell.add(panel, layout, constraints)`: the cell's `add` and the
+        // `layout.setConstraints` it makes.
+        let add = |cell: &dyn CellVirtual, component: Rc<JComponent>| {
+            cell.add(panel);
+            table
+                .get_layout()
+                .set_constraints(&component, &table.get_constraints());
+        };
+        table.with_constraints(|constraints| {
+            constraints.weightx = 0.0;
+            constraints.weighty = 0.1;
+            constraints.gridwidth = 1;
+        });
+        add(&*self.number, self.number.get_component());
+        table.with_constraints(|constraints| {
+            self.btn_highlighter
+                .add(panel, table.get_layout(), constraints);
+        });
+        table.with_constraints(|constraints| constraints.weightx = 0.1);
+        for cell in [
+            &self.d_phi_max,
+            &self.d_phi_increment,
+            &self.d_theta_max,
+            &self.d_theta_increment,
+            &self.d_psi_max,
+            &self.d_psi_increment,
+            &self.search_radius,
+            &self.hi_cutoff,
+            &self.hi_cutoff_sigma,
+            &self.low_cutoff,
+            &self.low_cutoff_sigma,
+            &self.ref_threshold,
+            &self.duplicate_shift_tolerance,
+        ] {
+            add(&**cell, cell.get_component());
+        }
+        table.with_constraints(|constraints| constraints.gridwidth = GRID_BAG_REMAINDER);
+        add(
+            &*self.duplicate_angular_tolerance,
+            self.duplicate_angular_tolerance.get_component(),
+        );
     }
 
     /// Java private `buildHeaderDescription(String[])`.
-    pub fn build_header_description(header_array: &[&str]) -> String {
-        header_array
-            .iter()
-            .map(|header| format!(", {header}"))
-            .collect()
+    fn build_header_description(header_array: Option<&[&str]>) -> String {
+        let mut header = String::new();
+        if let Some(header_array) = header_array {
+            for element in header_array {
+                header.push_str(&format!(", {element}"));
+            }
+        }
+        header
     }
 
-    /// Java private `validateRun(boolean, EtomoNumber, String[], String)`.
-    pub fn validate_run_number(
-        &mut self,
+    /// Java private `validateRun(boolean, EtomoNumber, String[], String)`.  Validates
+    /// empty and n.  Empty must always be false.  If n is not null, it must be valid
+    /// and not negative.
+    fn validate_run_value(
+        &self,
         empty: bool,
-        value: &str,
-        integer: bool,
+        n: Option<&EtomoNumber>,
         header_array: &[&str],
         additional_empty_error_message: Option<&str>,
     ) -> bool {
-        let description = Self::build_header_description(header_array);
         if empty {
-            self.last_message = Some((
-                format!(
-                    "{LABEL}:  In row {}{description} must not be empty.{}",
-                    self.number.to_string(),
-                    additional_empty_error_message.unwrap_or_default()
-                ),
-                "Entry Error".into(),
-            ));
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string(
+                    Some(self.manager),
+                    &format!(
+                        "{}:  In row {}{} must not be empty.{}",
+                        iteration_table::LABEL,
+                        self.number,
+                        Self::build_header_description(Some(header_array)),
+                        additional_empty_error_message.unwrap_or("")
+                    ),
+                    "Entry Error",
+                )
+            });
             return false;
         }
-        let parsed: Result<f64, ()> = if integer {
-            value.parse::<i64>().map(|n| n as f64).map_err(|_| ())
-        } else {
-            value.parse::<f64>().map_err(|_| ())
-        };
-        let Ok(number) = parsed else {
-            self.last_message = Some((
-                format!(
-                    "{LABEL}:  In row {}{description}:   Invalid number",
-                    self.number.to_string()
-                ),
-                "Entry Error".into(),
-            ));
-            return false;
-        };
-        if number < 0.0 {
-            self.last_message = Some((
-                format!(
-                    "{LABEL}:  In row {}{description} must not be negative.",
-                    self.number.get_text().unwrap_or_default()
-                ),
-                "Entry Error".into(),
-            ));
-            return false;
+        if let Some(n) = n {
+            if !n.is_valid() {
+                ui_harness::with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string(
+                        Some(self.manager),
+                        &format!(
+                            "{}:  In row {}{}:   {}",
+                            iteration_table::LABEL,
+                            self.number,
+                            Self::build_header_description(Some(header_array)),
+                            n.get_invalid_reason()
+                        ),
+                        "Entry Error",
+                    )
+                });
+                return false;
+            }
+            if n.is_negative() {
+                ui_harness::with(|harness| {
+                    harness.open_message_dialog_base_manager_string_string(
+                        Some(self.manager),
+                        &format!(
+                            "{}:  In row {}{} must not be negative.",
+                            iteration_table::LABEL,
+                            self.number.get_text().unwrap_or_default(),
+                            Self::build_header_description(Some(header_array))
+                        ),
+                        "Entry Error",
+                    )
+                });
+                return false;
+            }
         }
         true
     }
 
-    /// Java `validateRun(boolean)`.
-    pub fn validate_run(&mut self, is_low_cutoff: bool) -> bool {
-        let d_phi_max = self.d_phi_max.get_value().to_owned();
-        let d_phi_increment = self.d_phi_increment.get_value().to_owned();
-        let d_theta_max = self.d_theta_max.get_value().to_owned();
-        let d_theta_increment = self.d_theta_increment.get_value().to_owned();
-        let d_psi_max = self.d_psi_max.get_value().to_owned();
-        let d_psi_increment = self.d_psi_increment.get_value().to_owned();
-        let search_radius = self.search_radius.get_value().trim().to_owned();
-        let hi_cutoff = self.hi_cutoff.get_value().to_owned();
-        let hi_cutoff_sigma = self.hi_cutoff_sigma.get_value().to_owned();
-        let low_cutoff = self.low_cutoff.get_value().to_owned();
-        let low_cutoff_sigma = self.low_cutoff_sigma.get_value().to_owned();
-        let ref_threshold = self.ref_threshold.get_value().to_owned();
-        let duplicate_shift_tolerance = self.duplicate_shift_tolerance.get_value().to_owned();
-        let duplicate_angular_tolerance = self.duplicate_angular_tolerance.get_value().to_owned();
-        let theta_max_enabled = self.d_theta_max.is_enabled();
-        let theta_increment_enabled = self.d_theta_increment.is_enabled();
-        let psi_max_enabled = self.d_psi_max.is_enabled();
-        let psi_increment_enabled = self.d_psi_increment.is_enabled();
-        let duplicate_shift_enabled = self.duplicate_shift_tolerance.is_enabled();
-        let duplicate_angular_enabled = self.duplicate_angular_tolerance.is_enabled();
-        let checks = [
-            (
-                &d_phi_max,
-                false,
-                [D_PHI_D_THETA_D_PSI_HEADER1, "Phi", MAX_HEADER3].as_slice(),
+    /// Java package-private `validateRun(boolean)`.
+    pub fn validate_run(&self, is_low_cutoff: bool) -> bool {
+        // Phi
+        let mut n_double = EtomoNumber::new_with_type(Some(Type::Double));
+        let mut n_integer = EtomoNumber::new();
+        n_double.set_string(self.d_phi_max.get_value().as_deref());
+        if !self.validate_run_value(
+            self.d_phi_max.is_empty(),
+            Some(&n_double),
+            &[
+                iteration_table::D_PHI_D_THETA_D_PSI_HEADER1,
+                shared_strings::D_PHI_LABEL,
+                iteration_table::MAX_HEADER3,
+            ],
+            Some("Use 0 to not search on the angle."),
+        ) {
+            return false;
+        }
+        n_double.set_string(self.d_phi_increment.get_value().as_deref());
+        if !self.validate_run_value(
+            self.d_phi_increment.is_empty(),
+            Some(&n_double),
+            &[
+                iteration_table::D_PHI_D_THETA_D_PSI_HEADER1,
+                shared_strings::D_PHI_LABEL,
+                iteration_table::INCR_HEADER3,
+            ],
+            None,
+        ) {
+            return false;
+        }
+        // Theta
+        if self.d_theta_max.is_enabled() {
+            n_double.set_string(self.d_theta_max.get_value().as_deref());
+            if !self.validate_run_value(
+                self.d_theta_max.is_empty(),
+                Some(&n_double),
+                &[
+                    iteration_table::D_PHI_D_THETA_D_PSI_HEADER1,
+                    shared_strings::D_THETA_LABEL,
+                    iteration_table::MAX_HEADER3,
+                ],
                 Some("Use 0 to not search on the angle."),
-            ),
-            (
-                &d_phi_increment,
-                false,
-                [D_PHI_D_THETA_D_PSI_HEADER1, "Phi", INCR_HEADER3].as_slice(),
+            ) {
+                return false;
+            }
+        }
+        if self.d_theta_increment.is_enabled() {
+            n_double.set_string(self.d_theta_increment.get_value().as_deref());
+            if !self.validate_run_value(
+                self.d_theta_increment.is_empty(),
+                Some(&n_double),
+                &[
+                    iteration_table::D_PHI_D_THETA_D_PSI_HEADER1,
+                    shared_strings::D_THETA_LABEL,
+                    iteration_table::INCR_HEADER3,
+                ],
                 None,
-            ),
+            ) {
+                return false;
+            }
+        }
+        // Psi
+        if self.d_psi_max.is_enabled() {
+            n_double.set_string(self.d_psi_max.get_value().as_deref());
+            if !self.validate_run_value(
+                self.d_psi_max.is_empty(),
+                Some(&n_double),
+                &[
+                    iteration_table::D_PHI_D_THETA_D_PSI_HEADER1,
+                    shared_strings::D_PSI_LABEL,
+                    iteration_table::MAX_HEADER3,
+                ],
+                Some("Use 0 to not search on the angle."),
+            ) {
+                return false;
+            }
+        }
+        if self.d_psi_increment.is_enabled() {
+            n_double.set_string(self.d_psi_increment.get_value().as_deref());
+            if !self.validate_run_value(
+                self.d_psi_increment.is_empty(),
+                Some(&n_double),
+                &[
+                    iteration_table::D_PHI_D_THETA_D_PSI_HEADER1,
+                    shared_strings::D_PSI_LABEL,
+                    iteration_table::INCR_HEADER3,
+                ],
+                None,
+            ) {
+                return false;
+            }
+        }
+        // search radius
+        let search_radius_string = self
+            .search_radius
+            .get_value()
+            .unwrap_or_default()
+            .trim_matches(|c: char| (c as u32) <= 0x20)
+            .to_owned();
+        let header_array = [
+            iteration_table::SEARCH_RADIUS_HEADER1,
+            iteration_table::SEARCH_RADIUS_HEADER2,
         ];
-        for (value, integer, headers, extra) in checks {
-            if !self.validate_run_number(value.trim().is_empty(), value, integer, headers, extra) {
-                return false;
-            }
-        }
-        for (value, enabled, headers, extra) in [
-            (
-                &d_theta_max,
-                theta_max_enabled,
-                [D_PHI_D_THETA_D_PSI_HEADER1, "Theta", MAX_HEADER3].as_slice(),
-                Some("Use 0 to not search on the angle."),
-            ),
-            (
-                &d_theta_increment,
-                theta_increment_enabled,
-                [D_PHI_D_THETA_D_PSI_HEADER1, "Theta", INCR_HEADER3].as_slice(),
+        n_integer.set_string(Some(&search_radius_string));
+        if self.search_radius.is_empty() || n_integer.is_valid() {
+            if !self.validate_run_value(
+                self.search_radius.is_empty(),
+                Some(&n_integer),
+                &header_array,
                 None,
-            ),
-            (
-                &d_psi_max,
-                psi_max_enabled,
-                [D_PHI_D_THETA_D_PSI_HEADER1, "Psi", MAX_HEADER3].as_slice(),
-                Some("Use 0 to not search on the angle."),
-            ),
-            (
-                &d_psi_increment,
-                psi_increment_enabled,
-                [D_PHI_D_THETA_D_PSI_HEADER1, "Psi", INCR_HEADER3].as_slice(),
-                None,
-            ),
-        ] {
-            if enabled
-                && !self.validate_run_number(value.trim().is_empty(), value, false, headers, extra)
-            {
-                return false;
-            }
-        }
-        let radius_headers = [SEARCH_RADIUS_HEADER1, SEARCH_RADIUS_HEADER2];
-        let radius = search_radius.as_str();
-        if radius.parse::<i64>().is_ok() || radius.is_empty() {
-            if !self.validate_run_number(radius.is_empty(), radius, true, &radius_headers, None) {
+            ) {
                 return false;
             }
         } else {
-            let parts: Vec<_> = radius
+            // If its not a single number then it must be a list of three numbers
+            // divided by "," or " ".
+            // `split("\\s*,\\s*")` (trailing empty strings removed).
+            let mut search_radius_array: Vec<String> = search_radius_string
                 .split(',')
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
+                .map(|element| element.trim().to_owned())
                 .collect();
-            let parts = if parts.len() == 3 {
-                parts
-            } else {
-                radius.split_whitespace().collect()
-            };
-            if parts.len() != 3 {
-                self.last_message = Some((
-                    format!(
-                        "{LABEL}:  In row {}{} must have either 1 or 3 elements.",
-                        self.number.to_string(),
-                        Self::build_header_description(&radius_headers)
-                    ),
-                    "Entry Error".into(),
-                ));
-                return false;
+            while search_radius_array.len() > 1
+                && search_radius_array.last().is_some_and(String::is_empty)
+            {
+                search_radius_array.pop();
             }
-            for part in parts {
-                if !self.validate_run_number(false, part, true, &radius_headers, None) {
+            if search_radius_array.len() != 3 {
+                // `split("\\s+")`.
+                search_radius_array = search_radius_string
+                    .split(char::is_whitespace)
+                    .filter(|element| !element.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if search_radius_array.len() != 3 {
+                    ui_harness::with(|harness| {
+                        harness.open_message_dialog_base_manager_string_string(
+                            Some(self.manager),
+                            &format!(
+                                "{}:  In row {}{} must have either 1 or 3 elements.",
+                                iteration_table::LABEL,
+                                self.number,
+                                Self::build_header_description(Some(&header_array))
+                            ),
+                            "Entry Error",
+                        )
+                    });
+                    return false;
+                }
+            }
+            // Validate each number in the array.
+            for element in &search_radius_array {
+                n_integer.set_string(Some(element));
+                if !self.validate_run_value(false, Some(&n_integer), &header_array, None) {
                     return false;
                 }
             }
         }
-        for (value, headers, extra) in [
-            (
-                &hi_cutoff,
-                [HICUTOFF_HEADER1, HICUTOFF_HEADER2, HICUTOFF_CUTOFF_HEADER3].as_slice(),
-                None,
-            ),
-            (
-                &hi_cutoff_sigma,
-                [HICUTOFF_HEADER1, HICUTOFF_HEADER2, HICUTOFF_SIGMA_HEADER3].as_slice(),
-                None,
-            ),
-            (
-                &ref_threshold,
-                [REF_THRESHOLD_HEADER1, REF_THRESHOLD_HEADER2].as_slice(),
-                None,
-            ),
-        ] {
-            if !self.validate_run_number(value.trim().is_empty(), value, false, headers, extra) {
-                return false;
-            }
+        // hiCutoff
+        if !self.validate_run_value(
+            self.hi_cutoff.is_empty(),
+            None,
+            &[
+                iteration_table::HICUTOFF_HEADER1,
+                iteration_table::HICUTOFF_HEADER2,
+                iteration_table::HICUTOFF_CUTOFF_HEADER3,
+            ],
+            None,
+        ) {
+            return false;
+        }
+        // hiCutoffSigma
+        if !self.validate_run_value(
+            self.hi_cutoff_sigma.is_empty(),
+            None,
+            &[
+                iteration_table::HICUTOFF_HEADER1,
+                iteration_table::HICUTOFF_HEADER2,
+                iteration_table::HICUTOFF_SIGMA_HEADER3,
+            ],
+            None,
+        ) {
+            return false;
         }
         if is_low_cutoff {
-            for (value, headers, extra) in [
-                (
-                    &low_cutoff,
-                    [
-                        LOWCUTOFF_HEADER1,
-                        LOWCUTOFF_HEADER2,
-                        LOWCUTOFF_CUTOFF_HEADER3,
-                    ]
-                    .as_slice(),
-                    Some(" Use 0 to disable filtering for an iteration."),
-                ),
-                (
-                    &low_cutoff_sigma,
-                    [
-                        LOWCUTOFF_HEADER1,
-                        LOWCUTOFF_HEADER2,
-                        LOWCUTOFF_SIGMA_HEADER3,
-                    ]
-                    .as_slice(),
-                    None,
-                ),
-            ] {
-                if !self.validate_run_number(value.trim().is_empty(), value, false, headers, extra)
-                {
-                    return false;
-                }
+            // lowCutoff
+            if !self.validate_run_value(
+                self.low_cutoff.is_empty(),
+                None,
+                &[
+                    iteration_table::LOWCUTOFF_HEADER1,
+                    iteration_table::LOWCUTOFF_HEADER2,
+                    iteration_table::LOWCUTOFF_CUTOFF_HEADER3,
+                ],
+                Some(" Use 0 to disable filtering for an iteration."),
+            ) {
+                return false;
+            }
+            // lowCutoffSigma
+            if !self.validate_run_value(
+                self.low_cutoff_sigma.is_empty(),
+                None,
+                &[
+                    iteration_table::LOWCUTOFF_HEADER1,
+                    iteration_table::LOWCUTOFF_HEADER2,
+                    iteration_table::LOWCUTOFF_SIGMA_HEADER3,
+                ],
+                None,
+            ) {
+                return false;
             }
         }
-        for (value, enabled, headers) in [
-            (
-                &duplicate_shift_tolerance,
-                duplicate_shift_enabled,
-                [
-                    DUPLICATE_TOLERANCE_HEADER1,
-                    DUPLICATE_TOLERANCE_HEADER2,
-                    DUPLICATE_SHIFT_TOLERANCE_HEADER3,
-                ]
-                .as_slice(),
-            ),
-            (
-                &duplicate_angular_tolerance,
-                duplicate_angular_enabled,
-                [
-                    DUPLICATE_TOLERANCE_HEADER1,
-                    DUPLICATE_TOLERANCE_HEADER2,
-                    DUPLICATE_ANGULAR_TOLERANCE_HEADER3,
-                ]
-                .as_slice(),
-            ),
-        ] {
-            if enabled
-                && !self.validate_run_number(value.trim().is_empty(), value, true, headers, None)
-            {
+        // refThreshold
+        if !self.validate_run_value(
+            self.ref_threshold.is_empty(),
+            None,
+            &[
+                iteration_table::REF_THRESHOLD_HEADER1,
+                iteration_table::REF_THRESHOLD_HEADER2,
+            ],
+            None,
+        ) {
+            return false;
+        }
+        // duplicateShiftTolerance
+        if self.duplicate_shift_tolerance.is_enabled() {
+            n_integer.set_string(self.duplicate_shift_tolerance.get_value().as_deref());
+            if !self.validate_run_value(
+                self.duplicate_shift_tolerance.is_empty(),
+                Some(&n_integer),
+                &[
+                    iteration_table::DUPLICATE_TOLERANCE_HEADER1,
+                    iteration_table::DUPLICATE_TOLERANCE_HEADER2,
+                    iteration_table::DUPLICATE_SHIFT_TOLERANCE_HEADER3,
+                ],
+                None,
+            ) {
+                return false;
+            }
+        }
+        // duplicateAngularTolerance
+        if self.duplicate_angular_tolerance.is_enabled() {
+            n_integer.set_string(self.duplicate_angular_tolerance.get_value().as_deref());
+            if !self.validate_run_value(
+                self.duplicate_angular_tolerance.is_empty(),
+                Some(&n_integer),
+                &[
+                    iteration_table::DUPLICATE_TOLERANCE_HEADER1,
+                    iteration_table::DUPLICATE_TOLERANCE_HEADER2,
+                    iteration_table::DUPLICATE_ANGULAR_TOLERANCE_HEADER3,
+                ],
+                None,
+            ) {
                 return false;
             }
         }
         true
     }
 
-    /// Java private `setTooltips`; autodoc duplicate tolerance text remains the
-    /// explicit storage/autodoc boundary, while source-local tooltips are exact.
-    pub fn set_tooltips(&mut self) {
-        self.number.set_tool_tip_text("Iteration number");
-        self.d_phi_max.set_tooltip_text("Maximum magnitude of rotation about the particle Y axis in degrees.  Search will range from -(Phi Max) to +(Phi Max) in steps of (Phi Step).");
-        self.d_phi_increment.set_tooltip_text("Increment between sample points for rotation about Y in degrees.  Search will range from -(Phi Max) to +(Phi Max) in steps of (Phi Step).");
-        self.d_theta_max.set_tooltip_text("Maximum magnitude of rotation about the particle Z axis in degrees.  Search will range from -(Theta Max) to +(Theta Max) in steps of (Theta Step).");
-        self.d_theta_increment.set_tooltip_text("Increment between sample points for rotation about Z in degrees.  Search will range from -(Theta Max) to +(Theta Max) in steps of (Theta Step).");
-        self.d_psi_max.set_tooltip_text("Maximum magnitude of rotation about the particle X axis in degrees.  Search will range from -(Psi Max) to +(Psi Max) in steps of (Psi Step).");
-        self.d_psi_increment.set_tooltip_text("Increment between sample points for rotation about X in degrees.  Search will range from -(Psi Max) to +(Psi Max) in steps of (Psi Step).");
-        self.search_radius.set_tooltip_text("The number of pixels to search in the X, Y, and Z directions.  A single, integer number of pixels can be specified, which will be applied to all 3 dimensions, or a vector of 3 integers can be specified, giving the X, Y, and Z search distances individually. E.g. '3' is equivalent to '3 3 3'.");
-        self.hi_cutoff.set_tooltip_text("The normalized spatial frequency above which high frequencies are attenuated.  0.5 corresponds to the Nyquist frequency, and values of 0.866 or larger disable low-pass filtering.");
-        self.hi_cutoff_sigma.set_tooltip_text("The width (standard deviation) in normalized frequency units of a Gaussian determining the rate at which attenuation increases above the cutoff.");
-        self.low_cutoff.set_tooltip_text("The normalized frequency below which low frequencies will be attenuated. Values <= 0 disable high-pass filtering.");
-        self.low_cutoff_sigma.set_tooltip_text(
-            "An optional parameter which defines the transition width of the high-pass filter.",
+    /// Java private `setTooltips()`.
+    fn set_tooltips(&self) {
+        let autodoc = match unsafe {
+            autodoc_factory::get_instance(
+                Some(self.manager),
+                Some(autodoc_factory::PEET_PRM),
+                AxisID::Only,
+                false,
+            )
+        } {
+            Ok(autodoc) => autodoc,
+            Err(LogFileError::Lock(_)) => std::ptr::null_mut(),
+            Err(e) => {
+                eprintln!("{e}");
+                std::ptr::null_mut()
+            }
+        };
+        let autodoc = unsafe { autodoc.as_ref() }.map(|autodoc| autodoc as &dyn ReadOnlyAutodoc);
+        self.duplicate_shift_tolerance.set_tool_tip_text(
+            etomo_autodoc::get_tooltip(autodoc, Some(matlab_param::DUPLICATE_SHIFT_TOLERANCE_KEY))
+                .as_deref(),
         );
-        self.ref_threshold.set_tooltip_text("Determines the number of particles averaged to form the reference for the next alignment iteration. If less than 1, it represents a cross-correlation coefficient threshold, with particles having a larger correlation eligible for inclusion in the reference.  If greater than 1, it is the number of particles to include.");
-    }
-    /// Java `setVisibleLowCutoffRows(boolean)`.
-    pub fn set_visible_low_cutoff_rows(&mut self, input: bool) {
-        self.low_cutoff.set_visible(input);
-        self.low_cutoff_sigma.set_visible(input);
-    }
-    /// Java `setLowCutoffCutoff(String)`.
-    pub fn set_low_cutoff_cutoff(&mut self, input: Option<&str>) {
-        if let Some(input) = input {
-            self.low_cutoff.set_value(input);
-        }
-    }
-    /// Java `setLowCutoffSigma(String)`.
-    pub fn set_low_cutoff_sigma(&mut self, input: Option<&str>) {
-        if let Some(input) = input {
-            self.low_cutoff_sigma.set_value(input);
-        }
+        self.duplicate_angular_tolerance.set_tool_tip_text(
+            etomo_autodoc::get_tooltip(
+                autodoc,
+                Some(matlab_param::DUPLICATE_ANGULAR_TOLERANCE_KEY),
+            )
+            .as_deref(),
+        );
+        self.number.set_tool_tip_text(Some("Iteration number"));
+        self.d_phi_max.set_tool_tip_text(Some(
+            "Maximum magnitude of rotation about the particle Y axis in degrees.  Search will range from -(Phi Max) to +(Phi Max) in steps of (Phi Step).",
+        ));
+        self.d_phi_increment.set_tool_tip_text(Some(
+            "Increment between sample points for rotation about Y in degrees.  Search will range from -(Phi Max) to +(Phi Max) in steps of (Phi Step).",
+        ));
+        self.d_theta_max.set_tool_tip_text(Some(
+            "Maximum magnitude of rotation about the particle Z axis in degrees.  Search will range from -(Theta Max) to +(Theta Max) in steps of (Theta Step).",
+        ));
+        self.d_theta_increment.set_tool_tip_text(Some(
+            "Increment between sample points for rotation about Z in degrees.  Search will range from -(Theta Max) to +(Theta Max) in steps of (Theta Step).",
+        ));
+        self.d_psi_max.set_tool_tip_text(Some(
+            "Maximum magnitude of rotation about the particle X axis in degrees.  Search will range from -(Psi Max) to +(Psi Max) in steps of (Psi Step).",
+        ));
+        self.d_psi_increment.set_tool_tip_text(Some(
+            "Increment between sample points for rotation about X in degrees.  Search will range from -(Psi Max) to +(Psi Max) in steps of (Psi Step).",
+        ));
+        self.search_radius.set_tool_tip_text(Some(
+            "The number of pixels to search in the X, Y, and Z directions.  A single, integer number of pixels can be specified, which will be applied to all 3 dimensions, or a vector of 3 integers can be specified, giving the X, Y, and Z search distances individually. E.g. '3' is equivalent to '3 3 3'.",
+        ));
+        self.hi_cutoff.set_tool_tip_text(Some(
+            "The normalized spatial frequency above which high frequencies are attenuated.  0.5 corresponds to the Nyquist frequency, and values of 0.866 or larger disable low-pass filtering.",
+        ));
+        self.hi_cutoff_sigma.set_tool_tip_text(Some(
+            "The width (standard deviation) in normalized frequency units of a Gaussian determining the rate at which attenuation increases above the cutoff.",
+        ));
+        self.low_cutoff.set_tool_tip_text(Some(
+            "The normalized frequency below which low frequencies will be attenuated. Values <= 0 disable high-pass filtering.",
+        ));
+        self.low_cutoff_sigma.set_tool_tip_text(Some(
+            "An optional parameter which defines the transition width of the high-pass filter.",
+        ));
+        self.ref_threshold.set_tool_tip_text(Some(
+            "Determines the number of particles averaged to form the reference for the next alignment iteration. If less than 1, it represents a cross-correlation coefficient threshold, with particles having a larger correlation eligible for inclusion in the reference.  If greater than 1, it is the number of particles to include.",
+        ));
     }
 
-    fn set_field_value(
-        values: &std::collections::BTreeMap<String, String>,
-        key: &str,
-        field: &mut FieldCell,
-    ) {
-        field.set_value(values.get(key).map(String::as_str).unwrap_or_default());
+    /// Java `setVisibleLowCutoffRows(boolean)`.
+    pub fn set_visible_low_cutoff_rows(&self, input: bool) {
+        self.low_cutoff.get_component().set_visible(input);
+        self.low_cutoff_sigma.get_component().set_visible(input);
     }
-    fn fields_mut(&mut self) -> [&mut FieldCell; 14] {
-        [
-            &mut self.d_phi_max,
-            &mut self.d_phi_increment,
-            &mut self.d_theta_max,
-            &mut self.d_theta_increment,
-            &mut self.d_psi_max,
-            &mut self.d_psi_increment,
-            &mut self.search_radius,
-            &mut self.hi_cutoff,
-            &mut self.hi_cutoff_sigma,
-            &mut self.low_cutoff,
-            &mut self.low_cutoff_sigma,
-            &mut self.ref_threshold,
-            &mut self.duplicate_shift_tolerance,
-            &mut self.duplicate_angular_tolerance,
-        ]
+
+    /// Java `setLowCutoffCutoff(String)`.
+    pub fn set_low_cutoff_cutoff(&self, input: Option<&str>) {
+        let Some(input) = input else {
+            return;
+        };
+        self.low_cutoff.set_value_string(Some(input));
+    }
+
+    /// Java `setLowCutoffSigma(String)`.
+    pub fn set_low_cutoff_sigma(&self, input: Option<&str>) {
+        let Some(input) = input else {
+            return;
+        };
+        self.low_cutoff_sigma.set_value_string(Some(input));
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn source_validation_obeys_disabled_and_triplet_rules() {
-        let mut row = IterationRow::new(0, false);
-        for field in [
-            &mut row.d_phi_max,
-            &mut row.d_phi_increment,
-            &mut row.search_radius,
-            &mut row.hi_cutoff,
-            &mut row.hi_cutoff_sigma,
-            &mut row.ref_threshold,
+impl Highlightable for IterationRow {
+    /// Java `highlight(boolean)`.
+    fn highlight(&self, highlight: bool) {
+        for cell in [
+            &self.d_phi_max,
+            &self.d_phi_increment,
+            &self.d_theta_max,
+            &self.d_theta_increment,
+            &self.d_psi_max,
+            &self.d_psi_increment,
+            &self.search_radius,
+            &self.hi_cutoff,
+            &self.hi_cutoff_sigma,
+            &self.low_cutoff,
+            &self.low_cutoff_sigma,
+            &self.ref_threshold,
+            &self.duplicate_shift_tolerance,
+            &self.duplicate_angular_tolerance,
         ] {
-            field.set_value("1");
+            cell.set_highlight(highlight);
         }
-        row.search_radius.set_value("1, 2, 3");
-        row.update_display(true, false);
-        assert!(row.validate_run(false));
-        row.search_radius.set_value("1, 2");
-        assert!(!row.validate_run(false));
-        assert!(
-            row.last_message
-                .as_ref()
-                .unwrap()
-                .0
-                .contains("either 1 or 3 elements")
-        );
-    }
-    #[test]
-    fn source_parameter_defaults_and_copy_are_retained() {
-        let mut row = IterationRow::new(0, false);
-        row.d_phi_max.set_value("3");
-        row.d_phi_increment.set_value("1");
-        let mut iteration = Iteration::default();
-        row.get_parameters_matlab(&mut iteration, false);
-        assert_eq!(iteration.values["dPhiEnd"], "3");
-        assert_eq!(iteration.values["lowCutoffSigma"], LOW_CUTOFF_SIGMA_DEFAULT);
-        let copy = IterationRow::copy(1, &row);
-        assert_eq!(copy.get_index(), 1);
-        assert_eq!(copy.d_phi_max.get_value(), "3");
-        assert!(!copy.is_highlighted());
     }
 }

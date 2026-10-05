@@ -14,11 +14,12 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::log_interface::{
-    FileReaderRef, FileWriterRef, LogInterface, Loggable, LoggableException,
-};
+use super::log_interface::LogInterface;
 use crate::imod::etomo::process::emergency_monitor::EmergencyMonitor;
+use crate::imod::etomo::storage::file_reader::FileReaderRef;
+use crate::imod::etomo::storage::file_writer::FileWriterRef;
 use crate::imod::etomo::storage::log_file::{LogFile, LogFileError};
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::util::event_queue::{self, EdtRef};
 use crate::imod::etomo::util::utilities;
@@ -509,7 +510,7 @@ impl AppendLater {
         }
         let mut secondary_append_success = false;
         if let Some(secondary_log) = &self.secondary_log {
-            secondary_append_success = secondary_log.borrow_mut().append(string);
+            secondary_append_success = secondary_log.lock().unwrap().append(string);
         }
         // Make sure that string is logged somewhere.
         if !self.allow_primary_logging && !secondary_append_success {
@@ -598,10 +599,10 @@ impl AppendLater {
             }
         }
         if let Some(reader) = &self.reader
-            && reader.borrow().is_readable()
+            && reader.lock().unwrap().is_readable()
         {
             loop {
-                let line = reader.borrow_mut().read_line();
+                let line = reader.lock().unwrap().read_line();
                 let Some(line) = line else {
                     break;
                 };
@@ -616,7 +617,7 @@ impl AppendLater {
                 }
             }
             if let Some(secondary_log) = &self.secondary_log {
-                secondary_log.borrow_mut().flush();
+                secondary_log.lock().unwrap().flush();
             }
         }
         if let Some(axis_id) = self.axis_id
@@ -639,7 +640,8 @@ impl AppendLater {
                 prev_line_end_offset = primary_log.get_prev_line_end_offset();
             }
         } else if let Some(secondary_log) = &self.secondary_log {
-            prev_line_end_offset = secondary_log.borrow().get_prev_line_end_offset();
+            prev_line_end_offset =
+                Ok(secondary_log.lock().unwrap().get_prev_line_end_offset() as usize);
         }
         match prev_line_end_offset {
             Ok(prev_line_end_offset) => {

@@ -24,73 +24,77 @@ export component TransferfidPanel inherits Rectangle {
 
     VerticalLayout {
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
 
-        PanelHeader { title: "Transfer Fiducials"; }
+        ph-body-30 := PanelHeader { title: "Transfer Fiducials"; }
+        // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+        if ph-body-30.shown-open: VerticalLayout {
+            spacing: EtomoStyle.row-gap;
 
-        // `panelTransferfidBody`
-        VerticalLayout {
-            spacing: EtomoStyle.gap;
+            // `panelTransferfidBody`
+            VerticalLayout {
+                spacing: EtomoStyle.row-gap;
 
-            // `pnlRunMidas`, an X box holding the check box and a glue.
-            CheckBox { text: "Run midas"; enabled: root.enabled; }
+                // `pnlRunMidas`, an X box holding the check box and a glue.
+                CheckBox { text: "Run midas"; enabled: root.enabled; }
 
-            // `Box.createHorizontalStrut(300)` keeps the panel a minimum
-            // size (`:88`); expressed as a minimum width on the body.
-            Rectangle { height: 0px; min-width: 300px; }
+                // `Box.createHorizontalStrut(300)` keeps the panel a minimum
+                // size (`:88`); expressed as a minimum width on the body.
+                Rectangle { height: 0px; min-width: 300px; }
 
-            if root.advanced: LabeledTextField { label: "Center view A: "; text: ""; label-width: 260px; enabled: root.enabled; }
-            if root.advanced: LabeledTextField { label: "Center view B: "; text: ""; label-width: 260px; enabled: root.enabled; }
-            if root.advanced: LabeledTextField { label: "Number of views in the search: "; text: ""; label-width: 260px; enabled: root.enabled; }
+                if root.advanced: LabeledTextField { label: "Center view A: "; text: ""; enabled: root.enabled; }
+                if root.advanced: LabeledTextField { label: "Center view B: "; text: ""; enabled: root.enabled; }
+                if root.advanced: LabeledTextField { label: "Number of views in the search: "; text: ""; enabled: root.enabled; }
 
-            // `Box.createRigidArea(FixedDim.x0_y1)`
-            Rectangle { height: 1px; }
+                // `Box.createRigidArea(FixedDim.x0_y1)`
+                Rectangle { height: 1px; }
 
-            // `opnlSearchDirection` centres `panelSearchDirection`, an
-            // `EtchedBorder("Search Direction")` box.  The constructor selects
-            // none of the three; `setParameters()` (`:221-229`) selects
-            // `rbSearchBoth` for the null (default) search direction.
-            if root.advanced: HorizontalLayout {
-                alignment: center;
-                EtchedBorder {
-                    title: "Search Direction";
-                    RadioButton { text: "Both directions"; selected: true; enabled: root.enabled; }
-                    RadioButton { text: "+90 (CCW) only"; enabled: root.enabled; }
-                    RadioButton { text: "-90 (CW) only"; enabled: root.enabled; }
+                // `opnlSearchDirection` centres `panelSearchDirection`, an
+                // `EtchedBorder("Search Direction")` box.  The constructor selects
+                // none of the three; `setParameters()` (`:221-229`) selects
+                // `rbSearchBoth` for the null (default) search direction.
+                if root.advanced: HorizontalLayout {
+                    alignment: center;
+                    EtchedBorder {
+                        title: "Search Direction";
+                        RadioButton { text: "Both directions"; selected: true; enabled: root.enabled; }
+                        RadioButton { text: "+90 (CCW) only"; enabled: root.enabled; }
+                        RadioButton { text: "-90 (CW) only"; enabled: root.enabled; }
+                    }
                 }
-            }
 
-            Rectangle { height: 1px; }
+                Rectangle { height: 1px; }
 
-            // `pnlOuterMirrorXaxis` centres `pnlMirrorXaxis`, an
-            // `EtchedBorder("Mirroring around X axis")` box.  The three labels
-            // come from `MirrorInX.getLabel()`
-            // (`IMOD/Etomo/src/etomo/type/MirrorInX.java:57-68`);
-            // `MirrorInX.DEFAULT` is `ASSESS_BOTH`.
-            if root.advanced: HorizontalLayout {
-                alignment: center;
-                EtchedBorder {
-                    title: "Mirroring around X axis";
-                    RadioButton { text: "Try with and without"; selected: true; enabled: root.enabled; }
-                    RadioButton { text: "Use mirroring"; enabled: root.enabled; }
-                    RadioButton { text: "Do not use mirroring"; enabled: root.enabled; }
+                // `pnlOuterMirrorXaxis` centres `pnlMirrorXaxis`, an
+                // `EtchedBorder("Mirroring around X axis")` box.  The three labels
+                // come from `MirrorInX.getLabel()`
+                // (`IMOD/Etomo/src/etomo/type/MirrorInX.java:57-68`);
+                // `MirrorInX.DEFAULT` is `ASSESS_BOTH`.
+                if root.advanced: HorizontalLayout {
+                    alignment: center;
+                    EtchedBorder {
+                        title: "Mirroring around X axis";
+                        RadioButton { text: "Try with and without"; selected: true; enabled: root.enabled; }
+                        RadioButton { text: "Use mirroring"; enabled: root.enabled; }
+                        RadioButton { text: "Do not use mirroring"; enabled: root.enabled; }
+                    }
                 }
+
+                // `Box.createRigidArea(FixedDim.x0_y5)`
+                Rectangle { height: 5px; }
+
+                // `pnlTransferfid`: `buttonTransferfid`
+                // (`ProcessResultDisplayFactory.java:54-56`) then `btn3dmodSeed`,
+                // each separated by a horizontal glue.
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: EtomoStyle.gap;
+                    MultiLineButton { text: "Transfer Fiducials From Other Axis"; width: 260px; enabled: root.enabled; }
+                    MultiLineButton { text: "Open Seed Model"; width: 180px; }
+                }
+
+                Rectangle { height: 5px; }
             }
-
-            // `Box.createRigidArea(FixedDim.x0_y5)`
-            Rectangle { height: 5px; }
-
-            // `pnlTransferfid`: `buttonTransferfid`
-            // (`ProcessResultDisplayFactory.java:54-56`) then `btn3dmodSeed`,
-            // each separated by a horizontal glue.
-            HorizontalLayout {
-                alignment: center;
-                spacing: EtomoStyle.gap;
-                MultiLineButton { text: "Transfer Fiducials From Other Axis"; width: 260px; enabled: root.enabled; }
-                MultiLineButton { text: "Open Seed Model"; width: 180px; }
-            }
-
-            Rectangle { height: 5px; }
         }
     }
 }

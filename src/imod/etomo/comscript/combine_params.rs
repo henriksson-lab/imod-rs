@@ -608,10 +608,11 @@ impl CombineParams {
     ///
     /// Upstream bug fixed in translation: a null manager throws
     /// NullPointerException; it is returned as `Err` here.
-    pub fn set_default_patch_boundaries(&mut self, file_name: &str) -> Result<(), String> {
-        let manager = self
-            .manager
-            .ok_or_else(|| "java.lang.NullPointerException".to_string())?;
+    pub fn set_default_patch_boundaries(
+        &mut self,
+        file_name: &str,
+    ) -> Result<(), crate::imod::etomo::util::mrc_header::ReadError> {
+        let manager = self.manager.expect("java.lang.NullPointerException");
         // Get the data size limits from the image stack
         let mrc_header = MRCHeader::get_instance_in_dir(
             manager.get_property_user_dir().as_deref(),
@@ -803,12 +804,12 @@ impl StorableValue for CombineParams {
 
     /// Java `load(Properties)`.  Get the objects attributes from the properties
     /// object.
-    fn load(&mut self, props: &BTreeMap<String, String>) {
+    fn load(&mut self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
     /// Java `load(Properties, String)`.
-    fn load_with_prepend(&mut self, props: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&mut self, props: &mut BTreeMap<String, String>, prepend: &str) {
         self.reset();
         let group;
         let prepend = if prepend == "" {

@@ -30,6 +30,7 @@ use super::alt_stack_panel::AltStackPanel;
 use super::beveled_border::BeveledBorder;
 use super::button_component::ButtonComponent;
 use super::context_menu::ContextMenu;
+use super::generic_mouse_adapter::GenericMouseAdapter;
 use super::flatten_volume_panel::FlattenVolumePanel;
 use super::flatten_warp_display::FlattenWarpDisplay;
 use super::process_dialog::{ProcessDialog, ProcessDialogVirtual};
@@ -330,11 +331,16 @@ impl PostProcessingDialog {
     /// Java private `addListeners()`.
     fn add_listeners(self: &Rc<Self>) {
         // Mouse adapter for context menu
-        // Swing mouse: rootPanel.addMouseListener(mouseAdapter) and
-        // tabbedPane.addMouseListener(mouseAdapter) with `new
-        // GenericMouseAdapter(this)`.  Mouse events are not modelled; the
-        // adapter's only effect is to call popUpContextMenu on a right-button
-        // press, which a driver calls directly.
+        let context_menu: Weak<dyn ContextMenu> = Rc::downgrade(self) as Weak<dyn ContextMenu>;
+        let mouse_adapter: Rc<dyn crate::imod::etomo::jdk::MouseListener> =
+            GenericMouseAdapter::new(context_menu);
+        self.base
+            .root_panel
+            .get_component()
+            .add_mouse_listener(mouse_adapter.clone());
+        self.tabbed_pane
+            .get_component()
+            .add_mouse_listener(mouse_adapter);
         // Java `new TabChangeListener(this)`.
         let adaptee = Rc::downgrade(self);
         self.tabbed_pane

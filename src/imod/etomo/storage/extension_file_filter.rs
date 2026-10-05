@@ -231,7 +231,11 @@ impl SearchCollection {
             );
             if extensions.iter().any(|stored| match extension {
                 None => false,
-                Some(extension) => std::ptr::eq(*stored, extension),
+                // Java `Set.contains`: one `Extension` object per extension
+                // string, so identity is equality of the (unique) values; the
+                // `CLASS` fields and the `INSTANCES` entries are separate copies
+                // here, so they are compared by value.
+                Some(extension) => *stored == extension,
             }) {
                 return true;
             }
@@ -284,7 +288,28 @@ impl SearchCollection {
                 };
                 // `Pattern.compile(regex)` throws for a malformed pattern rather than
                 // returning null, which is what the source's own null check implies.
-                let pattern = match Regex::new(&regex) {
+                // `FileType.getRegex` quotes its literal pieces with `Pattern.quote`
+                // (`\Q...\E`), which the `regex` crate does not know: the quoted spans
+                // are expanded to escaped literals first, or every file-type pattern
+                // fails to compile and is silently skipped.
+                let mut java_regex = String::with_capacity(regex.len());
+                let mut rest = regex.as_str();
+                while let Some(index) = rest.find("\\Q") {
+                    java_regex.push_str(&rest[..index]);
+                    let body = &rest[index + 2..];
+                    match body.find("\\E") {
+                        Some(end) => {
+                            java_regex.push_str(&regex::escape(&body[..end]));
+                            rest = &body[end + 2..];
+                        }
+                        None => {
+                            java_regex.push_str(&regex::escape(body));
+                            rest = "";
+                        }
+                    }
+                }
+                java_regex.push_str(rest);
+                let pattern = match Regex::new(&java_regex) {
                     Err(_) => continue,
                     Ok(pattern) => pattern,
                 };
@@ -366,10 +391,7 @@ impl SearchCollection {
             match self.extensions.as_mut() {
                 None => self.extensions = Some(vec![input_extension]),
                 Some(extensions) => {
-                    if extensions
-                        .iter()
-                        .any(|stored| std::ptr::eq(*stored, *input_extension))
-                    {
+                    if extensions.iter().any(|stored| *stored == *input_extension) {
                         continue;
                     }
                     // The extension is new - add it.

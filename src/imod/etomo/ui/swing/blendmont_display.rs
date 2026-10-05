@@ -57,8 +57,3 @@ pub trait BlendmontDisplay {
     /// Java `isFiducialess()`.
     fn is_fiducialess(&self) -> bool;
 }
-
-// TODO(unit): Blendmont3dFindPanel.java, NewstackOrBlendmontPanel.java and
-// PrenewstPanel.java implement BlendmontDisplay; their Rust modules read a
-// local `BlendmontParam` boundary rather than the comscript `BlendmontParam`,
-// so the impls wait for those units.

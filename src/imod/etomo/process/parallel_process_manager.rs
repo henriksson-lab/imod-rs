@@ -1,134 +1,186 @@
 //! `IMOD/Etomo/src/etomo/process/ParallelProcessManager.java`.
 //!
-//! This coordinator is deliberately kept as a separate source unit from
-//! `ParallelManager`.  The command parameter and process-runtime classes named by
-//! the Java signatures have not been translated yet, so their Rust argument slots
-//! remain explicit null-equivalent boundaries.  In particular, this code does not
-//! claim that a background process was started before `BackgroundProcess.java` and
-//! the applicable command-detail classes are available.
-#![allow(dead_code)]
+//! The process manager of the generic parallel process and anisotropic diffusion
+//! interfaces (`ParallelManager`).  It embeds the `BaseProcessManager` superclass as
+//! `base` and installs itself as the base's [`BaseProcessManagerHooks`] for its two
+//! `postProcess` overrides.
+//!
+//! **Threads.**  The overrides run on the process thread.  The state they write is
+//! the manager's `ParallelState` (a `Mutex` per field); the chunksetup results go to
+//! the `ParallelDialog`, an event dispatch thread object, so those two manager calls
+//! are posted to the event dispatch thread, in the source's order.
 
-use std::convert::Infallible;
+use std::sync::Arc;
 
+use crate::imod::etomo::comscript::anisotropic_diffusion_param::{self, AnisotropicDiffusionParam};
+use crate::imod::etomo::comscript::chunksetup_param::{self, ChunksetupParam};
+use crate::imod::etomo::comscript::command::Command;
+use crate::imod::etomo::comscript::command_mode;
+use crate::imod::etomo::comscript::trimvol_param::TrimvolParam;
 use crate::imod::etomo::parallel_manager::ParallelManager;
-use crate::imod::etomo::process::base_process_manager::BaseProcessManager;
+use crate::imod::etomo::process::background_process::BackgroundProcess;
+use crate::imod::etomo::process::base_process_manager::{
+    AxisBusyException, BaseProcessManager, BaseProcessManagerHooks,
+};
+use crate::imod::etomo::process::process_interface::{ProcessSeriesRef, SystemProcessInterface};
+use crate::imod::etomo::r#type::axis_id::AxisID;
+use crate::imod::etomo::r#type::process_name::ProcessName;
+use crate::imod::etomo::util::event_queue;
 
-/// Java final `ParallelProcessManager extends BaseProcessManager`.
+/// Java `public final class ParallelProcessManager extends BaseProcessManager`.
 pub struct ParallelProcessManager {
-    /// Java superclass state.
-    base: BaseProcessManager,
-    /// Java final `manager`.
+    /// The `BaseProcessManager` superclass.
+    pub base: BaseProcessManager,
+    /// Java private final `manager`.
     manager: &'static ParallelManager,
 }
 
 impl ParallelProcessManager {
-    /// Java `ParallelProcessManager(ParallelManager)`.
-    pub fn new(manager: &'static ParallelManager) -> Self {
-        Self {
-            // `BaseProcessManager` still has an unported `BaseManager` reference
-            // representation.  The concrete manager is retained in this unit's own
-            // source field, exactly as Java does.
+    /// Java `ParallelProcessManager(ParallelManager)`.  The manager keeps it for the
+    /// run, and the base class's start functions take `&'static self`.
+    pub fn new(manager: &'static ParallelManager) -> &'static ParallelProcessManager {
+        let process_manager: &'static ParallelProcessManager = Box::leak(Box::new(Self {
             base: BaseProcessManager::new(manager),
             manager,
-        }
+        }));
+        process_manager.base.set_hooks(process_manager);
+        process_manager
     }
 
-    /// Java `trimVolume(TrimvolParam, ProcessSeries)`.
+    /// Java `trimVolume(TrimvolParam, ProcessSeries) throws AxisBusyException`.  Run
+    /// trimvol.
     pub fn trim_volume(
-        &self,
-        trimvol_param: Option<Infallible>,
-        process_series: Option<Infallible>,
-    ) -> Option<String> {
-        let _ = (trimvol_param, process_series);
-        // TODO(unit): TrimvolParam.java, ProcessSeries.java's concrete manager
-        // reference, BackgroundProcess.java, and BaseProcessManager's typed
-        // startBackgroundProcess overload.  The Java body starts TRIMVOL on ONLY
-        // then returns BackgroundProcess.getName().
-        None
+        &'static self,
+        trimvol_param: Arc<TrimvolParam>,
+        process_series: Option<ProcessSeriesRef>,
+    ) -> Result<String, AxisBusyException> {
+        let background_process = self.base.start_background_process_command(
+            trimvol_param as Arc<dyn Command + Send + Sync>,
+            true,
+            AxisID::Only,
+            Some(ProcessName::TRIMVOL),
+            None,
+            process_series,
+            false,
+            true, // POPUP_CHUNK_WARNINGS_DEFAULT
+        )?;
+        Ok(background_process.get_name())
     }
 
-    /// Java `anisotropicDiffusion(AnisotropicDiffusionParam, ProcessSeries)`.
+    /// Java `anisotropicDiffusion(AnisotropicDiffusionParam, ProcessSeries) throws
+    /// AxisBusyException`.
     pub fn anisotropic_diffusion(
-        &self,
-        param: Option<Infallible>,
-        process_series: Option<Infallible>,
-    ) -> Option<String> {
-        let _ = (param, process_series);
-        // TODO(unit): AnisotropicDiffusionParam.java, BackgroundProcess.java, and
-        // BaseProcessManager's typed startBackgroundProcess overload.  The Java body
-        // starts ANISOTROPIC_DIFFUSION on ONLY then returns getName().
-        None
+        &'static self,
+        param: Arc<AnisotropicDiffusionParam>,
+        process_series: Option<ProcessSeriesRef>,
+    ) -> Result<String, AxisBusyException> {
+        let background_process = self.base.start_background_process_command(
+            param as Arc<dyn Command + Send + Sync>,
+            true,
+            AxisID::Only,
+            Some(ProcessName::ANISOTROPIC_DIFFUSION),
+            None,
+            process_series,
+            false,
+            true, // POPUP_CHUNK_WARNINGS_DEFAULT
+        )?;
+        Ok(background_process.get_name())
     }
 
-    /// Java `chunksetup(ChunksetupParam, ProcessSeries)`.
+    /// Java `chunksetup(ChunksetupParam, ProcessSeries) throws AxisBusyException`.
     pub fn chunksetup(
-        &self,
-        param: Option<Infallible>,
-        process_series: Option<Infallible>,
-    ) -> Option<String> {
-        let _ = (param, process_series);
-        // TODO(unit): ChunksetupParam.java, BackgroundProcess.java, and
-        // BaseProcessManager's typed startBackgroundProcess overload.  The Java body
-        // starts CHUNKSETUP on ONLY then returns getName().
-        None
-    }
-
-    /// Java override `postProcess(BackgroundProcess)`.
-    pub fn post_process_background(&self, process: Option<Infallible>) {
-        // TODO(unit): `super.postProcess(process)` once this manager installs its hooks.
-        let _ = process;
-        // TODO(unit): BackgroundProcess.java, CommandDetails.java,
-        // AnisotropicDiffusionParam.java, ChunksetupParam.java, and
-        // ParallelState.java.  The source first returns for null CommandDetails;
-        // ANISOTROPIC_DIFFUSION copies K_VALUE and ITERATION_LIST to state; CHUNKSETUP
-        // supplies stdout and ONE_LINE_COMMAND_PROGRAM to the manager.
+        &'static self,
+        param: Arc<ChunksetupParam>,
+        process_series: Option<ProcessSeriesRef>,
+    ) -> Result<String, AxisBusyException> {
+        let background_process = self.base.start_background_process_command(
+            param as Arc<dyn Command + Send + Sync>,
+            true,
+            AxisID::Only,
+            Some(ProcessName::CHUNKSETUP),
+            None,
+            process_series,
+            false,
+            true, // POPUP_CHUNK_WARNINGS_DEFAULT
+        )?;
+        Ok(background_process.get_name())
     }
 
     /// Java package-private `getManager()`.
     pub fn get_manager(&self) -> &'static ParallelManager {
         self.manager
     }
-
-    /// Java override `postProcess(DetachedProcess)`.
-    pub fn post_process_detached(&self, process: Option<Infallible>) {
-        // Source order matters: BaseProcessManager saves processchunks resume data
-        // before this manager examines the detached command.
-        // TODO(unit): `super.postProcess(process)` once this manager installs its hooks.
-        let _ = process;
-        // TODO(unit): DetachedProcess.java, Command.java, CommandDetails.java,
-        // AnisotropicDiffusionParam.java, and ParallelState.java.  For a PROCESSCHUNKS
-        // command whose anisotropic-diffusion subcommand has VARYING_K mode, Java
-        // copies K_VALUE_LIST and ITERATION into ParallelState.
-    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ParallelProcessManager;
-    use crate::imod::etomo::parallel_manager::ParallelManager;
-
-    #[test]
-    fn retains_the_parallel_manager_reference() {
-        // Managers live on the event dispatch thread, as in Java.
-        crate::imod::etomo::util::event_queue::invoke_and_wait(|| {
-            let manager = ParallelManager::new();
-            let process_manager = ParallelProcessManager::new(manager);
-            assert!(std::ptr::eq(process_manager.get_manager(), manager));
-            assert!(std::ptr::eq(
-                manager.parallel_process_manager().get_manager(),
-                manager
-            ));
-        });
+impl BaseProcessManagerHooks for ParallelProcessManager {
+    /// Java override `postProcess(BackgroundProcess)`.  (The source does not call
+    /// `super.postProcess`.)
+    fn post_process_background(&self, _base: &BaseProcessManager, process: &BackgroundProcess) {
+        let Some(command_details) = process.get_command_details() else {
+            return;
+        };
+        if command_details.get_command_name().as_deref()
+            == Some(&ProcessName::ANISOTROPIC_DIFFUSION.to_string())
+        {
+            let state = self.manager.get_state();
+            let Some(details) = command_details.get_process_details() else {
+                return;
+            };
+            // Java unboxes the double; an unknown field throws there.
+            if let Some(k_value) =
+                details.get_double_value(&anisotropic_diffusion_param::Field::KValue)
+            {
+                state.set_test_k_value(k_value);
+            }
+            state.set_test_iteration_list(
+                details
+                    .get_iterator_element_list(&anisotropic_diffusion_param::Field::IterationList)
+                    .as_ref(),
+            );
+        } else if command_details.get_process_name() == Some(ProcessName::CHUNKSETUP) {
+            let std_output = process.get_std_output();
+            let one_line_command_program =
+                command_details.get_process_details().and_then(|details| {
+                    details.get_string(&chunksetup_param::Field::OneLineCommandProgram)
+                });
+            let manager = self.manager;
+            // The dialog is an event dispatch thread object.
+            event_queue::invoke_later(move || {
+                manager.set_chunk_setup_output_file(std_output.as_deref());
+                manager.set_parallel_process_name(one_line_command_program.as_deref());
+            });
+        }
     }
 
-    #[test]
-    fn unavailable_process_types_do_not_report_started_processes() {
-        // Managers live on the event dispatch thread, as in Java.
-        crate::imod::etomo::util::event_queue::invoke_and_wait(|| {
-            let process_manager = ParallelProcessManager::new(ParallelManager::new());
-            assert_eq!(process_manager.trim_volume(None, None), None);
-            assert_eq!(process_manager.anisotropic_diffusion(None, None), None);
-            assert_eq!(process_manager.chunksetup(None, None), None);
-        });
+    /// Java override `postProcess(DetachedProcess)`.
+    fn post_process_detached(&self, base: &BaseProcessManager, process: &BackgroundProcess) {
+        base.post_process_detached_base(process);
+        let Some(command) = process.get_command() else {
+            return;
+        };
+        if command.get_command_name().as_deref() == Some(&ProcessName::PROCESSCHUNKS.to_string()) {
+            let subcommand_details = command.get_subcommand_details();
+            if let Some(subcommand_details) = subcommand_details
+                && subcommand_details.get_command_name().as_deref()
+                    == Some(&ProcessName::ANISOTROPIC_DIFFUSION.to_string())
+                && command_mode::equals_mode(
+                    subcommand_details.get_command_mode(),
+                    &anisotropic_diffusion_param::Mode::VaryingK,
+                )
+            {
+                let state = self.manager.get_state();
+                state.set_test_k_value_list(
+                    subcommand_details
+                        .get_string(&anisotropic_diffusion_param::Field::KValueList)
+                        .as_deref(),
+                );
+                // Java unboxes the int; an unknown field throws there.
+                if let Some(iteration) =
+                    subcommand_details.get_int_value(&anisotropic_diffusion_param::Field::Iteration)
+                {
+                    state.set_test_iteration(iteration);
+                }
+            }
+        }
     }
 }

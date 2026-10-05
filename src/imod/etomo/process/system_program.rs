@@ -71,7 +71,7 @@ pub struct SystemProgram {
     done: AtomicBool,
     run_timestamp: Mutex<Option<SystemTime>>,
     /// Java `cmdInputStream` / `cmdInBuffer`.
-    cmd_in_buffer: Mutex<Option<ChildStdin>>,
+    cmd_in_buffer: Mutex<Option<std::io::BufWriter<ChildStdin>>>,
     accept_input_while_running: AtomicBool,
     command_line: Mutex<Option<String>>,
     /// Java `process`: the child's id, which `destroy` signals.
@@ -100,19 +100,22 @@ pub enum MessagesKind {
 }
 
 impl MessagesKind {
-    fn build(self) -> ProcessMessages {
+    fn build(self, manager: Option<&'static dyn BaseManager>, axis_id: AxisID) -> ProcessMessages {
         match self {
-            MessagesKind::Instance => ProcessMessages::get_instance(),
-            MessagesKind::InstanceAllowMultiLineLog(allow) => ProcessMessages::new(
-                false, false, None, None, false, false, false, None, None, false, allow, true,
-                false,
-            ),
-            MessagesKind::MultiLine => ProcessMessages::get_multi_line_instance(),
-            MessagesKind::MultiLineAllowMultiLineLog(allow) => ProcessMessages::new(
-                true, false, None, None, false, false, false, None, None, false, allow, true, false,
-            ),
+            MessagesKind::Instance => ProcessMessages::get_instance(manager, axis_id),
+            MessagesKind::InstanceAllowMultiLineLog(allow) => {
+                ProcessMessages::get_instance_allow_multi_line_log(manager, axis_id, allow)
+            }
+            MessagesKind::MultiLine => ProcessMessages::get_multi_line_instance(manager, axis_id),
+            MessagesKind::MultiLineAllowMultiLineLog(allow) => {
+                ProcessMessages::get_multi_line_instance_allow_multi_line_log(
+                    manager, axis_id, allow,
+                )
+            }
             MessagesKind::MultiLineWarningInfo(warning, info, log_info) => {
-                ProcessMessages::get_multi_line_instance_with_options(warning, info, log_info)
+                ProcessMessages::get_multi_line_instance_with_options(
+                    manager, axis_id, warning, info, log_info,
+                )
             }
         }
     }
@@ -132,7 +135,7 @@ impl SystemProgram {
             manager,
             command_array: Mutex::new(command_array),
             axis_id,
-            process_messages: Mutex::new(messages.build()),
+            process_messages: Mutex::new(messages.build(manager, axis_id)),
             debug: Mutex::new(etomo_director::ARGUMENTS.lock().unwrap().get_debug_level()),
             exit_value: AtomicI32::new(i32::MIN),
             std_input: Mutex::new(None),
@@ -359,7 +362,8 @@ impl SystemProgram {
             }
             // Create a buffered writer to handle the stdin, stdout and stderr
             // streams of the process
-            let mut cmd_in = process.stdin.take();
+            // `new BufferedWriter(new OutputStreamWriter(cmdIn))`: one write per flush.
+            let mut cmd_in = process.stdin.take().map(std::io::BufWriter::new);
 
             // Set up a reader thread to keep the stdout buffers of the process empty
             let stdout = self.new_output_buffer_manager(debug);
@@ -544,10 +548,10 @@ impl SystemProgram {
         {
             let mut process_messages = self.process_messages.lock().unwrap();
             if let Some(stdout) = self.stdout.lock().unwrap().as_ref() {
-                process_messages.add_process_output_lines(None, stdout.lock().unwrap().get_lines());
+                process_messages.add_process_output_output_buffer_manager(&stdout.lock().unwrap());
             }
             if let Some(stderr) = self.stderr.lock().unwrap().as_ref() {
-                process_messages.add_process_output_lines(None, stderr.lock().unwrap().get_lines());
+                process_messages.add_process_output_output_buffer_manager(&stderr.lock().unwrap());
             }
             if !debug.is_on() {
                 process_messages.print_all();
@@ -758,8 +762,11 @@ impl SystemProgram {
     }
 }
 
-/// The reader thread of `OutputBufferManager.run`: add every line of the
-/// stream until end of file.
+/// The reader thread of `OutputBufferManager.run`: until `SystemProgram.run` reports
+/// the process done, add every line the stream has and sleep 100 ms; then add what is
+/// left.  The sleep after the child's end of file is what delays `SystemProgram`'s
+/// `done` (it joins this thread first), so `ParsePID`'s `isDone` poll still sees a
+/// process that has just ended as running and reads its PID line.
 fn spawn_reader<R: std::io::Read + Send + 'static>(
     reader: Option<R>,
     buffer: Arc<Mutex<OutputBufferManager>>,
@@ -768,24 +775,31 @@ fn spawn_reader<R: std::io::Read + Send + 'static>(
     Some(std::thread::spawn(move || {
         let mut reader = BufReader::new(reader);
         let mut line = Vec::new();
-        loop {
+        // `BufferedReader.readLine`: a line without "\n", "\r\n" or "\r", or None at end
+        // of file (or on an error, which Java's IOException catch ends the thread on).
+        let mut read_line = |line: &mut Vec<u8>| -> Option<String> {
             line.clear();
-            match reader.read_until(b'\n', &mut line) {
-                Ok(0) | Err(_) => break,
+            match reader.read_until(b'\n', line) {
+                Ok(0) | Err(_) => None,
                 Ok(_) => {
-                    // `BufferedReader.readLine` strips "\n", "\r\n" or "\r".
                     if line.last() == Some(&b'\n') {
                         line.pop();
                     }
                     if line.last() == Some(&b'\r') {
                         line.pop();
                     }
-                    buffer
-                        .lock()
-                        .unwrap()
-                        .add(String::from_utf8_lossy(&line).into_owned());
+                    Some(String::from_utf8_lossy(line).into_owned())
                 }
             }
+        };
+        while !buffer.lock().unwrap().is_process_done() {
+            while let Some(text) = read_line(&mut line) {
+                buffer.lock().unwrap().add(text);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        while let Some(text) = read_line(&mut line) {
+            buffer.lock().unwrap().add(text);
         }
     }))
 }

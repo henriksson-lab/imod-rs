@@ -2,9 +2,6 @@
 //!
 //! Description: Creates Autodoc classes.
 //!
-//! `BaseManager` has no module; every caller that reaches a factory passes a null one,
-//! so the parameter is typed `Option<Infallible>`.
-//!
 //! Java's `private AutodocFactory() {}` only prevents instantiation of the utility
 //! class; a Rust module needs no equivalent.  Java's statics are per-process; a
 //! `*mut Autodoc` is neither `Send` nor `Sync`, so the registry is thread-local here,
@@ -484,6 +481,31 @@ pub unsafe fn get_instance_file(
         // Java's `catch (FileNotFoundException)`.
         Err(LogFileError::Io(_)) => Ok(std::ptr::null_mut()),
         Err(e) => Err(e),
+    }
+}
+
+/// Java `getUnmanagedInstance(BaseManager, AxisID, FileType)`.
+///
+/// # Safety
+/// See `get_matlab_instance`.
+pub unsafe fn get_unmanaged_instance_file_type(
+    manager: Option<&'static dyn BaseManager>,
+    axis_id: AxisID,
+    autodoc_file_type: Option<&FileType>,
+) -> Result<*mut Autodoc, LogFileError> {
+    let Some(autodoc_file_type) = autodoc_file_type else {
+        eprintln!("Warning: autodocFileType is null");
+        // Thread.dumpStack(): no Rust counterpart (see `get_unmanaged_instance`).
+        return Ok(std::ptr::null_mut());
+    };
+    unsafe {
+        get_unmanaged_instance(
+            manager,
+            axis_id,
+            autodoc_file_type
+                .get_file(manager, Some(axis_id))
+                .as_deref(),
+        )
     }
 }
 

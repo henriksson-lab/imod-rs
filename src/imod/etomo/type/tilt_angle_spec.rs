@@ -21,6 +21,8 @@ use crate::imod::etomo::comscript::bad_com_script_exception::BadComScriptExcepti
 use crate::imod::etomo::comscript::com_script_command::ComScriptCommand;
 use crate::imod::etomo::comscript::command_param::ParseComScriptError;
 use crate::imod::etomo::comscript::fortran_input_string::FortranInputString;
+use crate::imod::etomo::comscript::fortran_input_string_list::FortranInputStringList;
+use crate::imod::etomo::comscript::param_utilities;
 
 /// Java `rcsid`.
 pub const RCSID: &str = "$Id$";
@@ -430,9 +432,11 @@ impl TiltAngleSpec {
         // Get tiltAngles (Successive entries accumulate)
         if let Some(tilt_angles_key) = &self.tilt_angles_key {
             if !super::const_etomo_number::java_lang_string_matches_whitespace(tilt_angles_key) {
-                // TODO(unit): needs etomo/comscript/FortranInputStringList.java -
-                // `list = new FortranInputStringList(tiltAnglesKey); list.parse(scriptCommand);
-                // tiltAngles = list.getDouble();` (consolidating successive entries).
+                let mut list = FortranInputStringList::new(Some(tilt_angles_key));
+                list.parse(script_command)?;
+                // Currently consolidating successive entries. If this is problem, will
+                // have to change how tiltAngles is stored.
+                self.tilt_angles = list.get_double();
             }
         }
         Ok(())
@@ -443,22 +447,32 @@ impl TiltAngleSpec {
         &self,
         script_command: &mut ComScriptCommand,
     ) -> Result<(), BadComScriptException> {
-        let _ = &script_command;
         if self.r#type == TiltAngleType::Range {
-            // TODO(unit): needs etomo/comscript/ParamUtilities.java -
-            // `ParamUtilities.updateScriptParameter(scriptCommand, rangeMinKey, rangeMin)` and
-            // `ParamUtilities.updateScriptParameter(scriptCommand, rangeStepKey, rangeStep)`.
+            param_utilities::update_script_parameter_double(
+                script_command,
+                self.range_min_key.as_deref(),
+                self.range_min,
+            );
+            param_utilities::update_script_parameter_double(
+                script_command,
+                self.range_step_key.as_deref(),
+                self.range_step,
+            );
         } else if self.r#type == TiltAngleType::File {
-            // TODO(unit): needs etomo/comscript/ParamUtilities.java -
-            // `ParamUtilities.updateScriptParameter(scriptCommand, tiltAngleFilenameKey,
-            // tiltAngleFilename)`.
+            param_utilities::update_script_parameter_string(
+                script_command,
+                self.tilt_angle_filename_key.as_deref(),
+                Some(&self.tilt_angle_filename),
+            )?;
         } else if self.r#type == TiltAngleType::List {
             if let Some(tilt_angles) = &self.tilt_angles {
                 if !tilt_angles.is_empty() {
                     let list = FortranInputString::get_instance_from_doubles(Some(tilt_angles));
-                    let _ = list;
-                    // TODO(unit): needs etomo/comscript/ParamUtilities.java -
-                    // `ParamUtilities.updateScriptParameter(scriptCommand, tiltAnglesKey, list)`.
+                    param_utilities::update_script_parameter_fortran_input_string(
+                        script_command,
+                        self.tilt_angles_key.as_deref(),
+                        &list,
+                    );
                 }
             }
         } else {

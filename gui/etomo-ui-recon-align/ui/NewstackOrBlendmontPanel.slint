@@ -40,60 +40,63 @@ export component NewstackOrBlendmontPanel inherits Rectangle {
 
     VerticalLayout {
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
 
-        PanelHeader { title: root.montage ? "Blendmont" : "Newstack"; }
+        ph-body-3 := PanelHeader { title: root.montage ? "Blendmont" : "Newstack"; }
+        // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+        if ph-body-3.shown-open: VerticalLayout {
+            spacing: EtomoStyle.row-gap;
 
-        // `pnlBody`
-        VerticalLayout {
-            spacing: EtomoStyle.gap;
+            // `pnlBody`
+            VerticalLayout {
+                spacing: EtomoStyle.row-gap;
 
-            // ---- `NewstackAndBlendmontParamPanel.createPanel()`
-            // (`NewstackAndBlendmontParamPanel.java:106-134`) ----
-            CheckBox { text: "Use linear interpolation"; }
-            // `pnlBinning`: `spinBinning` (`BINNING_LABEL + ": "`, default 1,
-            // range 1..8) then a glue (`:51-52`, `:116-121`).
-            HorizontalLayout {
-                alignment: start;
-                LabeledSpinner { label: "Aligned image stack binning: "; text: "1"; label-width: 260px; }
-            }
-            // `cbAntialiasFilter` exists only for a non-montage dataset
-            // (`:76-83`, `:122-124`).
-            if !root.montage: CheckBox { text: "Reduce size with antialiasing filter"; }
-            CheckBox { text: "Coarse alignment only"; checked: root.fiducialess; }
-            LabeledTextField { label: "Tilt axis rotation: "; text: ""; label-width: 260px; enabled: root.fiducialess; }
-            if root.advanced: LabeledTextField {
-                // `SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL + " (X,Y - unbinned): "` (`:47`, `:53-54`).
-                label: "Size to output (X,Y - unbinned): ";
-                text: "";
-                label-width: 260px;
-            }
-            // `Box.createVerticalStrut(2)`
-            Rectangle { height: 2px; }
-            // `lCtf3d1` / `lCtf3d2`, coloured `ProcessControlPanel.colorComplete`
-            // (`ProcessControlPanel.java:88`, `new Color(0, 153, 0)`).
-            if root.ctf3d: Text {
-                text: "No need to make stack if doing 3D CTF and using raw images - ";
-                color: #009900;
-                font-size: EtomoStyle.font-size-pt * 1px;
-            }
-            if root.ctf3d: Text {
-                text: "unless you want to check gold erasing with an aligned stack.";
-                color: #009900;
-                font-size: EtomoStyle.font-size-pt * 1px;
-            }
-            // `Box.createVerticalStrut(3)`
-            Rectangle { height: 3px; }
+                // ---- `NewstackAndBlendmontParamPanel.createPanel()`
+                // (`NewstackAndBlendmontParamPanel.java:106-134`) ----
+                CheckBox { text: "Use linear interpolation"; }
+                // `pnlBinning`: `spinBinning` (`BINNING_LABEL + ": "`, default 1,
+                // range 1..8) then a glue (`:51-52`, `:116-121`).
+                HorizontalLayout {
+                    LabeledSpinner { label: "Aligned image stack binning: "; text: "1"; }
+                }
+                // `cbAntialiasFilter` exists only for a non-montage dataset
+                // (`:76-83`, `:122-124`).
+                if !root.montage: CheckBox { text: "Reduce size with antialiasing filter"; }
+                CheckBox { text: "Coarse alignment only"; checked: root.fiducialess; }
+                LabeledTextField { label: "Tilt axis rotation: "; text: ""; enabled: root.fiducialess; }
+                if root.advanced: LabeledTextField {
+                    // `SIZE_TO_OUTPUT_IN_X_AND_Y_LABEL + " (X,Y - unbinned): "` (`:47`, `:53-54`).
+                    label: "Size to output (X,Y - unbinned): ";
+                    text: "";
+                    
+                }
+                // `Box.createVerticalStrut(2)`
+                Rectangle { height: 2px; }
+                // `lCtf3d1` / `lCtf3d2`, coloured `ProcessControlPanel.colorComplete`
+                // (`ProcessControlPanel.java:88`, `new Color(0, 153, 0)`).
+                if root.ctf3d: Text {
+                    text: "No need to make stack if doing 3D CTF and using raw images - ";
+                    color: #009900;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                if root.ctf3d: Text {
+                    text: "unless you want to check gold erasing with an aligned stack.";
+                    color: #009900;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                }
+                // `Box.createVerticalStrut(3)`
+                Rectangle { height: 3px; }
 
-            // `pnlButtons`.  `btnRunProcess` is
-            // `ProcessResultDisplayFactory.fullAlignedStack`
-            // (`ProcessResultDisplayFactory.java:100-102`), labelled
-            // `RUN_BUTTON_LABEL` (`NewstackOrBlendmontPanel.java:61`).
-            HorizontalLayout {
-                spacing: EtomoStyle.gap;
-                alignment: start;
-                MultiLineButton { text: "Create Full Aligned Stack"; width: 220px; }
-                MultiLineButton { text: "View Full Aligned Stack"; width: 220px; }
+                // `pnlButtons`.  `btnRunProcess` is
+                // `ProcessResultDisplayFactory.fullAlignedStack`
+                // (`ProcessResultDisplayFactory.java:100-102`), labelled
+                // `RUN_BUTTON_LABEL` (`NewstackOrBlendmontPanel.java:61`).
+                HorizontalLayout {
+                    spacing: EtomoStyle.gap;
+                    alignment: start;
+                    MultiLineButton { text: "Create Full Aligned Stack"; width: 220px; }
+                    MultiLineButton { text: "View Full Aligned Stack"; width: 220px; }
+                }
             }
         }
     }

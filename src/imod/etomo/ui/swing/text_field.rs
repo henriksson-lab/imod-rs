@@ -656,8 +656,6 @@ impl Field for TextField {
         // only search for default value once
         if self.default_value.borrow().is_none() {
             let default_value = Rc::new(TextFieldSetting::new_field_type(self.field_type));
-            // TODO(unit): needs etomo/logic/AutodocAttributeRetriever.java -
-            // INSTANCE.getDefaultValue(DirectiveDef).
             let value = autodoc_attribute_retriever::INSTANCE
                 .get_default_value(Some(directive_def.clone()));
             if let Some(value) = value {

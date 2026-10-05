@@ -46,24 +46,40 @@ import {
 // The wired window composes the translated panels and dialogs of the other
 // gui crates (Slint imports by path, so they compile here with one shared
 // `EtomoBridge` global).
-import { EtomoBridge } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtomoBridge, BridgedTableRow, BridgedTableCell, BridgedPopupItem, BridgedPopupMenu, ContextArea } from "../../etomo-ui-common/ui/widgets.slint";
 import { MainTomogramPanel } from "MainTomogramPanel.slint";
+import { ReconDialogColumn } from "ReconDialogColumn.slint";
+import { MainFrame_AboutBox } from "../../etomo-ui-windows/ui/MainFrame_AboutBox.slint";
+import { SettingsDialog } from "../../etomo-ui-shell/ui/SettingsDialog.slint";
 import { FrontPageDialog } from "../../etomo-ui-shell/ui/FrontPageDialog.slint";
 import { SetupDialog } from "../../etomo-ui-recon-setup/ui/SetupDialog.slint";
-import { PreProcessingDialog } from "../../etomo-ui-recon-setup/ui/PreProcessingDialog.slint";
-import { CoarseAlignDialog } from "../../etomo-ui-recon-setup/ui/CoarseAlignDialog.slint";
-import { FiducialModelDialog } from "../../etomo-ui-recon-align/ui/FiducialModelDialog.slint";
-import { AlignmentEstimationDialog } from "../../etomo-ui-recon-align/ui/AlignmentEstimationDialog.slint";
-import { TomogramPositioningDialog } from "../../etomo-ui-recon-align/ui/TomogramPositioningDialog.slint";
-import { FinalAlignedStackDialog } from "../../etomo-ui-recon-align/ui/FinalAlignedStackDialog.slint";
-import { TomogramGenerationDialog } from "../../etomo-ui-recon-gen/ui/TomogramGenerationDialog.slint";
-import { TomogramCombinationDialog } from "../../etomo-ui-recon-gen/ui/TomogramCombinationDialog.slint";
-import { PostProcessingDialog } from "../../etomo-ui-recon-gen/ui/PostProcessingDialog.slint";
-import { CleanUpDialog } from "../../etomo-ui-recon-gen/ui/CleanUpDialog.slint";
 import { MainToolsPanel } from "MainToolsPanel.slint";
+import { MainJoinPanel } from "MainJoinPanel.slint";
+import { JoinDialog } from "../../etomo-ui-join-peet/ui/JoinDialog.slint";
 import { ToolsDialog } from "../../etomo-ui-shell/ui/ToolsDialog.slint";
+import { MainParallelPanel } from "MainParallelPanel.slint";
+import { MainPeetPanel } from "MainPeetPanel.slint";
+import { PeetDialog } from "../../etomo-ui-join-peet/ui/PeetDialog.slint";
+import { PeetStartupDialog } from "../../etomo-ui-join-peet/ui/PeetStartupDialog.slint";
+import { ParallelPanel, ParallelPanelRow } from "ParallelPanel.slint";
+import { ParallelDialog } from "../../etomo-ui-shell/ui/ParallelDialog.slint";
+import { AnisotropicDiffusionDialog } from "../../etomo-ui-shell/ui/AnisotropicDiffusionDialog.slint";
+import { ParallelChooser } from "../../etomo-ui-common/ui/fields.slint";
+import { SerialSectionsStartupDialog } from "../../etomo-ui-batch-serial/ui/SerialSectionsStartupDialog.slint";
+import { SerialSectionsDialog } from "../../etomo-ui-batch-serial/ui/SerialSectionsDialog.slint";
+import { MainSerialSectionsPanel } from "MainSerialSectionsPanel.slint";
+import { MainBatchRunTomoPanel } from "MainBatchRunTomoPanel.slint";
+import { BatchRunTomoDialog } from "../../etomo-ui-batch-serial/ui/BatchRunTomoDialog.slint";
+import { BatchRunTomoDatasetDialog } from "../../etomo-ui-batch-serial/ui/BatchRunTomoDatasetDialog.slint";
+import { MainDirectiveEditorPanel } from "MainDirectiveEditorPanel.slint";
+import { DirectiveEditorDialog } from "../../etomo-ui-directives/ui/DirectiveEditorDialog.slint";
+import { DirectiveSectionData } from "../../etomo-ui-directives/ui/DirectiveSectionPanel.slint";
+import { DirectivePanelData } from "../../etomo-ui-directives/ui/DirectivePanel.slint";
+export { DirectiveSectionData, DirectivePanelData }
+export { ParallelPanelRow }
 export { TextPageWindowWindow } from "../../etomo-ui-windows/ui/TextPageWindow.slint";
-export { EtomoBridge }
+export { TabbedTextWindowWindow } from "../../etomo-ui-windows/ui/TabbedTextWindow.slint";
+export { EtomoBridge, BridgedTableRow, BridgedTableCell, BridgedPopupItem }
 
 export component MainFrame inherits Rectangle {
     // Which menu's drop-down is open; -1 (none) is the state a freshly built
@@ -336,7 +352,9 @@ export component MainFrameWindow inherits Window {
     // (`:487`) alone with no manager, `"<manager name> - Etomo"` with one
     // (`:581`), and for a dual axis prefixed with `aAxisTitle` "A Axis - " or
     // `bAxisTitle` "B Axis - " (`:490-491`).
-    title: "Etomo";
+    // Wired: the translated `MainFrame`'s title (`slint_bridge.rs`).
+    in property <string> frame-title: "Etomo";
+    title: root.frame-title;
     preferred-width: 1000px;
     preferred-height: 820px;
     background: EtomoStyle.background;
@@ -346,55 +364,110 @@ export component MainFrameWindow inherits Window {
     callback menu-toggled(string, bool);
     // Rust-only wiring (`ui/swing/slint_bridge.rs`): which manager's
     // `MainPanel` `MainFrame.setCurrentManager` put in `rootPanel` ("" none,
-    // "front-page", "recon", "tools"), the axis type, whether `openSetupPanel`
+    // "front-page", "recon", "tools", "parallel", "join"), the axis type, whether `openSetupPanel`
     // is showing, and the current dialog of the shown axis (the
     // `DialogType` name, "" none) - the panel `AxisProcessPanel.panelDialog`
     // holds.  For "tools", `tool-type` is the `ToolsManager`'s `ToolType`
     // (0 flatten volume, 1 GPU test, 2 align frames).
     in property <string> view: "";
+    // For "peet" (`PeetManager`): whether `panelDialog` holds the `PeetDialog`.
+    in property <bool> peet-dialog-shown: false;
     in property <string> axis-type: "SINGLE_AXIS";
+    // For "recon": the axis `MainPanel` shows in `panelCenter` ("A", or "B"
+    // after `showAxisB`); `dialog` is that axis's current dialog.
+    in property <string> showing-axis: "A";
     in property <bool> showing-setup: false;
     in property <string> dialog: "";
     in property <int> tool-type: 0;
+    // For "tools": the text of `ToolsDialog.taTaskLog` (the task log).
+    in property <string> tools-task-log: "";
     in property <string> status-bar-text: "No data set loaded";
+    // For "parallel" (`ParallelManager`): the process `panelDialog` shows
+    // ("chooser" `ParallelChooser`, "PARALLEL" `ParallelDialog`,
+    // "ANISOTROPIC_DIFFUSION" `AnisotropicDiffusionDialog`), whether
+    // `AxisProcessPanel.parallelStatusPanel` shows the `ParallelPanel`, and the
+    // rows of its processor table.
+    in property <string> parallel-dialog: "";
+    in property <bool> show-parallel-panel: false;
+    in property <[ParallelPanelRow]> parallel-rows: [];
+    callback parallel-row-toggled(int);
+    // A showing modal `JDialog` (a project's startup dialog): its title ("" when
+    // none shows), drawn over the frame as Swing's modal dialog sits over it;
+    // `startup-dialog-closing` is the dialog's close button (`WINDOW_CLOSING`).
+    in property <string> startup-dialog: "";
+    // For "serial-sections" (`SerialSectionsManager`): whether `panelDialog`
+    // holds the `SerialSectionsDialog` (after the startup dialog).
+    in property <bool> serial-sections-dialog-shown: false;
+    // For "batch" (`BatchRunTomoManager`): whether `panelDialog` holds the
+    // `BatchRunTomoDialog`, and whether the showing `JDialog` is a dataset's
+    // own `BatchRunTomoDatasetDialog` frame (`getRowInstance`).
+    in property <bool> batch-dialog-shown: false;
+    in property <bool> startup-dialog-batch-dataset: false;
+    callback startup-dialog-closing();
+    // The About box's labels, read from its `JDialog` (`slint_bridge.rs`), and
+    // its OK button.
+    in property <string> about-version-text;
+    in property <string> about-imod-version;
+    in property <string> about-imod-info-1;
+    in property <string> about-imod-info-2;
+    in property <bool> about-show-imod-info;
+    in property <bool> about-show-imod-version;
+    in property <bool> about-show-peet-version;
+    in property <string> about-peet-version;
+    callback about-ok();
+    // A showing `ManagerFrame` (`UIHarness.addFrame`: the directive editor,
+    // `DirectiveEditorManager`): its title ("" when none shows), drawn over the
+    // main frame as the separate Swing frame sits over it, with its own menu
+    // bar (`EtomoMenu.getInstance(ManagerFrame, savable)`, the `!dataset`
+    // path), the `MainDirectiveEditorPanel` status bar, the progress panel and
+    // the `DirectiveEditorDialog`.  `manager-frame-closing` is the frame's close
+    // button (`WINDOW_CLOSING`, `ManagerFrame.processWindowEvent`).
+    in property <string> manager-frame: "";
+    in property <string> manager-frame-status-bar-text: "";
+    in property <[DirectiveSectionData]> directive-column-1: [];
+    in property <[DirectiveSectionData]> directive-column-2: [];
+    in property <[DirectiveSectionData]> directive-column-3: [];
+    in property <bool> directive-column-1-extra-row: false;
+    in property <bool> directive-column-2-extra-row: false;
+    in property <bool> directive-column-3-extra-row: false;
+    in-out property <int> manager-frame-open-menu: -1;
+    callback manager-frame-closing();
+    // `PeetManager.isInterfaceAvailable()`: whether `EtomoMenu` added the PEET
+    // Help menu items (`slint_bridge.rs`).
+    in property <bool> peet-available: true;
     MainFrame {
+        peet-available: root.peet-available;
         menu-command(command) => { root.menu-command(command); }
         menu-toggled(command, checked) => { root.menu-toggled(command, checked); }
         if root.view == "front-page": FrontPageDialog { }
-        if root.view == "recon" && root.showing-setup: SetupDialog { }
+        // `openSetupPanel`: packed at its preferred height, as `pack()` sizes it.
+        if root.view == "recon" && root.showing-setup: VerticalLayout {
+            alignment: start;
+            SetupDialog { }
+        }
         // `AxisProcessPanel`: the process buttons on the left; on the right
         // the progress panel above `panelDialog`, which scrolls when the
         // dialog is taller than the window.
         if root.view == "recon" && !root.showing-setup: HorizontalLayout {
             alignment: start;
+            // `MainPanel.panelCenter` holds the axis `MainPanel` shows: A (or
+            // the only axis), or B after `showAxisB` (`showing-axis`).  When both
+            // axes are shown, B is in the `SubFrame` window (`SubFrame.slint`).
             MainTomogramPanel {
-                width: 160px;
+                // `TomogramProcessPanel`'s column: the 200-pixel process
+                // buttons and the two axis buttons with their 40-pixel gap.
+                width: 215px;
                 status-bar-text: root.status-bar-text;
                 axis-type: root.axis-type;
+                showing-axis: root.showing-axis;
                 show-status-panel: false;
             }
-            Rectangle {
-                background: Colors.background-a;
-                VerticalLayout {
-                    AxisProgressPanel { }
-                    Flickable {
-                        viewport-height: recon-dialog.preferred-height;
-                        viewport-width: max(self.width, recon-dialog.preferred-width);
-                        recon-dialog := VerticalLayout {
-                            alignment: start;
-                            if root.dialog == "PRE_PROCESSING": PreProcessingDialog { }
-                            if root.dialog == "COARSE_ALIGNMENT": CoarseAlignDialog { }
-                            if root.dialog == "FIDUCIAL_MODEL": FiducialModelDialog { }
-                            if root.dialog == "FINE_ALIGNMENT": AlignmentEstimationDialog { }
-                            if root.dialog == "TOMOGRAM_POSITIONING": TomogramPositioningDialog { }
-                            if root.dialog == "FINAL_ALIGNED_STACK": FinalAlignedStackDialog { }
-                            if root.dialog == "TOMOGRAM_GENERATION": TomogramGenerationDialog { }
-                            if root.dialog == "TOMOGRAM_COMBINATION": TomogramCombinationDialog { }
-                            if root.dialog == "POST_PROCESSING": PostProcessingDialog { }
-                            if root.dialog == "CLEAN_UP": CleanUpDialog { }
-                        }
-                    }
-                }
+            ReconDialogColumn {
+                dialog: root.dialog;
+                panel-background: root.showing-axis == "B" ? Colors.background-b : Colors.background-a;
+                show-parallel-panel: root.show-parallel-panel;
+                parallel-rows: root.parallel-rows;
+                parallel-row-toggled(row) => { root.parallel-row-toggled(row); }
             }
         }
         if root.view == "tools": HorizontalLayout {
@@ -411,13 +484,394 @@ export component MainFrameWindow inherits Window {
                     Flickable {
                         viewport-height: tools-dialog.preferred-height;
                         viewport-width: max(self.width, tools-dialog.preferred-width);
+                        // A right press on the dialog's background goes to the
+                        // dialog's outermost context-menu panel (`slint_bridge.rs`).
+                        ContextArea {
+                            x: 0;
+                            y: 0;
+                            width: max(parent.width, tools-dialog.preferred-width);
+                            height: max(tools-dialog.preferred-height, 0px);
+                        }
                         tools-dialog := VerticalLayout {
                             alignment: start;
-                            ToolsDialog { tool-type: root.tool-type; }
+                            ToolsDialog { tool-type: root.tool-type; task-log: root.tools-task-log; }
                         }
                     }
                 }
             }
         }
+        // `MainJoinPanel` / `JoinProcessPanel`: no process buttons; the
+        // progress panel above `panelDialog`, which holds the `JoinDialog`.
+        if root.view == "join": HorizontalLayout {
+            MainJoinPanel {
+                width: 160px;
+                status-bar-text: root.status-bar-text;
+                show-status-panel: false;
+            }
+            // `scrollA` (`MainPanel`): takes the rest of the window's width and
+            // scrolls the dialog when it is wider (the Section Table's 13
+            // columns), as the Java JScrollPane does.
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Colors.violet;
+                VerticalLayout {
+                    AxisProgressPanel { }
+                    Flickable {
+                        viewport-height: join-dialog.preferred-height;
+                        viewport-width: max(self.width, join-dialog.preferred-width);
+                        // A right press on the dialog's background goes to the
+                        // dialog's outermost context-menu panel (`slint_bridge.rs`).
+                        ContextArea {
+                            x: 0;
+                            y: 0;
+                            width: max(parent.width, join-dialog.preferred-width);
+                            height: max(join-dialog.preferred-height, 0px);
+                        }
+                        join-dialog := VerticalLayout {
+                            alignment: start;
+                            JoinDialog { }
+                        }
+                    }
+                }
+            }
+        }
+        // `MainSerialSectionsPanel` / `SerialSectionsProcessPanel`: no process
+        // buttons; the progress panel above `panelDialog`, which holds the
+        // `SerialSectionsDialog` once the startup dialog is done.
+        if root.view == "serial-sections": HorizontalLayout {
+            alignment: start;
+            MainSerialSectionsPanel {
+                width: 160px;
+                status-bar-text: root.status-bar-text;
+                show-status-panel: false;
+            }
+            Rectangle {
+                background: Colors.background-serial-sections;
+                VerticalLayout {
+                    AxisProgressPanel { }
+                    Flickable {
+                        viewport-height: serial-sections-dialog.preferred-height;
+                        viewport-width: max(self.width, serial-sections-dialog.preferred-width);
+                        // A right press on the dialog's background goes to the
+                        // dialog's outermost context-menu panel (`slint_bridge.rs`).
+                        ContextArea {
+                            x: 0;
+                            y: 0;
+                            width: max(parent.width, serial-sections-dialog.preferred-width);
+                            height: max(serial-sections-dialog.preferred-height, 0px);
+                        }
+                        serial-sections-dialog := VerticalLayout {
+                            alignment: start;
+                            if root.serial-sections-dialog-shown: SerialSectionsDialog { }
+                        }
+                    }
+                }
+            }
+        }
+        // `MainBatchRunTomoPanel` / `BatchRunTomoProcessPanel`: no process
+        // buttons and `altParallelLoc` (the dialog's Run tab shows the parallel
+        // panel); the progress panel above `panelDialog`, which holds the
+        // `BatchRunTomoDialog`.
+        if root.view == "batch": HorizontalLayout {
+            alignment: start;
+            MainBatchRunTomoPanel {
+                width: 160px;
+                status-bar-text: root.status-bar-text;
+                show-status-panel: false;
+            }
+            Rectangle {
+                background: Colors.violet;
+                VerticalLayout {
+                    AxisProgressPanel { }
+                    Flickable {
+                        viewport-height: batch-dialog.preferred-height;
+                        viewport-width: max(self.width, batch-dialog.preferred-width);
+                        ContextArea {
+                            x: 0;
+                            y: 0;
+                            width: max(parent.width, batch-dialog.preferred-width);
+                            height: max(batch-dialog.preferred-height, 0px);
+                        }
+                        batch-dialog := VerticalLayout {
+                            alignment: start;
+                            if root.batch-dialog-shown: BatchRunTomoDialog {
+                                show-parallel-panel: root.show-parallel-panel;
+                                parallel-rows: root.parallel-rows;
+                                parallel-row-toggled(row) => { root.parallel-row-toggled(row); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // `MainParallelPanel` / `ParallelProcessPanel`: no process buttons; the
+        // progress panel, the `ParallelPanel` when parallel processing is shown
+        // (`AxisProcessPanel.showParallelPanel`), then `panelDialog`.
+        // `MainPeetPanel` / `PeetProcessPanel`: no process buttons; the progress
+        // panel, the `ParallelPanel` when parallel processing is shown (the Run
+        // tab), then `panelDialog`, which holds the `PeetDialog` once the
+        // startup dialog has set up the project.
+        if root.view == "peet": HorizontalLayout {
+            MainPeetPanel {
+                width: 160px;
+                status-bar-text: root.status-bar-text;
+                show-status-panel: false;
+            }
+            // Takes the rest of the window's width, so the dialog's wide tables
+            // (iteration table: 16 columns) can be shown or scrolled to.
+            Rectangle {
+                horizontal-stretch: 1;
+                background: EtomoStyle.background;
+                VerticalLayout {
+                    AxisProgressPanel { }
+                    // In its own row, so its fixed width does not cap the dialog's.
+                    if root.show-parallel-panel: HorizontalLayout {
+                        alignment: start;
+                        ParallelPanel {
+                            rows: root.parallel-rows;
+                            row-toggled(row) => { root.parallel-row-toggled(row); }
+                        }
+                    }
+                    Flickable {
+                        viewport-height: peet-dialog.preferred-height;
+                        viewport-width: max(self.width, peet-dialog.preferred-width);
+                        // A right press on the dialog's background goes to the
+                        // dialog's outermost context-menu panel (`slint_bridge.rs`).
+                        ContextArea {
+                            x: 0;
+                            y: 0;
+                            width: max(parent.width, peet-dialog.preferred-width);
+                            height: max(peet-dialog.preferred-height, 0px);
+                        }
+                        peet-dialog := VerticalLayout {
+                            alignment: start;
+                            if root.peet-dialog-shown: PeetDialog { }
+                        }
+                    }
+                }
+            }
+        }
+        if root.view == "parallel": HorizontalLayout {
+            alignment: start;
+            MainParallelPanel {
+                width: 160px;
+                status-bar-text: root.status-bar-text;
+                show-status-panel: false;
+            }
+            Rectangle {
+                background: Colors.background-parallel;
+                VerticalLayout {
+                    AxisProgressPanel { }
+                    if root.show-parallel-panel: ParallelPanel {
+                        rows: root.parallel-rows;
+                        row-toggled(row) => { root.parallel-row-toggled(row); }
+                    }
+                    Flickable {
+                        viewport-height: parallel-dialog.preferred-height;
+                        viewport-width: max(self.width, parallel-dialog.preferred-width);
+                        // A right press on the dialog's background goes to the
+                        // dialog's outermost context-menu panel (`slint_bridge.rs`).
+                        ContextArea {
+                            x: 0;
+                            y: 0;
+                            width: max(parent.width, parallel-dialog.preferred-width);
+                            height: max(parallel-dialog.preferred-height, 0px);
+                        }
+                        parallel-dialog := VerticalLayout {
+                            alignment: start;
+                            if root.parallel-dialog == "chooser": ParallelChooser { }
+                            if root.parallel-dialog == "PARALLEL": ParallelDialog { }
+                            if root.parallel-dialog == "ANISOTROPIC_DIFFUSION": AnisotropicDiffusionDialog { }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if root.startup-dialog != "": Rectangle {
+        background: #00000040;
+        TouchArea { }
+        startup-frame := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 3;
+            width: startup-layout.preferred-width;
+            height: startup-layout.preferred-height;
+            background: EtomoStyle.background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            startup-layout := VerticalLayout {
+                // The dialog's title bar, with the window system's close button.
+                Rectangle {
+                    height: 24px;
+                    background: EtomoStyle.panel.darker(10%);
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        Text { text: root.startup-dialog; vertical-alignment: center; font-weight: 700; }
+                        Rectangle {
+                            width: 24px;
+                            Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.startup-dialog-closing(); } }
+                        }
+                    }
+                }
+                if root.startup-dialog == "Starting Serial Sections": SerialSectionsStartupDialog { }
+                if root.startup-dialog == "Starting PEET": PeetStartupDialog { }
+                // A dataset's `BatchRunTomoDatasetDialog` frame (title "dir/name").
+                if root.startup-dialog-batch-dataset: Flickable {
+                    min-height: min(batch-dataset.preferred-height, 760px);
+                    preferred-height: min(batch-dataset.preferred-height, 760px);
+                    preferred-width: batch-dataset.preferred-width;
+                    viewport-height: batch-dataset.preferred-height;
+                    viewport-width: batch-dataset.preferred-width;
+                    batch-dataset := BatchRunTomoDatasetDialog { global: false; }
+                }
+                // `SettingsDialog` (Options > Settings), a `JDialog` the Java makes
+                // non-modal; drawn over the frame like the modal ones.
+                if root.startup-dialog == "Etomo Settings": SettingsDialog { }
+                // `MainFrame_AboutBox` (Help > About), a modal `JDialog`.
+                if root.startup-dialog == "About": MainFrame_AboutBox {
+                    version-text: root.about-version-text;
+                    imod-version: root.about-imod-version;
+                    imod-info-1: root.about-imod-info-1;
+                    imod-info-2: root.about-imod-info-2;
+                    show-imod-info: root.about-show-imod-info;
+                    show-imod-version: root.about-show-imod-version;
+                    show-peet-version: root.about-show-peet-version;
+                    peet-version: root.about-peet-version;
+                    ok-pressed => { root.about-ok(); }
+                }
+            }
+        }
+    }
+    // ---- the directive editor's `ManagerFrame` ("directive-editor" view) ----
+    if root.manager-frame != "": Rectangle {
+        background: #00000040;
+        TouchArea { }
+        Rectangle {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            height: parent.height - 24px;
+            background: EtomoStyle.background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            VerticalLayout {
+                // The frame's title bar, with the window system's close button.
+                Rectangle {
+                    height: 24px;
+                    background: EtomoStyle.panel.darker(10%);
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        Text { text: root.manager-frame; vertical-alignment: center; font-weight: 700; }
+                        Rectangle {
+                            width: 24px;
+                            Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+                            TouchArea { clicked => { root.manager-frame-closing(); } }
+                        }
+                    }
+                }
+                // Room for the frame's menu bar, drawn last (over the content).
+                Rectangle { height: 24px; }
+                // `MainDirectiveEditorPanel` / `DirectiveEditorProcessPanel`: no
+                // process buttons; the progress panel above `panelDialog`, which
+                // holds the `DirectiveEditorDialog`.
+                HorizontalLayout {
+                    MainDirectiveEditorPanel {
+                        width: 160px;
+                        status-bar-text: root.manager-frame-status-bar-text;
+                        show-status-panel: false;
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        background: Colors.background-tools;
+                        VerticalLayout {
+                            AxisProgressPanel { }
+                            Flickable {
+                                viewport-height: directive-editor-dialog.preferred-height;
+                                viewport-width: max(self.width, directive-editor-dialog.preferred-width);
+                                directive-editor-dialog := VerticalLayout {
+                                    alignment: start;
+                                    DirectiveEditorDialog {
+                                        column-1-sections: root.directive-column-1;
+                                        column-2-sections: root.directive-column-2;
+                                        column-3-sections: root.directive-column-3;
+                                        column-1-extra-row: root.directive-column-1-extra-row;
+                                        column-2-extra-row: root.directive-column-2-extra-row;
+                                        column-3-extra-row: root.directive-column-3-extra-row;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // `EtomoMenu.createPanel(frame, dataset = false, savable)`:
+            // File (Close, Save, Save As, separator, Cancel), Tools, View,
+            // Options, Help.  Items are clicked in the frame's own menu bar
+            // (bridge kind "fmn").
+            MenuBar {
+                x: 0;
+                y: 24px;
+                width: parent.width;
+                Menu {
+                    title: "File";
+                    mnemonic: "F";
+                    open: root.manager-frame-open-menu == 0;
+                    activated => { root.manager-frame-open-menu = root.manager-frame-open-menu == 0 ? -1 : 0; }
+                    MenuItem { kind: "fmn"; text: "Close"; mnemonic: "C"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Save"; mnemonic: "S"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Save As..."; mnemonic: "A"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuSeparator { }
+                    MenuItem { kind: "fmn"; text: "Cancel"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                }
+                Menu {
+                    title: "Tools";
+                    mnemonic: "T";
+                    open: root.manager-frame-open-menu == 1;
+                    activated => { root.manager-frame-open-menu = root.manager-frame-open-menu == 1 ? -1 : 1; }
+                    MenuItem { kind: "fmn"; text: "Flatten Volume"; mnemonic: "F"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Test GPU"; mnemonic: "U"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Align Frames"; mnemonic: "A"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                }
+                Menu {
+                    title: "View";
+                    mnemonic: "V";
+                    open: root.manager-frame-open-menu == 2;
+                    activated => { root.manager-frame-open-menu = root.manager-frame-open-menu == 2 ? -1 : 2; }
+                    MenuItem { kind: "fmn"; text: "Fit Window"; mnemonic: "F"; accelerator: "Ctrl+F"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                }
+                Menu {
+                    title: "Options";
+                    mnemonic: "O";
+                    open: root.manager-frame-open-menu == 3;
+                    activated => { root.manager-frame-open-menu = root.manager-frame-open-menu == 3 ? -1 : 3; }
+                    MenuItem { kind: "fmn"; text: "Settings"; mnemonic: "S"; accelerator: "Ctrl+S"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                }
+                Menu {
+                    title: "Help";
+                    mnemonic: "H";
+                    open: root.manager-frame-open-menu == 4;
+                    activated => { root.manager-frame-open-menu = root.manager-frame-open-menu == 4 ? -1 : 4; }
+                    MenuItem { kind: "fmn"; text: "Tomography Guide"; mnemonic: "T"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Imod Users Guide"; mnemonic: "I"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "3dmod Users Guide"; mnemonic: "3"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Etomo Users Guide"; mnemonic: "E"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Join Users Guide"; mnemonic: "J"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    // `peetAvailable` gates these two, as in the main frame's
+                    // Help menu (whose `peet-available` is not wired either).
+                    MenuItem { kind: "fmn"; text: "PEET Users Guide"; mnemonic: "P"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "PEET Help"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "Batch Interface Guide"; mnemonic: "B"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                    MenuItem { kind: "fmn"; text: "About"; mnemonic: "A"; activated(command) => { root.manager-frame-open-menu = -1; } }
+                }
+            }
+        }
+    }
+    // The showing `JPopupMenu` (context menus), above everything else.
+    if EtomoBridge.popup-shown: BridgedPopupMenu {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
     }
 }

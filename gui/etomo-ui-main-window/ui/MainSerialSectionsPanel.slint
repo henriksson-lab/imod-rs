@@ -11,7 +11,7 @@
 // so there is no B column.  `getDataFileFilter()` returns a
 // `SerialSectionsFileFilter`.
 //
-// Appearance only: no callbacks, no state, static defaults everywhere.
+// Wired in the main window's "serial-sections" view (`MainFrame.slint`).
 
 import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
 import { Colors } from "MainWindowWidgets.slint";
@@ -21,6 +21,9 @@ import { SerialSectionsProcessPanel } from "SerialSectionsProcessPanel.slint";
 export component MainSerialSectionsPanel inherits Rectangle {
     in property <string> status-bar-text: "No data set loaded";
     in property <color> panel-background: Colors.background-serial-sections;
+    // Rust-only wiring: false when the main window draws the progress panel
+    // in the dialog column (`MainFrameWindow`).
+    in property <bool> show-status-panel: true;
     background: EtomoStyle.background;
     MainPanel {
         width: 100%;
@@ -30,6 +33,7 @@ export component MainSerialSectionsPanel inherits Rectangle {
         // `addAxisPanelA()`: `getScrollA().add(axisPanelA.getContainer())`.
         SerialSectionsProcessPanel {
             panel-background: root.panel-background;
+            show-status-panel: root.show-status-panel;
         }
         // `createAxisPanelB` has an empty body and `getAxisPanelB()` returns
         // null, so there is no B column to draw.

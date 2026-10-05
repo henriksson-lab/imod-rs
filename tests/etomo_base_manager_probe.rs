@@ -76,10 +76,10 @@ impl Storable for TestMetaData {
         self.base()
             .store_with_created_prepend(properties, prepend.as_deref());
     }
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         self.load_with_prepend(properties, "");
     }
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         let created = self.create_prepend(prepend);
         if self
             .base()
@@ -191,7 +191,7 @@ fn jvm_verified_etomo_version() {
         Some(&"2.3.4".to_string())
     );
     let mut loaded = EtomoVersion::get_empty_instance(Some("RevisionNumber"));
-    loaded.load_with_prepend(&props, "Setup");
+    loaded.load_with_prepend(&mut props, "Setup");
     assert_eq!(loaded.to_string(), "2.3.4");
 }
 
@@ -396,7 +396,7 @@ fn jvm_verified_base_meta_data() {
     );
 
     let mut md2 = TestMetaData::new();
-    md2.load(&props);
+    md2.load(&mut props);
     assert_eq!(
         md2.base()
             .get_current_processchunks_root_name(Some(AxisID::Only)),

@@ -22,17 +22,11 @@ use crate::imod::etomo::jdk::{FileFilter, JComponent};
 use crate::imod::etomo::storage::autodoc::autodoc_tokenizer::DEFAULT_DELIMITER;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::ui::browsing_directory::BrowsingDirectory;
-// TODO(unit): needs etomo/util/ValidDirectory.java - `new ValidDirectory(manager)`,
-// `set(String)`, `isNull()`, `get()` in `getBrowsingDir`.
 use crate::imod::etomo::util::utilities;
 use crate::imod::etomo::util::valid_directory::ValidDirectory;
 
 /// Java package-private `static final String DEFAULT_TITLE = "Open"`.
 pub const DEFAULT_TITLE: &str = "Open";
-
-/// Java `UITestFieldType.FILE_CHOOSER.isUnlimitedSegments()`.
-// TODO(unit): needs etomo/type/UITestFieldType.java - `FILE_CHOOSER` is written out.
-const FILE_CHOOSER_UNLIMITED_SEGMENTS: bool = true;
 
 /// Java `JFileChooser.CANCEL_OPTION`.
 pub const CANCEL_OPTION: i32 = 1;
@@ -65,10 +59,76 @@ thread_local! {
 
 /// Installs (or, with `None`, removes) the boundary that answers
 /// `showOpenDialog`/`showSaveDialog`.  Not a Java member.
-// TODO(unit): the file dialog is a UI boundary with no Java unit behind it;
-// UIHarness / the Slint bridge should install the real dialog here.
+// The Slint frontend installs its dialog (`slint_bridge::install`); the click
+// drivers and tests install their own.
 pub fn set_dialog_responder(responder: Option<DialogResponder>) {
     DIALOG_RESPONDER.with(|slot| *slot.borrow_mut() = responder);
+}
+
+/// Whether a dialog boundary is installed.  Not a Java member.
+pub fn has_dialog_responder() -> bool {
+    DIALOG_RESPONDER.with(|slot| slot.borrow().is_some())
+}
+
+thread_local! {
+    /// Every chooser made on this thread, for the Slint frontend to find the
+    /// one whose `Component` is added to a panel (`CleanupPanel`) and draw it.
+    /// Not a Java member.
+    static CHOOSERS: RefCell<Vec<std::rc::Weak<FileChooser>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The live chooser whose Swing `Component` is `component`.  Not a Java member.
+pub fn chooser_for_component(component: &Rc<JComponent>) -> Option<Rc<FileChooser>> {
+    CHOOSERS.with(|choosers| {
+        let mut choosers = choosers.borrow_mut();
+        choosers.retain(|chooser| chooser.strong_count() > 0);
+        choosers
+            .iter()
+            .filter_map(std::rc::Weak::upgrade)
+            .find(|chooser| Rc::ptr_eq(&chooser.component, component))
+    })
+}
+
+/// The entries the chooser's list shows for `dir` under `filter` (`None` is the
+/// look and feel's "All Files" filter), as `BasicDirectoryModel` loads them:
+/// `FileSystemView.getFiles(dir, isFileHidingEnabled())` (a name starting with
+/// "." is hidden), each kept when `JFileChooser.accept` (the filter's
+/// `accept`) takes it; directories (traversable) always, files only when file
+/// selection is enabled; directories first, then files, each sorted by name.
+/// Returns (name, is directory) pairs.  Not a Java member.
+pub fn list_entries(
+    chooser: &FileChooser,
+    dir: &Path,
+    filter: Option<&Rc<dyn FileFilter>>,
+) -> Vec<(String, bool)> {
+    let hiding = chooser.is_file_hiding_enabled();
+    let mode = chooser.get_file_selection_mode();
+    let mut directories = Vec::new();
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if hiding && name.starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            if !filter.is_none_or(|filter| filter.accept(&path)) {
+                continue;
+            }
+            if path.is_dir() {
+                directories.push(name);
+            } else if mode != DIRECTORIES_ONLY {
+                files.push(name);
+            }
+        }
+    }
+    directories.sort();
+    files.sort();
+    directories
+        .into_iter()
+        .map(|name| (name, true))
+        .chain(files.into_iter().map(|name| (name, false)))
+        .collect()
 }
 
 /// Java `public final class FileChooser extends JFileChooser`.
@@ -214,6 +274,7 @@ impl FileChooser {
         });
         chooser.set_current_directory(current_directory.as_deref());
         chooser.set_name(Some(DEFAULT_TITLE));
+        CHOOSERS.with(|choosers| choosers.borrow_mut().push(Rc::downgrade(&chooser)));
         chooser
     }
 
@@ -261,7 +322,11 @@ impl FileChooser {
 
     /// Java overridden `setName(String)`.
     pub fn set_name(&self, text: Option<&str>) {
-        let name = utilities::convert_label_to_name(text, FILE_CHOOSER_UNLIMITED_SEGMENTS);
+        let name = utilities::convert_label_to_name(
+            text,
+            crate::imod::etomo::r#type::ui_test_field_type::UITestFieldType::FILE_CHOOSER
+                .is_unlimited_segments(),
+        );
         // super.setName(name)
         self.component.set_name(name.as_deref());
         *self.name.borrow_mut() = name;

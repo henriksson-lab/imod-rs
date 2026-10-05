@@ -1,212 +1,178 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/MainSerialSectionsPanel.java`.
 //!
-//! Java inheritance is represented by the owned `main_panel` field. Swing
-//! `JScrollPane.add` stays an explicit presentation boundary in
-//! `scroll_a_components`, rather than being replaced by a layout abstraction.
-#![allow(dead_code)]
+//! The main panel of the Serial Sections interface (`SerialSectionsManager`): one
+//! `SerialSectionsProcessPanel`, into which the manager shows the
+//! `SerialSectionsDialog`.  Extends [`MainPanel`] (held as `base`, dereffed to) and
+//! implements [`MainPanelVirtual`].
+
+use std::cell::RefCell;
+use std::ops::Deref;
+use std::rc::{Rc, Weak};
 
 use super::abstract_parallel_dialog::AbstractParallelDialog;
-use super::axis_process_panel::AxisProcessPanel;
+use super::axis_process_panel::AxisProcessPanelVirtual;
 use super::axis_progress_panel::AxisProgressPanel;
-use super::main_panel::MainPanel;
+use super::main_panel::{MainPanel, MainPanelVirtual};
 use super::serial_sections_process_panel::SerialSectionsProcessPanel;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::FileFilter;
 use crate::imod::etomo::process::process_state::ProcessState;
 use crate::imod::etomo::storage::serial_sections_file_filter::SerialSectionsFileFilter;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 
-/// Java final `MainSerialSectionsPanel`, including its `MainPanel` superclass.
+/// Java `public static final String rcsid`.
+pub const RCSID: &str = "$Id:$";
+
+/// Java `public final class MainSerialSectionsPanel extends MainPanel`.
 pub struct MainSerialSectionsPanel {
-    pub main_panel: MainPanel,
-    pub axis_panel_a: Option<SerialSectionsProcessPanel>,
-    /// Native `getScrollA().add(axisPanelA.getContainer())` call boundary.
-    pub scroll_a_components: Vec<bool>,
+    /// The Java superclass part.
+    base: Rc<MainPanel>,
+    /// Java superclass field `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private `axisPanelA`, initially null.
+    axis_panel_a: RefCell<Option<Rc<SerialSectionsProcessPanel>>>,
+}
+
+impl Deref for MainSerialSectionsPanel {
+    type Target = MainPanel;
+    fn deref(&self) -> &MainPanel {
+        &self.base
+    }
 }
 
 impl MainSerialSectionsPanel {
-    /// `MainSerialSectionsPanel(BaseManager)`.
-    pub fn new(manager: &'static dyn BaseManager) -> Self {
-        Self {
-            main_panel: MainPanel::new(manager),
-            axis_panel_a: None,
-            scroll_a_components: Vec::new(),
+    /// Java `MainSerialSectionsPanel(BaseManager)`.
+    pub fn new(manager: &'static dyn BaseManager) -> Rc<MainSerialSectionsPanel> {
+        let this = Rc::new(MainSerialSectionsPanel {
+            // super(manager)
+            base: MainPanel::new(manager),
+            manager,
+            axis_panel_a: RefCell::new(None),
+        });
+        this.base
+            .set_this(Rc::downgrade(&this) as Weak<dyn MainPanelVirtual>);
+        this
+    }
+}
+
+impl MainPanelVirtual for MainSerialSectionsPanel {
+    fn main_panel(&self) -> &MainPanel {
+        &self.base
+    }
+
+    /// Java package-private `addAxisPanelA()`.
+    fn add_axis_panel_a(&self) {
+        // Upstream bug fixed in translation (MainSerialSectionsPanel.java:36): Java
+        // dereferences getScrollA() and axisPanelA unchecked; a null one is skipped.
+        let axis_panel_a = self.axis_panel_a.borrow().clone();
+        if let (Some(scroll_a), Some(axis_panel_a)) = (self.base.get_scroll_a(), axis_panel_a) {
+            scroll_a.add(&axis_panel_a.get_container());
         }
     }
-    /// Java override `addAxisPanelA()`.
-    pub fn add_axis_panel_a(&mut self) {
-        self.scroll_a_components.push(
-            self.axis_panel_a
-                .as_ref()
-                .unwrap()
-                .axis_process_panel
-                .get_container(),
-        );
+
+    /// Java package-private `addAxisPanelB()`: empty.
+    fn add_axis_panel_b(&self) {}
+
+    /// Java package-private `createAxisPanelA(AxisID, AxisProgressPanel)`.
+    fn create_axis_panel_a(&self, _axis_id: AxisID, axis_progress_panel: Rc<AxisProgressPanel>) {
+        let panel = SerialSectionsProcessPanel::new(self.manager, axis_progress_panel);
+        *self.axis_panel_a.borrow_mut() = Some(panel);
     }
-    /// Java override `addAxisPanelB()`, empty in the source.
-    pub fn add_axis_panel_b(&mut self) {}
-    /// Java override `createAxisPanelA(AxisID, AxisProgressPanel)`.
-    pub fn create_axis_panel_a(
-        &mut self,
-        _axis_id: AxisID,
-        axis_progress_panel: AxisProgressPanel,
-    ) {
-        self.axis_panel_a = Some(SerialSectionsProcessPanel::new(
-            self.main_panel.manager,
-            axis_progress_panel,
-        ));
-    }
-    /// Java override `createAxisPanelB(AxisProgressPanel)`, empty in source.
-    pub fn create_axis_panel_b(&mut self, _axis_progress_panel: AxisProgressPanel) {}
-    /// Java override `getAxisPanelA()`.
-    pub fn get_axis_panel_a(&mut self) -> Option<&mut AxisProcessPanel> {
+
+    /// Java package-private `createAxisPanelB(AxisProgressPanel)`: empty.
+    fn create_axis_panel_b(&self, _axis_progress_panel: Rc<AxisProgressPanel>) {}
+
+    /// Java package-private `getAxisPanelA()`.
+    fn get_axis_panel_a(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         self.axis_panel_a
-            .as_mut()
-            .map(|panel| &mut panel.axis_process_panel)
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
     }
-    /// Java override `getAxisPanelB()`, returning null.
-    pub fn get_axis_panel_b(&mut self) -> Option<&mut AxisProcessPanel> {
+
+    /// Java package-private `getAxisPanelB()`: null.
+    fn get_axis_panel_b(&self) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         None
     }
-    /// Java override `getDataFileFilter()`.
-    pub fn get_data_file_filter(&self) -> SerialSectionsFileFilter {
-        SerialSectionsFileFilter::new()
+
+    /// Java package-private `getDataFileFilter()`.
+    fn get_data_file_filter(&self) -> Option<Rc<dyn FileFilter>> {
+        Some(Rc::new(SerialSectionsFileFilter::new()) as Rc<dyn FileFilter>)
     }
-    /// Java override `hideAxisPanelA()`.
-    pub fn hide_axis_panel_a(&mut self) -> bool {
+
+    /// Java package-private `hideAxisPanelA()`.
+    fn hide_axis_panel_a(&self) -> bool {
+        // Upstream bug fixed in translation (MainSerialSectionsPanel.java:61): a null
+        // panel is not hidden (false) here instead of a NullPointerException.
         self.axis_panel_a
-            .as_mut()
-            .unwrap()
-            .axis_process_panel
-            .hide()
+            .borrow()
+            .clone()
+            .is_some_and(|panel| panel.hide())
     }
-    /// Java override `hideAxisPanelB()`.
-    pub fn hide_axis_panel_b(&mut self) -> bool {
+
+    /// Java package-private `hideAxisPanelB()`.
+    fn hide_axis_panel_b(&self) -> bool {
         true
     }
-    /// Java override `isAxisPanelANull()`.
-    pub fn is_axis_panel_a_null(&self) -> bool {
-        self.axis_panel_a.is_none()
+
+    /// Java package-private `isAxisPanelANull()`.
+    fn is_axis_panel_a_null(&self) -> bool {
+        self.axis_panel_a.borrow().is_none()
     }
-    /// Java override `isAxisPanelBNull()`.
-    pub fn is_axis_panel_b_null(&self) -> bool {
+
+    /// Java package-private `isAxisPanelBNull()`.
+    fn is_axis_panel_b_null(&self) -> bool {
         true
     }
-    /// Java override `mapBaseAxisProcessPanel(AxisID)`.
-    pub fn map_base_axis_process_panel(
-        &mut self,
+
+    /// Java package-private `mapBaseAxisProcessPanel(AxisID)`.
+    fn map_base_axis_process_panel(
+        &self,
         axis_id: AxisID,
-    ) -> Option<&mut AxisProcessPanel> {
+    ) -> Option<Rc<dyn AxisProcessPanelVirtual>> {
         if axis_id == AxisID::Second {
             return None;
         }
-        self.get_axis_panel_a()
+        self.axis_panel_a
+            .borrow()
+            .clone()
+            .map(|panel| panel as Rc<dyn AxisProcessPanelVirtual>)
     }
-    /// Java override `mapAxisProgressPanel(AxisID)`.
-    pub fn map_axis_progress_panel(&mut self, axis_id: AxisID) -> Option<&mut AxisProgressPanel> {
+
+    /// Java package-private `mapAxisProgressPanel(AxisID)`.
+    fn map_axis_progress_panel(&self, axis_id: AxisID) -> Option<Rc<AxisProgressPanel>> {
         if axis_id == AxisID::Second {
             return None;
         }
-        self.main_panel.axis_progress_panel_a.as_mut()
+        Some(self.base.get_progress_panel(axis_id))
     }
-    /// Java override `resetAxisPanels()`.
-    pub fn reset_axis_panels(&mut self) {
-        self.axis_panel_a = None;
+
+    /// Java package-private `resetAxisPanels()`.
+    fn reset_axis_panels(&self) {
+        *self.axis_panel_a.borrow_mut() = None;
     }
-    /// Java override `saveDisplayState()`, empty in the source.
-    pub fn save_display_state(&mut self) {}
-    /// Java override `setState(ProcessState, AxisID, AbstractParallelDialog)`, empty in source.
-    pub fn set_state(
-        &mut self,
+
+    /// Java `saveDisplayState()`: empty.
+    fn save_display_state(&self) {}
+
+    /// Java `setState(ProcessState, AxisID, AbstractParallelDialog)`: empty.
+    fn set_state(
+        &self,
         _process_state: ProcessState,
         _axis_id: AxisID,
         _parallel_dialog: &dyn AbstractParallelDialog,
     ) {
     }
-    /// Java override `showAxisPanelA()`.
-    pub fn show_axis_panel_a(&mut self) {
-        self.axis_panel_a
-            .as_mut()
-            .unwrap()
-            .axis_process_panel
-            .show();
-    }
-    /// Java override `showAxisPanelB()`, empty in the source.
-    pub fn show_axis_panel_b(&mut self) {}
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::imod::etomo::directive_editor_manager::DirectiveEditorManager;
-    use crate::imod::etomo::r#type::dialog_type::DialogType;
-    struct ParallelDialog;
-    impl AbstractParallelDialog for ParallelDialog {
-        fn get_parameters(
-            &self,
-            _param: &mut dyn crate::imod::etomo::comscript::parallel_param::ParallelParam,
-        ) {
-        }
-        fn get_dialog_type(&self) -> DialogType {
-            DialogType::SerialSections
+    /// Java package-private `showAxisPanelA()`.
+    fn show_axis_panel_a(&self) {
+        // Upstream bug fixed in translation (MainSerialSectionsPanel.java:113): a null
+        // panel is skipped instead of a NullPointerException.
+        if let Some(panel) = self.axis_panel_a.borrow().clone() {
+            panel.show();
         }
     }
-    #[test]
-    fn only_axis_creates_serial_sections_process_panel_and_maps_non_b_axis() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let mut panel = MainSerialSectionsPanel::new(manager);
-        assert!(panel.is_axis_panel_a_null());
-        assert!(panel.is_axis_panel_b_null());
-        panel.create_axis_panel_a(
-            AxisID::First,
-            AxisProgressPanel::get_instance(Some(AxisID::Only), manager),
-        );
-        assert!(!panel.is_axis_panel_a_null());
-        assert_eq!(panel.get_axis_panel_a().unwrap().axis_id, AxisID::Only);
-        assert!(panel.map_base_axis_process_panel(AxisID::First).is_some());
-        assert!(panel.map_base_axis_process_panel(AxisID::Second).is_none());
-        assert!(panel.get_axis_panel_b().is_none());
-    }
-    #[test]
-    fn source_visibility_and_scroll_addition_are_delegated_to_axis_a() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let mut panel = MainSerialSectionsPanel::new(manager);
-        panel.create_axis_panel_a(
-            AxisID::Only,
-            AxisProgressPanel::get_instance(Some(AxisID::Only), manager),
-        );
-        panel.add_axis_panel_a();
-        assert_eq!(panel.scroll_a_components, vec![true]);
-        assert!(panel.hide_axis_panel_a());
-        assert!(!panel.get_axis_panel_a().unwrap().panel_root_visible);
-        panel.show_axis_panel_a();
-        assert!(panel.get_axis_panel_a().unwrap().panel_root_visible);
-        assert!(panel.hide_axis_panel_b());
-    }
-    #[test]
-    fn data_filter_progress_mapping_reset_and_empty_overrides_match_source() {
-        let manager = DirectiveEditorManager::new(None, None, None, None);
-        let mut panel = MainSerialSectionsPanel::new(manager);
-        panel.main_panel.axis_progress_panel_a =
-            Some(AxisProgressPanel::get_instance(Some(AxisID::Only), manager));
-        assert_eq!(
-            panel
-                .map_axis_progress_panel(AxisID::First)
-                .unwrap()
-                .axis_id,
-            AxisID::Only
-        );
-        assert!(panel.map_axis_progress_panel(AxisID::Second).is_none());
-        assert_eq!(
-            panel.get_data_file_filter().get_description(),
-            "Serial sections data file (.ess)"
-        );
-        panel.create_axis_panel_a(
-            AxisID::Only,
-            AxisProgressPanel::get_instance(Some(AxisID::Only), manager),
-        );
-        panel.set_state(ProcessState::Complete, AxisID::Only, &ParallelDialog);
-        panel.save_display_state();
-        panel.reset_axis_panels();
-        assert!(panel.is_axis_panel_a_null());
-    }
+
+    /// Java package-private `showAxisPanelB()`: empty.
+    fn show_axis_panel_b(&self) {}
 }

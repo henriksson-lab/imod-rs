@@ -587,3 +587,16 @@ mod tests {
         assert_eq!(Type::OPEN.get_state(false), "closed");
     }
 }
+
+/// The `etomo.ui.TableComponent` interface the Java class implements.
+impl crate::imod::etomo::ui::table_component::TableComponent for ExpandButton {
+    /// Java `getPreferredWidth()`:
+    /// `getPreferredWidth(type.getUnformattedText(expanded))`, which is
+    /// `UIUtilities.getPreferredWidth(button, text)`.
+    fn get_preferred_width(&self) -> i32 {
+        super::ui_utilities::get_preferred_width_abstract_button_string(
+            &SwingComponent::get_component(self),
+            Some(self.type_.get_unformatted_text(self.is_expanded())),
+        )
+    }
+}

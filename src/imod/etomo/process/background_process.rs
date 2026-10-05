@@ -507,7 +507,8 @@ impl BackgroundProcess {
 
     /// `DetachedProcess.createRunCommand`.
     fn create_run_command(&self, detached: &Detached) -> Result<Vec<String>, String> {
-        let python_script_path = etomo_director::INSTANCE.get_python_script_path()
+        let python_script_path = etomo_director::INSTANCE
+            .get_python_script_path()
             .unwrap_or_default();
         let mut run_command = vec![
             "python".to_owned(),
@@ -598,24 +599,24 @@ impl BackgroundProcess {
             // treate any error message as a failure
             // popup error messages from the process
             if let Some(process_messages) = &process_messages
-                && !process_messages.is_empty(MessageType::Error)
+                && !process_messages.is_empty(Some(MessageType::Error))
             {
                 error_found = true;
-                ui_harness::post_error_message_dialog(
+                ui_harness::open_error_message_dialog_and_wait(
                     Some(self.manager),
-                    copy_messages(process_messages),
+                    process_messages.clone(),
                     "Process Error".to_owned(),
                     self.axis_id,
                 );
             }
             // popup error messages from the monitor
             if let Some(monitor_messages) = &monitor_messages
-                && !monitor_messages.is_empty(MessageType::Error)
+                && !monitor_messages.is_empty(Some(MessageType::Error))
             {
                 error_found = true;
-                ui_harness::post_error_message_dialog(
+                ui_harness::open_error_message_dialog_and_wait(
                     Some(self.manager),
-                    copy_messages(monitor_messages),
+                    monitor_messages.clone(),
                     "Process Monitor Error".to_owned(),
                     self.axis_id,
                 );
@@ -626,7 +627,8 @@ impl BackgroundProcess {
             {
                 let size = monitor_messages.size(MessageType::ChunkWarning);
                 if size > 0 {
-                    let mut warning_message = ProcessMessages::get_instance();
+                    let mut warning_message =
+                        ProcessMessages::get_instance(Some(self.manager), self.axis_id);
                     warning_message.add_empty(MessageType::Warning);
                     warning_message
                         .add_message(MessageType::Warning, "<html><U>Warnings Occurred</U>");
@@ -654,37 +656,37 @@ impl BackgroundProcess {
             error_found = true;
             let std_error = self.std_error.lock().unwrap().clone();
             let std_output = self.std_output.lock().unwrap().clone();
-            let mut error_message = ProcessMessages::get_instance();
+            let mut error_message = ProcessMessages::get_instance(Some(self.manager), self.axis_id);
             error_message.add_message(
                 MessageType::Error,
-                format!(
+                &format!(
                     "<html>Command failed: {}",
                     self.get_abbreviated_command_line()
                 ),
             );
             error_message.add_array(
                 MessageType::Error,
-                "<html><U>Standard error output:</U>",
+                Some("<html><U>Standard error output:</U>"),
                 std_error.as_deref(),
             );
             error_message.add_from_type(
                 MessageType::Error,
                 MessageType::ChunkError,
-                "<html><U>Chunk errors:</U>",
+                Some("<html><U>Chunk errors:</U>"),
                 monitor_messages.as_ref(),
             );
             error_message.add_from(
                 MessageType::Error,
-                "<html><U>Monitor error messages:</U>",
+                Some("<html><U>Monitor error messages:</U>"),
                 monitor_messages.as_ref(),
             );
             if let Some(std_output) = std_output {
-                error_message.add_process_output_lines(Some("Program output:"), std_output);
+                error_message.add_process_output_lines(Some("Program output:"), &std_output);
             }
             // make sure script knows about failure
             self.set_process_end_state(ProcessEndState::Failed);
             // popup error messages
-            ui_harness::post_error_message_dialog(
+            ui_harness::open_error_message_dialog_and_wait(
                 Some(self.manager),
                 error_message,
                 format!(
@@ -733,19 +735,16 @@ impl BackgroundProcess {
     pub fn get_process_messages(&self) -> Option<ProcessMessages> {
         let program = self.get_program()?;
         let messages = program.get_process_messages();
-        let mut copy = ProcessMessages::get_instance();
-        copy.add_process_messages(&messages);
-        Some(copy)
+        Some(messages.clone())
     }
 
     /// Java `getMonitorMessages`; `DetachedProcess` asks its monitor.
     fn get_monitor_messages(&self) -> Option<ProcessMessages> {
         let detached = self.detached.as_ref()?;
         let monitor = detached.monitor.as_ref()?;
-        let messages = monitor.get_process_messages()?;
-        let mut copy = ProcessMessages::get_instance();
-        copy.add_process_messages(&messages);
-        Some(copy)
+        monitor
+            .get_process_messages()
+            .map(|messages| messages.clone())
     }
 
     /// Java `getProgram`.
@@ -964,12 +963,4 @@ impl SystemProcessInterface for BackgroundProcess {
     fn reset_process_data(&self) {
         self.process_data.lock().unwrap().reset();
     }
-}
-
-/// A copy of `messages` for the event dispatch thread, where the Java hands
-/// the dialog the same object.
-fn copy_messages(messages: &ProcessMessages) -> ProcessMessages {
-    let mut copy = ProcessMessages::get_instance();
-    copy.add_process_messages(messages);
-    copy
 }

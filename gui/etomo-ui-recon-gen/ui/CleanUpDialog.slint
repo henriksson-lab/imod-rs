@@ -2,7 +2,7 @@
 // `CleanupPanel.java` it nests).  Appearance only — no listeners, no manager,
 // no file system access.
 
-import { EtomoStyle, BeveledBorder, MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtomoStyle, BeveledBorder, MultiLineButton, BridgedLabel } from "../../etomo-ui-common/ui/widgets.slint";
 import { EtchedBorder, ExitButtons, FileChooser, CenteredLabel } from "LocalWidgets.slint";
 
 // `CleanupPanel` (`CleanupPanel.java:223-242`): the "Intermediate File Cleanup"
@@ -17,7 +17,10 @@ export component CleanupPanel inherits EtchedBorder {
     // FixedDim.x0_y5
     Rectangle { height: 5px; }
     // `lDirSize`, set by `setDirSize()` to "Directory size (MB): " + size.
-    CenteredLabel { text: "Directory size (MB): 0"; }
+    HorizontalLayout {
+        alignment: center;
+        BridgedLabel { prefix: "Directory size (MB): "; text: "Directory size (MB): 0"; }
+    }
     // FixedDim.x0_y10
     Rectangle { height: 10px; }
     FileChooser { }
@@ -44,12 +47,23 @@ export component CleanUpDialog inherits BeveledBorder {
         alignment: center;
         MultiLineButton {
             text: root.dual-axis ? "Archive Original Stacks" : "Archive Original Stack";
+            // Wired: whichever label the constructor gave the Swing button.
+            labels: "Archive Original Stacks|Archive Original Stack";
             min-width: 200px;
         }
     }
-    CenteredLabel { text: root.archive-info-a; }
-    // `archiveInfoB` is hidden outright for a single axis dataset.
-    if root.dual-axis: CenteredLabel { text: root.archive-info-b; }
+    // `archiveInfoA` / `archiveInfoB` ("To restore original stack, run:
+    // archiveorig -r <stack>"), shown by `setArchiveFields` only when the
+    // original stack was archived; `archiveInfoB` is hidden outright for a
+    // single axis dataset.  Wired, the showing Swing labels.
+    HorizontalLayout {
+        alignment: center;
+        BridgedLabel { prefix: "To restore original stack"; text: root.archive-info-a; }
+    }
+    if root.dual-axis: HorizontalLayout {
+        alignment: center;
+        BridgedLabel { prefix: "To restore original stack#2"; text: root.archive-info-b; }
+    }
     CleanupPanel { }
     // `addExitButtons()`; `btnAdvanced.setVisible(false)` and
     // `btnExecute.setText("Done")` (`CleanUpDialog.java:63-65`).

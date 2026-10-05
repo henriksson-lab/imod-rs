@@ -14,6 +14,7 @@
 
 use super::const_etomo_number::Number;
 use super::etomo_number::EtomoNumber;
+use super::parsed_element_list::ParsedElementList;
 use crate::imod::etomo::storage::log_file::LogFileError;
 use crate::imod::etomo::ui::swing::token::Token;
 use crate::imod::etomo::util::primative_tokenizer::PrimativeTokenizer;
@@ -46,8 +47,30 @@ impl ParsedElementBase {
     }
 }
 
+impl ParsedElementBase {
+    /// The body of Java `ParsedElement.validate()`, which the subclasses' overrides
+    /// reach as `super.validate()`.
+    pub fn validate(&self) -> Option<String> {
+        if let Some(error_message) = &self.error_message {
+            return Some(error_message.clone());
+        }
+        if self.failed {
+            return Some(format!(
+                "{}: Unable to parse.{}",
+                self.descr.as_deref().unwrap_or(""),
+                if self.line_num > 0 {
+                    format!("  Line# {}", self.line_num)
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        None
+    }
+}
+
 /// Java `ParsedElement`.
-pub trait ParsedElement {
+pub trait ParsedElement: std::fmt::Display + Send + Sync + std::any::Any {
     /// The fields Java's `ParsedElement` declares (not a source member).
     fn parsed_element_base(&self) -> &ParsedElementBase;
 
@@ -114,14 +137,25 @@ pub trait ParsedElement {
     /// Java abstract `clear()`.
     fn clear(&mut self);
 
-    // TODO(unit): needs etomo/type/ParsedElementList.java - Java abstract
-    // package-private `ParsedElementList getParsedNumberExpandedArray(ParsedElementList
-    // parsedNumberExpandedArray)`: "Append non-null ParsedNumbers to
-    // parsedNumberExpandedArray.  Create parsedNumberExpandedArray if
-    // parsedNumberExpandedArray == null.  Returns parsedNumberExpandedArray."  Declared
-    // here as `fn get_parsed_number_expanded_array(&self, Option<ParsedElementList>) ->
-    // Option<ParsedElementList>` once the list type exists; nothing in this class calls
-    // it.
+    /// Java abstract package-private `getParsedNumberExpandedArray(ParsedElementList)`.
+    /// Append non-null ParsedNumbers to parsedNumberExpandedArray.  Create
+    /// parsedNumberExpandedArray if parsedNumberExpandedArray == null.  Returns
+    /// parsedNumberExpandedArray (never null).
+    fn get_parsed_number_expanded_array(
+        &self,
+        parsed_number_expanded_array: Option<ParsedElementList>,
+    ) -> ParsedElementList;
+
+    /// Not a Java member: a copy of this element.  Java containers share element
+    /// objects by reference (`array.add(input.getElement(i))`, the expanded arrays,
+    /// `descriptor.getElement(0)`); the translation owns its elements, so a container
+    /// that receives an element another one holds receives a copy.  No caller mutates
+    /// an element through the second reference.
+    fn clone_element(&self) -> Box<dyn ParsedElement>;
+
+    /// Not a Java member: the concrete class, for the source's downcasts
+    /// (`(ParsedNumber) element`, `(ParsedArrayDescriptor) element`).
+    fn as_any(&self) -> &dyn std::any::Any;
 
     /// Java final `setRawString(String)`.
     fn set_raw_string_string(&mut self, string: Option<&str>) {
@@ -142,22 +176,7 @@ pub trait ParsedElement {
     /// Java `validate()`.  Returns the first parse error.  If failed and there's no
     /// error message, returns a generic one.  Otherwise return null.
     fn validate(&self) -> Option<String> {
-        let base = self.parsed_element_base();
-        if let Some(error_message) = &base.error_message {
-            return Some(error_message.clone());
-        }
-        if base.failed {
-            return Some(format!(
-                "{}: Unable to parse.{}",
-                base.descr.as_deref().unwrap_or(""),
-                if base.line_num > 0 {
-                    format!("  Line# {}", base.line_num)
-                } else {
-                    String::new()
-                }
-            ));
-        }
-        None
+        self.parsed_element_base().validate()
     }
 
     /// Java final package-private `getErrorMessage()`.

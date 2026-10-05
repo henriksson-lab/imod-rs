@@ -206,11 +206,11 @@ impl Storable for PanelHeaderState {
         PanelHeaderState::store_with_prepend(self, properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         PanelHeaderState::load(self, properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         PanelHeaderState::load_with_prepend(self, properties, prepend);
     }
 }

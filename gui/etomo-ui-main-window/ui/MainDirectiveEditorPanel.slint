@@ -11,7 +11,8 @@
 // so there is no B column.  `setStatusBarText(String, int)` (`:118-120`)
 // delegates to `MainPanel.setStatusBarTextToDirectory`.
 //
-// Appearance only: no callbacks, no state, static defaults everywhere.
+// Wired as part of the main window's "directive-editor" view (the
+// `ManagerFrame` overlay in `MainFrame.slint`).
 
 import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
 import { Colors } from "MainWindowWidgets.slint";
@@ -21,6 +22,9 @@ import { DirectiveEditorProcessPanel } from "DirectiveEditorProcessPanel.slint";
 export component MainDirectiveEditorPanel inherits Rectangle {
     in property <string> status-bar-text: "No data set loaded";
     in property <color> panel-background: Colors.background-tools;
+    // Rust-only wiring: false when the main window draws the progress panel
+    // in the dialog column (`MainFrameWindow`).
+    in property <bool> show-status-panel: true;
     background: EtomoStyle.background;
     MainPanel {
         width: 100%;
@@ -30,6 +34,7 @@ export component MainDirectiveEditorPanel inherits Rectangle {
         // `addAxisPanelA()`: `getScrollA().add(axisPanelA.getContainer())`.
         DirectiveEditorProcessPanel {
             panel-background: root.panel-background;
+            show-status-panel: root.show-status-panel;
         }
         // `createAxisPanelB` has an empty body and `getAxisPanelB()` returns
         // null, so there is no B column to draw.

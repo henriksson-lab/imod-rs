@@ -26,6 +26,3 @@ pub trait TiltXcorrDisplay: ProcessDisplay {
         do_validation: bool,
     ) -> bool;
 }
-
-// TODO(unit): TiltxcorrPanel.java implements TiltXcorrDisplay; the Rust
-// `tiltxcorr_panel.rs` works through boundary traits, so the impl waits.

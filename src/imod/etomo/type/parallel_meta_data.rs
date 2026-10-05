@@ -512,12 +512,12 @@ impl ParallelMetaData {
     }
 
     /// Java `load(Properties)`.
-    pub fn load(&self, props: &BTreeMap<String, String>) {
+    pub fn load(&self, props: &mut BTreeMap<String, String>) {
         self.load_with_prepend(props, "");
     }
 
     /// Java `load(Properties, String)`.
-    pub fn load_with_prepend(&self, props: &BTreeMap<String, String>, prepend: &str) {
+    pub fn load_with_prepend(&self, props: &mut BTreeMap<String, String>, prepend: &str) {
         // `super.load(props, prepend)`.
         if self
             .base
@@ -614,11 +614,8 @@ impl ParallelMetaData {
         self.memory_per_chunk.lock().unwrap().load_with_default_int(
             props,
             prepend,
-            // Java `AnisotropicDiffusionDialog.MEMORY_PER_CHUNK_DEFAULT`, which is
-            // `FilterFullVolumePanel.MEMORY_PER_CHUNK_DEFAULT` =
-            // `14 * ChunksetupParam.MEMORY_TO_VOXEL`.
-            // TODO(unit): read it from the faithful FilterFullVolumePanel.
-            14 * crate::imod::etomo::comscript::chunksetup_param::MEMORY_TO_VOXEL,
+            // Java `AnisotropicDiffusionDialog.MEMORY_PER_CHUNK_DEFAULT`.
+            crate::imod::etomo::ui::swing::anisotropic_diffusion_dialog::MEMORY_PER_CHUNK_DEFAULT,
         );
         self.overlap_times_four
             .lock()
@@ -705,27 +702,33 @@ impl ParallelMetaData {
         self.x_min
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.x_max
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.y_min
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.y_max
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.z_min
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.z_max
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.test_k_value_list
             .lock()
             .unwrap()
@@ -733,11 +736,13 @@ impl ParallelMetaData {
         self.test_iteration
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.test_k_value
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.test_iteration_list
             .lock()
             .unwrap()
@@ -745,15 +750,18 @@ impl ParallelMetaData {
         self.k_value
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.iteration
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.memory_per_chunk
             .lock()
             .unwrap()
-            .base.store_with_prepend(props, prepend);
+            .base
+            .store_with_prepend(props, prepend);
         self.overlap_times_four
             .lock()
             .unwrap()
@@ -815,11 +823,11 @@ impl Storable for ParallelMetaData {
         ParallelMetaData::store_with_prepend(self, properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         ParallelMetaData::load(self, properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         ParallelMetaData::load_with_prepend(self, properties, prepend);
     }
 }

@@ -7,7 +7,7 @@ use super::command_mode::CommandMode;
 /// Java permits `getSubcommandMode` to return null; the source's
 /// `ProcesschunksParam` initializes that member to null.  `None` preserves
 /// that state without introducing an invented default command mode.
-pub trait ParallelParam {
+pub trait ParallelParam: std::any::Any {
     fn get_subcommand_mode(&self) -> Option<&dyn CommandMode>;
 }
 

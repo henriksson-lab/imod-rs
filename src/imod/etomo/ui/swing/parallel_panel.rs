@@ -294,7 +294,7 @@ impl ParallelPanel {
         {
             let mut storable = instance.clone();
             let director = &*etomo_director::INSTANCE;
-            if let Some(parameter_store) = director.get_parameter_store().as_ref() {
+            if let Some(parameter_store) = director.get_parameter_store().as_mut() {
                 parameter_store.load(&mut storable);
             }
         }
@@ -792,12 +792,12 @@ impl ParallelPanel {
     }
 
     /// Java `load(Properties)` (implements `Storable`).
-    pub fn load_properties(&self, props: &BTreeMap<String, String>) {
+    pub fn load_properties(&self, props: &mut BTreeMap<String, String>) {
         self.load_properties_string(props, "");
     }
 
     /// Java `load(Properties, String)` (implements `Storable`).
-    pub fn load_properties_string(&self, props: &BTreeMap<String, String>, prepend: &str) {
+    pub fn load_properties_string(&self, props: &mut BTreeMap<String, String>, prepend: &str) {
         // Java `String group;` - declared, unused.
         // Java `prepend == ""` is an identity test against the interned literal;
         // every caller's empty prepend is that literal.
@@ -1543,11 +1543,11 @@ impl Storable for Rc<ParallelPanel> {
         self.store_properties_string(properties, prepend);
     }
 
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         self.load_properties(properties);
     }
 
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         self.load_properties_string(properties, prepend);
     }
 }

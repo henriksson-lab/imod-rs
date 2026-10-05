@@ -67,7 +67,8 @@ impl SelectFileExtension {
         component: Option<&Rc<JComponent>>,
         override_file_open_directory: Option<PathBuf>,
     ) -> Option<PathBuf> {
-        let chooser = FileChooser::new_file(self.get_directory(override_file_open_directory).as_deref());
+        let chooser =
+            FileChooser::new_file(self.get_directory(override_file_open_directory).as_deref());
         let file_chooser_title = self.file_chooser_title.borrow().clone();
         if let Some(file_chooser_title) = file_chooser_title.as_deref() {
             chooser.set_dialog_title(Some(file_chooser_title));
@@ -112,7 +113,8 @@ impl SelectFileExtension {
         component: Option<&Rc<JComponent>>,
         override_file_open_directory: Option<PathBuf>,
     ) -> Option<Vec<PathBuf>> {
-        let chooser = JFileChooser::new_file(self.get_directory(override_file_open_directory).as_deref());
+        let chooser =
+            JFileChooser::new_file(self.get_directory(override_file_open_directory).as_deref());
         let file_chooser_title = self.file_chooser_title.borrow().clone();
         if let Some(file_chooser_title) = file_chooser_title.as_deref() {
             chooser.set_dialog_title(Some(file_chooser_title));
@@ -133,7 +135,9 @@ impl SelectFileExtension {
         if chooser.show_open_dialog(component) == JFileChooser::APPROVE_OPTION {
             let selected_files = chooser.get_selected_files();
             if !selected_files.is_empty() {
-                let parent = selected_files[0].parent().map(|parent| parent.to_path_buf());
+                let parent = selected_files[0]
+                    .parent()
+                    .map(|parent| parent.to_path_buf());
                 self.set_dir(
                     parent
                         .as_ref()
@@ -153,8 +157,6 @@ impl SelectFileExtension {
 
     /// Java private `getDirectory(File)`.
     fn get_directory(&self, override_file_open_directory: Option<PathBuf>) -> Option<PathBuf> {
-        // TODO(unit): needs etomo/util/ValidDirectory.java - static isValid(File),
-        // isValid(BrowsingDirectory), get(File), get(BrowsingDirectory).
         if ValidDirectory::is_valid_file(override_file_open_directory.as_deref()) {
             return ValidDirectory::get_file(override_file_open_directory.as_deref());
         }

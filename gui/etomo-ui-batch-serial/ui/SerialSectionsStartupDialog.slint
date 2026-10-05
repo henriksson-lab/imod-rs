@@ -1,10 +1,43 @@
 // Mirrors `IMOD/Etomo/src/etomo/ui/swing/SerialSectionsStartupDialog.java`
-// (the modal "Starting Serial Sections" JDialog).  Appearance only: field
-// values are the static defaults the Java constructor sets.
+// (the modal "Starting Serial Sections" JDialog, `createPanel`, :124-209).
+//
+// Wired through `EtomoBridge` (`ui/swing/slint_bridge.rs`): every widget is
+// identified by the label the Java gives it.  The main frame draws this over
+// its content while the translated `JDialog` shows (`MainFrame.slint`,
+// `startup-dialog`).  Unwired, the widgets show the Java's construction-time
+// state.
 
-import { EtomoStyle, CheckBox, RadioButton, MultiLineButton, LabeledSpinner }
+import { EtomoStyle, CheckBox, RadioButton, MultiLineButton, LabeledSpinner,
+         BridgedTextBox, BridgedButton }
     from "../../etomo-ui-common/ui/widgets.slint";
-import { EtchedBorder, FileTextField } from "LocalWidgets.slint";
+import { EtchedBorder } from "LocalWidgets.slint";
+
+// `FileTextField2.getInstance(manager, label)` (`FileTextField2.java`): the
+// label, the entry box and the folder button (bridged as "fbn", the button
+// beside the field labelled `label`).
+component StartupFileTextField inherits HorizontalLayout {
+    in property <string> label;
+    in property <length> label-width: 50px;
+    in property <length> field-width: 250px;
+    spacing: EtomoStyle.gap;
+    alignment: start;
+    Text {
+        text: root.label;
+        width: root.label-width;
+        vertical-alignment: center;
+        font-size: EtomoStyle.font-size-pt * 1px;
+    }
+    BridgedTextBox { kind: "tf"; label: root.label; width: root.field-width; }
+    Rectangle {
+        width: 26px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        Text { text: "..."; horizontal-alignment: center; vertical-alignment: center; }
+        BridgedButton { kind: "fbn"; label: root.label; }
+    }
+}
 
 export component SerialSectionsStartupDialog inherits Rectangle {
     background: EtomoStyle.panel;
@@ -16,15 +49,13 @@ export component SerialSectionsStartupDialog inherits Rectangle {
         Rectangle { height: 10px; }
 
         // ftfStack = FileTextField2.getInstance(manager, "Stack: ")
-        FileTextField {
-            label: "Stack: ";
-            label-width: 50px;
-            field-width: 320px;
-        }
+        StartupFileTextField { label: "Stack: "; label-width: 50px; field-width: 320px; }
 
         Rectangle { height: 30px; }
 
         // pnlViewTypeX: 5px indent, then the "Frame Type" group box.
+        // `RadioButton(String, EnumeratedType, ButtonGroup)` selects the
+        // enum's default (`ViewType.DEFAULT` is SINGLE_VIEW).
         HorizontalLayout {
             padding-left: 5px;
             alignment: start;
@@ -55,14 +86,13 @@ export component SerialSectionsStartupDialog inherits Rectangle {
             padding-left: 5px;
             spacing: 5px;
             alignment: start;
-            FileTextField {
+            StartupFileTextField {
                 label: "Image distortion field file: ";
                 label-width: 170px;
                 field-width: 175px;
             }
             LabeledSpinner {
                 label: "Binning: ";
-                label-width: 55px;
                 text: "1";
             }
         }

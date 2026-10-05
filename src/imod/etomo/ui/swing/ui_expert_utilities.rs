@@ -25,7 +25,6 @@ use crate::imod::etomo::r#type::meta_data::MetaData;
 use crate::imod::etomo::ui::swing::fiducialess_params::FiducialessParams;
 use crate::imod::etomo::ui::swing::tomogram_positioning_expert::TomogramPositioningExpert;
 use crate::imod::etomo::ui::swing::ui_harness;
-// TODO(unit): needs etomo/util/FidXyz.java - `FidXyz` has no module yet.
 use crate::imod::etomo::util::fid_xyz::FidXyz;
 use crate::imod::etomo::util::mrc_header::MRCHeader;
 use crate::imod::etomo::util::utilities::java_lang_math_round;
@@ -162,7 +161,7 @@ impl UIExpertUtilities {
         &self,
         manager: &'static dyn BaseManager,
         axis_id: AxisID,
-        stack_header: Option<Rc<RefCell<MRCHeader>>>,
+        stack_header: Option<std::sync::Arc<crate::imod::etomo::util::mrc_header::SharedMRCHeader>>,
         null_if_failed: bool,
     ) -> i32 {
         let rawstack_header = MRCHeader::get_instance_from_file_type(

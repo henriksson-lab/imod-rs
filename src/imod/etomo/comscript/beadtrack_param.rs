@@ -44,6 +44,7 @@ use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::storage::autodoc::autodoc_factory;
 use crate::imod::etomo::storage::autodoc::read_only_autodoc::ReadOnlyAutodoc;
 use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{
     ConstEtomoNumber, Type, java_lang_string_matches_whitespace,
@@ -54,7 +55,6 @@ use crate::imod::etomo::r#type::file_key::FileKey;
 use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::script_parameter::ScriptParameter;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::util::utilities;
 
 /// Java `PROCESS_NAME`.
@@ -1344,7 +1344,10 @@ impl ProcessDetails for BeadtrackParam {
         None
     }
 
-    fn get_hashtable(&self, _field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         None
     }
 
@@ -1352,7 +1355,10 @@ impl ProcessDetails for BeadtrackParam {
         None
     }
 
-    fn get_int_key_list(&self, _field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         None
     }
 
@@ -1364,7 +1370,10 @@ impl ProcessDetails for BeadtrackParam {
         None
     }
 
-    fn get_iterator_element_list(&self, _field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        _field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         None
     }
 }

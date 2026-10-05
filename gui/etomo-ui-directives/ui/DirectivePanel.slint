@@ -4,68 +4,77 @@
 // widget that matches the directive's value type, then horizontal glue.  Which
 // value widget exists is decided in the constructor
 // (`DirectivePanel.java:71-105`): a boolean or choice-list directive gets
-// `cbValue` (a `ComboBox`) and no text field; anything else gets `tfValue` (a
-// `TextField`), plus `sbFileValue` (a `SimpleButton` carrying
-// `ScaledImage.OPEN_FILE`) when the value type is FILE.
+// `cbValue` (a `ComboBox`, items "Yes"/"No" or the choice list's descriptions)
+// and no text field; anything else gets `tfValue` (a `TextField`), plus
+// `sbFileValue` (a `SimpleButton` carrying `ScaledImage.OPEN_FILE`) when the
+// value type is FILE.
 //
-// Appearance only: no callbacks, no state, static defaults everywhere.
+// Wired: the rows are the showing `DirectivePanel`s of the translated
+// component tree (`slint_bridge::directive_editor_columns`), and every widget
+// is bridged by the label the Java gives it - `cbInclude` by its text
+// (" -  <title>: "), `cbValue` ("cbb") and `tfValue` ("tf") by the directive
+// title, and the file button as the button beside `tfValue` ("fbn") - with
+// "#N" when several showing widgets carry the same name.
 
-import { EtomoStyle, CheckBox } from "../../etomo-ui-common/ui/widgets.slint";
-import { TextField, ComboBox, SimpleButton } from "widgets_local.slint";
+import { EtomoStyle, CheckBox, BridgedComboBox, BridgedTextBox, BridgedButton } from "../../etomo-ui-common/ui/widgets.slint";
 
-// One directive, as `DirectiveSectionPanel.createPanel` pulls it out of the
-// `DirectiveMap`.  The directives themselves are read from
-// `IMOD/com/directives.csv` at run time, so this is a model, not a literal.
-//
-// `value-kind` says which branch of the constructor built the panel:
-//   "combo" -> `cbValue`, either the boolean instance (items "Yes", "No",
-//              `ComboBox.getUnlabeledInstance`) or the choice-list instance
-//              (`ComboBox.getUnlabeledEmptyChoiceInstance`)
-//   "file"  -> `tfValue` plus `sbFileValue`
-//   ""      -> `tfValue` alone
+// One showing directive row, as `DirectiveSectionPanel.createPanel` built it
+// from the `DirectiveMap`.  `value-kind` says which branch of the constructor
+// built the panel: "combo" (`cbValue`), "text" (`tfValue`), "file" (`tfValue`
+// plus `sbFileValue`).
 export struct DirectivePanelData {
-    title: string,
+    // `cbInclude`'s text, " -  " + title + ": ".
+    include-text: string,
+    // "#N" for `cbInclude` when several showing check boxes share its name.
+    include-occurrence: string,
     value-kind: string,
-    value: string,
-    include: bool,
-    // `DirectivePanel.init` (`DirectivePanel.java:193-195`) hides the row when
-    // `tool.isDirectiveVisible` says no.  That answer needs a `DirectiveTool`
-    // and the loaded dataset, so it is a model field rather than a constant.
-    directive-visible: bool,
+    // The value widget's bridge label: the directive title, plus "#N".
+    value-label: string,
 }
 
 export component DirectivePanel inherits HorizontalLayout {
-    in property <string> title;
-    in property <string> value-kind;
-    in property <string> value;
-    // `cbInclude` starts unselected unless `setIncluded()` toggles it.
-    in property <bool> include: false;
+    in property <DirectivePanelData> data;
     in property <length> value-width: 160px;
 
     spacing: EtomoStyle.gap;
+    alignment: start;
 
     // `cbInclude = new CheckBox(" -  " + title + ": ")` (`DirectivePanel.java:66`).
     CheckBox {
-        text: " -  " + root.title + ": ";
-        checked: root.include;
+        text: root.data.include-text;
+        occurrence: root.data.include-occurrence;
     }
-    // `enableValue()`: the value widget is enabled only while the include check
-    // box is both selected and enabled.
-    if root.value-kind == "combo": ComboBox {
+    // `enableValue()` enables the value widget only while the include check
+    // box is both selected and enabled; the bridge reads that state.
+    if root.data.value-kind == "combo": BridgedComboBox {
         width: root.value-width;
-        text: root.value;
-        enabled: root.include;
+        kind: "cbb";
+        label: root.data.value-label;
     }
-    if root.value-kind != "combo": TextField {
+    if root.data.value-kind != "combo": BridgedTextBox {
         width: root.value-width;
-        text: root.value;
-        enabled: root.include;
+        kind: "tf";
+        label: root.data.value-label;
     }
-    if root.value-kind == "file": SimpleButton {
-        enabled: root.include;
+    if root.data.value-kind == "file": Rectangle {
+        // `sbFileValue`, `UIUtilities.getScaledFolderButtonDimension()`; the
+        // `openFile` icon is drawn as a text glyph.
+        width: 24px;
+        height: EtomoStyle.field-height;
+        background: EtomoStyle.panel;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        file-button := BridgedButton {
+            kind: "fbn";
+            label: root.data.value-label;
+        }
+        Text {
+            text: "...";
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            color: file-button.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
     }
-    // `Box.createHorizontalGlue()`.
-    Rectangle { }
 }
 
 export component DirectivePanelWindow inherits Window {
@@ -77,9 +86,7 @@ export component DirectivePanelWindow inherits Window {
         padding: EtomoStyle.inset;
         alignment: start;
         DirectivePanel {
-            title: "Directive";
-            value-kind: "";
-            value: "";
+            data: { include-text: " -  Directive: ", value-kind: "text", value-label: "Directive" };
         }
     }
 }

@@ -4,7 +4,7 @@
 // `IMOD/Etomo/src/etomo/ui/swing`, named after that class.
 
 import {
-    EtomoStyle, EtomoBridge, BridgedTextBox, BridgedButton, BridgedToggle, BridgedComboBox,
+    EtomoStyle, EtomoBridge, ContextArea, BridgedTextBox, BridgedButton, BridgedToggle, BridgedComboBox,
 } from "../../etomo-ui-common/ui/widgets.slint";
 
 // `EtchedBorder` (`EtchedBorder.java`): a titled etched group box.  A distinct
@@ -12,15 +12,22 @@ import {
 // Swing draws it with a thin two-tone etch rather than a raised bevel.
 export component EtchedBorder inherits Rectangle {
     in property <string> title;
+    // Wired: false while the titled panel is not showing (`visible-value`
+    // "brd"); the box then takes no room.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.title == ""
+        || EtomoBridge.visible-value("brd", root.title, true, EtomoBridge.generation);
+    height: root.shown-visible ? etched-layout.preferred-height : 0px;
     background: EtomoStyle.panel;
-    border-width: 1px;
+    border-width: root.shown-visible ? 1px : 0px;
     // Swing's etched border is a dark line with a light line inside it.  Slint
     // has one border colour per rectangle, so the etch is approximated by the
     // dark line only.
     border-color: EtomoStyle.border;
-    VerticalLayout {
+    ContextArea { kind: "brd"; label: root.title; visible: root.shown-visible; }
+    etched-layout := VerticalLayout {
+        visible: root.shown-visible;
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
         if root.title != "": Text {
             text: root.title;
             font-size: EtomoStyle.font-size-pt * 1px;
@@ -69,22 +76,26 @@ export component FileTextField inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
-    in property <length> label-width: 180px;
-    spacing: 0px;
-    Text {
-        text: root.label;
-        width: root.label-width;
-        vertical-alignment: center;
-        color: field.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("tf", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: 0px;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: field.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        field := BridgedTextBox {
+            kind: "tf";
+            label: root.label;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        FileButton { label: root.label; enabled: root.enabled; }
     }
-    field := BridgedTextBox {
-        kind: "tf";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    FileButton { label: root.label; enabled: root.enabled; }
 }
 
 // `ButtonControlTextEfield` (`ButtonControlTextEfield.java`), as built by
@@ -95,22 +106,26 @@ export component ButtonControlTextEfield inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
-    in property <length> label-width: 180px;
-    spacing: 0px;
-    Text {
-        text: root.label;
-        width: root.label-width;
-        vertical-alignment: center;
-        color: field.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("tf", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: 0px;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: field.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        field := BridgedTextBox {
+            kind: "tf";
+            label: root.label;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        FileButton { label: root.label; enabled: root.enabled; }
     }
-    field := BridgedTextBox {
-        kind: "tf";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    FileButton { label: root.label; enabled: root.enabled; }
 }
 
 // `ComboBox` (`ComboBox.java`): label then a drop-down, named "cbb." + the
@@ -119,20 +134,28 @@ export component ComboBox inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
-    in property <length> label-width: 130px;
-    spacing: EtomoStyle.gap;
-    Text {
-        text: root.label;
-        width: root.label-width;
-        vertical-alignment: center;
-        color: box.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
-    }
-    box := BridgedComboBox {
-        kind: "cbb";
-        label: root.label;
-        text: root.text;
-        enabled: root.enabled;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("cbb", root.label, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        // `ComboBox.createPanel` (`ComboBox.java:119-124`): rigid 2px, the
+        // label, rigid 3px, the combo box, rigid 2px.
+        padding-left: 2px;
+        padding-right: 2px;
+        spacing: 3px;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: box.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        box := BridgedComboBox {
+            kind: "cbb";
+            label: root.label;
+            text: root.text;
+            enabled: root.enabled;
+        }
     }
 }
 
@@ -145,36 +168,41 @@ export component CheckTextField inherits HorizontalLayout {
     in property <string> field-text;
     in property <bool> enabled: true;
     in property <length> field-width: 120px;
-    spacing: EtomoStyle.gap;
-    alignment: start;
-    Rectangle {
-        width: 13px;
-        height: EtomoStyle.field-height;
+    // Wired: drawn only while the Swing component shows (`visible-value`).
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("cb", root.text, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
         Rectangle {
             width: 13px;
-            height: 13px;
-            background: EtomoStyle.field-background;
-            border-width: 1px;
-            border-color: EtomoStyle.border;
-            if toggle.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+            height: EtomoStyle.field-height;
+            Rectangle {
+                width: 13px;
+                height: 13px;
+                background: EtomoStyle.field-background;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                if toggle.checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+            }
+            toggle := BridgedToggle {
+                kind: "cb";
+                label: root.text;
+                default-checked: root.checked;
+                default-enabled: root.enabled;
+            }
         }
-        toggle := BridgedToggle {
-            kind: "cb";
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            color: toggle.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+        TextField {
+            width: root.field-width;
             label: root.text;
-            default-checked: root.checked;
-            default-enabled: root.enabled;
+            text: root.field-text;
+            enabled: toggle.checked;
         }
-    }
-    Text {
-        text: root.text;
-        vertical-alignment: center;
-        color: toggle.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-    }
-    TextField {
-        width: root.field-width;
-        label: root.text;
-        text: root.field-text;
-        enabled: toggle.checked;
     }
 }
 

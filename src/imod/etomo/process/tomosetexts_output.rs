@@ -1,7 +1,6 @@
 //! `IMOD/Etomo/src/etomo/process/TomosetextsOutput.java`.
 //!
-//! Parses the output of `b3dtomosetexts`.  The whole unit is translated; nothing in it
-//! reaches an untranslated source unit.
+//! Parses the output of `b3dtomosetexts`.
 #![allow(dead_code)]
 
 use crate::imod::etomo::r#type::image_filename_style::ImageFilenameStyle;

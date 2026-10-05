@@ -19,8 +19,6 @@ use super::menu_button_container::MenuButtonContainer;
 use super::menu_item::MenuItem;
 use super::multi_line_button::{MultiLineButton, MultiLineButtonVirtual};
 use crate::imod::etomo::jdk::{ActionEvent, JComponent, MouseEvent};
-// TODO(unit): needs etomo/type/ActionElement.java - `interface ActionElement {
-// String getActionCommand(); }`.
 use crate::imod::etomo::r#type::action_element::ActionElement;
 use crate::imod::etomo::r#type::dialog_type::DialogType;
 

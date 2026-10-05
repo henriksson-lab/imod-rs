@@ -17,9 +17,3 @@ pub trait TrialTiltDisplay: TiltDisplay {
     /// Java `addTrialTomogramName(String)`.
     fn add_trial_tomogram_name(&self, trial_tomogram_name: Option<&str>);
 }
-
-
-
-// TODO(unit): TrialTiltPanel.java implements TrialTiltDisplay; the Rust
-// `trial_tilt_panel.rs` reads local `TrialTiltParam`/`SplittiltParam`
-// boundaries rather than the comscript `TiltParam`/`SplittiltParam`.

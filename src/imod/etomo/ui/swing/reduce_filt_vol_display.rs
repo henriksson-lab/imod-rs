@@ -13,6 +13,3 @@ pub trait ReduceFiltVolDisplay {
         do_validation: bool,
     ) -> Result<bool, FortranInputSyntaxException>;
 }
-
-// TODO(unit): SqueezeVolPanel.java implements ReduceFiltVolDisplay; the Rust
-// `squeeze_vol_panel.rs` takes an explicit manager and a boundary param.

@@ -249,6 +249,8 @@ export component JTextArea inherits Rectangle {
 export component JTabbedPane inherits VerticalLayout {
     in property <[string]> tabs;
     in property <int> current-tab: 0;
+    // Rust-only wiring: a press on tab `index` (`JTabbedPane.setSelectedIndex`).
+    callback tab-pressed(int);
     spacing: 0px;
     HorizontalLayout {
         spacing: 2px;
@@ -267,6 +269,7 @@ export component JTabbedPane inherits VerticalLayout {
                     font-size: EtomoStyle.font-size-pt * 1px;
                 }
             }
+            TouchArea { clicked => { root.tab-pressed(index); } }
         }
     }
     @children

@@ -1,7 +1,7 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/HighlightList.java`.
 //!
 //! A vertical list of labels, one of which is shown selected (in a highlight
-//! colour).  Mouse events are not modelled by the Swing stand-in.
+//! colour).
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -96,9 +96,10 @@ impl HighlightList {
     }
 
     /// Java `addMouseListener(MouseListener)`.
-    pub fn add_mouse_listener(&self, _listener: Rc<dyn MouseListener>) {
-        // Swing mouse events: panel.addMouseListener(listener) and
-        // labels[i].addMouseListener(listener) for every label - mouse events are not
-        // modelled by the Swing stand-in.
+    pub fn add_mouse_listener(&self, listener: Rc<dyn MouseListener>) {
+        self.panel.add_mouse_listener(listener.clone());
+        for label in &self.labels {
+            label.add_mouse_listener(listener.clone());
+        }
     }
 }

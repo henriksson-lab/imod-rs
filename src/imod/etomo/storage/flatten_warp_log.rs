@@ -6,9 +6,9 @@
 
 use std::cell::RefCell;
 
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::const_etomo_number::java_lang_string_trim;
 use crate::imod::etomo::r#type::process_name::ProcessName;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 
 /// Java `public final class FlattenWarpLog implements Loggable`.
 pub struct FlattenWarpLog {

@@ -24,16 +24,17 @@ use std::time::Duration;
 use super::etched_border::EtchedBorder;
 use super::etomo_logger::EtomoLogger;
 use super::etomo_panel::EtomoPanel;
-use super::log_interface::{
-    BadLocationException, FileReaderRef, FileWriterRef, LogInterface, Loggable,
-};
+use super::log_interface::{BadLocationException, LogInterface};
 use super::menu::Menu;
 use super::menu_item::MenuItem;
 use super::ui_harness;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::jdk::{ActionEvent, Dimension, JComponent, Point};
+use crate::imod::etomo::storage::file_reader::FileReaderRef;
+use crate::imod::etomo::storage::file_writer::FileWriterRef;
 use crate::imod::etomo::storage::log_file::{Handle, LogFile, LogFileError, WriterId};
+use crate::imod::etomo::storage::loggable::Loggable;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::base_meta_data::BaseMetaData;
 use crate::imod::etomo::r#type::etomo_boolean2::EtomoBoolean2;

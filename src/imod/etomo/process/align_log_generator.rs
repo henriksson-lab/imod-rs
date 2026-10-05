@@ -7,9 +7,9 @@ use super::system_program::SystemProgram;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::etomo_director;
 use crate::imod::etomo::storage::log_file::LogFileError;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::process_name::ProcessName;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use std::io::Write;
 
 /// Java `ERROR_LOG_NAME`.
@@ -29,9 +29,6 @@ pub enum Mode {
 }
 
 /// Java `AlignLogGenerator implements Loggable`.
-// TODO(unit): needs etomo/storage/Loggable.java - the interface
-// (`getLogMessage`, `getName`) this class implements; the two methods are
-// translated below as inherent methods.
 pub struct AlignLogGenerator {
     /// Java field `axisID`.
     pub axis_id: AxisID,
@@ -67,7 +64,8 @@ impl AlignLogGenerator {
         align_log_command[0] = Some("python".to_string());
         align_log_command[1] = Some("-u".to_string());
         align_log_command[2] = Some(
-            etomo_director::INSTANCE.get_python_script_path()
+            etomo_director::INSTANCE
+                .get_python_script_path()
                 .as_deref()
                 .unwrap_or("null")
                 .to_string()

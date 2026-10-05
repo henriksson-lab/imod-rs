@@ -52,11 +52,15 @@ export global Colors {
 export component SimpleButton inherits Rectangle {
     in property <string> text;
     in property <bool> enabled: true;
-    height: 26px;
+    // Wired: drawn only while the Swing component shows; it then takes no room.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("bn", root.text, true, EtomoBridge.generation);
+    height: root.shown-visible ? 26px : 0px;
     background: EtomoStyle.panel;
-    border-width: 2px;
+    border-width: root.shown-visible ? 2px : 0px;
     border-color: EtomoStyle.border;
     Text {
+        visible: root.shown-visible;
         text: root.text;
         horizontal-alignment: center;
         vertical-alignment: center;
@@ -65,6 +69,7 @@ export component SimpleButton inherits Rectangle {
     }
     // Wired: `SimpleButton.setName(text)` names it "bn." + the label.
     area := BridgedButton {
+        visible: root.shown-visible;
         kind: "bn";
         label: root.text;
         default-enabled: root.enabled;
@@ -247,6 +252,12 @@ export component ProcessControlPanel inherits Rectangle {
     }
     TouchArea {
         clicked => { EtomoBridge.activated("pcp", root.label); }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                EtomoBridge.context-requested("pcp", root.label,
+                    self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
     }
 }
 
@@ -261,10 +272,14 @@ export component MenuItem inherits Rectangle {
     in property <string> accelerator;
     in property <bool> enabled: true;
     in property <bool> visible-item: true;
+    // Wired: the bridge kind of the translated `EtomoMenu` item with this text:
+    // "mn" under the main frame's menu bar, "fmn" under the showing
+    // `ManagerFrame`'s (the directive editor).
+    in property <string> kind: "mn";
     // Wired: the enabled state of the translated `EtomoMenu` item with this
-    // text (bridge kind "mn").
+    // text.
     property <bool> shown-enabled: EtomoBridge.wired
-        ? EtomoBridge.enabled-value("mn", root.text, root.enabled, EtomoBridge.generation)
+        ? EtomoBridge.enabled-value(root.kind, root.text, root.enabled, EtomoBridge.generation)
         : root.enabled;
     // The Java action command is normally the item text.  The Rust frame uses
     // a stable source-mapped command name instead, so labels can remain
@@ -302,7 +317,7 @@ export component MenuItem inherits Rectangle {
             if root.shown-enabled && root.visible-item {
                 root.activated(root.command);
                 // Wired: click the translated menu item with this text.
-                EtomoBridge.activated("mn", root.text);
+                EtomoBridge.activated(root.kind, root.text);
             }
         }
     }

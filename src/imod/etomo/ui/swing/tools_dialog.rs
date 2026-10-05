@@ -13,15 +13,16 @@ use super::context_menu::ContextMenu;
 use super::etomo_logger::EtomoLogger;
 use super::flatten_volume_panel::FlattenVolumePanel;
 use super::gpu_tilt_test_panel::GpuTiltTestPanel;
-use super::log_interface::{
-    BadLocationException, FileReaderRef, FileWriterRef, LogInterface, Loggable,
-};
+use super::log_interface::{BadLocationException, LogInterface};
 use super::tool_panel::ToolPanel;
 use super::ui_harness;
 use crate::imod::etomo::base_manager::BaseManager;
 use crate::imod::etomo::comscript::const_warp_vol_param::ConstWarpVolParam;
 use crate::imod::etomo::comscript::gpu_tilt_test_param::GpuTiltTestParam;
 use crate::imod::etomo::jdk::{JComponent, MouseEvent};
+use crate::imod::etomo::storage::file_reader::FileReaderRef;
+use crate::imod::etomo::storage::file_writer::FileWriterRef;
+use crate::imod::etomo::storage::loggable::Loggable;
 use crate::imod::etomo::tools_manager::ToolsManager;
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::dialog_type::DialogType;

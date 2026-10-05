@@ -12,16 +12,9 @@
 //! caches lazily from methods the source calls on a shared instance, so the caches are
 //! `Cell`s and those methods take `&self`.  Java overloads carry descriptive suffixes
 //! naming their extra parameters (`contains_axis_template`, `get_value_index`, ...); a
-//! null `DirectiveDef` is `None`.  The class implements `DirectiveFileInterface`, which
-//! has no Rust trait yet, so its methods are inherent.
-// TODO(unit): needs etomo/storage/DirectiveAttribute.java - static `getMatch(Match,
-// DirectiveFile, ReadOnlyAttribute, DirectiveDef, AxisID)`
-// (storage::directive_attribute::get_match(Match, &DirectiveFile, Option<&Attribute>,
-// DirectiveDef, Option<AxisID>) -> Option<AttributeMatch>), `AttributeMatch`
-// (is_empty(), is_override(), is_value(), and `DirectiveValue::get_value`) and `Match`
-// (variants Primary and Secondary).
-// TODO(unit): needs etomo/storage/DirectiveFileInterface.java - the interface this class
-// implements.
+//! null `DirectiveDef` is `None`.  The class implements `DirectiveFileInterface`
+//! (`directive_file_interface.rs`); `DirectiveAttribute`'s `getMatch`,
+//! `AttributeMatch` and `Match` are in `directive_attribute.rs`.
 
 use super::autodoc::attribute::Attribute;
 use super::autodoc::autodoc::Autodoc;

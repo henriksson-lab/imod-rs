@@ -1544,10 +1544,10 @@ impl SetupDialog {
     /// Java private `addListeners()`.
     fn add_listeners(&self) {
         // Mouse adapter for context menu
-        // Swing layout: rootPanel.addMouseListener(new GenericMouseAdapter(this)) -
-        // mouse events are not modelled; the context menu is
-        // `ContextMenu::pop_up_context_menu`.
-        let _ = GenericMouseAdapter::new;
+        let context_menu: Weak<dyn ContextMenu> = self.this.clone();
+        self.root_panel
+            .get_component()
+            .add_mouse_listener(GenericMouseAdapter::new(context_menu));
         let this = self.this.clone();
         // BackupDirectoryActionListener
         self.ftf_backup_directory

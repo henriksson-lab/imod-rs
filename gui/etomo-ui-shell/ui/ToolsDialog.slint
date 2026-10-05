@@ -30,11 +30,13 @@ export component ToolsDialog inherits Rectangle {
     in property <int> tool-type: 0;
     // `toolPanel != null` (`:190`).
     in property <bool> has-tool-panel: true;
+    // Wired: the text of `taTaskLog` (`slint_bridge.rs`).
+    in property <string> task-log;
     background: EtomoStyle.background;
 
     VerticalLayout {
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
 
         // `pnlRoot.add(toolPanel.getComponent())`, only when non-null.
         if root.has-tool-panel && root.tool-type == 0: FlattenVolumePanel {
@@ -46,17 +48,30 @@ export component ToolsDialog inherits Rectangle {
 
         // `scrTaskLog` = new JScrollPane(taTaskLog); taTaskLog.setRows(5),
         // setEditable(false), setLineWrap(true), setWrapStyleWord(true).
-        // Slint has no read-only multi-line text area in this widget
-        // vocabulary, so the log is an empty white, bordered five-row box with
-        // the scroll pane's vertical bar drawn beside it.
+        // Wired, `task-log` is the text `append` (the `EtomoLogger` of this
+        // `LogInterface`) has put in the Swing `JTextArea`; an append on the
+        // event dispatch thread moves the caret to the end, so the scroll
+        // pane follows the last line.
         Rectangle {
-            min-height: EtomoStyle.field-height * 5;
+            height: EtomoStyle.field-height * 5;
             background: EtomoStyle.field-background;
             border-width: 1px;
             border-color: EtomoStyle.border;
             HorizontalLayout {
                 padding: 1px;
-                Rectangle { }
+                task-log-view := Flickable {
+                    viewport-width: self.width;
+                    viewport-height: max(self.height, task-log-text.preferred-height + 6px);
+                    task-log-text := Text {
+                        x: 3px;
+                        y: 3px;
+                        width: task-log-view.width - 6px;
+                        text: root.task-log;
+                        wrap: word-wrap;
+                        color: EtomoStyle.text;
+                        font-size: EtomoStyle.font-size-pt * 1px;
+                    }
+                }
                 Rectangle {
                     width: 14px;
                     background: EtomoStyle.panel;
@@ -65,6 +80,9 @@ export component ToolsDialog inherits Rectangle {
                 }
             }
         }
+    }
+    changed task-log => {
+        task-log-view.viewport-y = min(0px, task-log-view.height - task-log-view.viewport-height);
     }
 }
 

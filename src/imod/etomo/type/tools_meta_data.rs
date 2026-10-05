@@ -108,13 +108,13 @@ impl Storable for ToolsMetaData {
     }
 
     /// Java `load(Properties)`, inherited from `BaseMetaData`.
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         self.load_with_prepend(properties, "");
     }
 
     /// Java `load(Properties, String)`, inherited from `BaseMetaData`
     /// (`canCorrectImageFilenameStyle` is true here).
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         let prepend = self.create_prepend(prepend);
         if self
             .base

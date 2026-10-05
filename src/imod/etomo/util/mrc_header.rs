@@ -4,11 +4,7 @@
 //!
 //! `read(BaseManager)` ([`MRCHeader::read_with_manager`]) runs `$IMOD_DIR/bin/header`
 //! through an `etomo.process.SystemProgram` and parses its output with
-//! [`MRCHeader::read`].  The members that still need `etomo.ui.swing.UIHarness` carry
-//! `TODO(unit)` markers below.  Everything else -
-//! the n'ton table, the constants, the fields, `makeKey`, `pixelEquals`, every getter
-//! that does not return an `ImageOutputFormat`, `parseCommentData`, `paramString`,
-//! `toString`, and the whole nested `CommentData` class - is translated.
+//! [`MRCHeader::read`].
 //!
 //! `parseCommentData` is the part of the unit that is pure string handling, and it is
 //! what the comment-section fields (`binning`, `imageRotation`, `bidir`, `dosym`,
@@ -16,7 +12,11 @@
 //! `tests/etomo_mrc_header_probe.rs`.
 //!
 //! The n'ton table `instances` maps an absolute path to one shared, mutable `MRCHeader`,
-//! so its values are `Rc<RefCell<MRCHeader>>` - what a Java reference is here.
+//! so its values are `Arc<SharedMRCHeader>` - what a Java reference is here.  The
+//! table is `static` in Java and eTomo reads headers from the event thread, process
+//! monitor threads and process-series threads alike, so it is process-global here;
+//! a thread-local table re-ran `header` for every new thread (seen as extra `header`
+//! launches in the whole-tomogram positioning series).
 #![allow(dead_code)]
 
 use crate::imod::etomo::base_manager::BaseManager;
@@ -27,10 +27,36 @@ use crate::imod::etomo::r#type::image_output_format::ImageOutputFormat;
 use crate::imod::etomo::util::file_modified_flag::FileModifiedFlag;
 use crate::imod::etomo::util::utilities::{java_io_file_get_absolute_path, java_lang_string_split};
 use regex::Regex;
-use std::cell::RefCell;
+
+/// The exceptions `read(BaseManager)` throws: `IOException`,
+/// `InvalidParameterException` (etomo.comscript), and the unchecked
+/// `NumberFormatException` of the size and mode parse.  Each carries its message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReadError {
+    Io(String),
+    InvalidParameter(String),
+    NumberFormat(String),
+}
+
+/// `Throwable.getMessage()`.
+impl std::fmt::Display for ReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReadError::Io(message)
+            | ReadError::InvalidParameter(message)
+            | ReadError::NumberFormat(message) => f.write_str(message),
+        }
+    }
+}
+
+/// A caller that handles every exception alike keeps only the message.
+impl From<ReadError> for String {
+    fn from(e: ReadError) -> String {
+        e.to_string()
+    }
+}
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// Java `DEBUG`: `EtomoDirector.INSTANCE.getArguments().isDebug()`, read once when the
 /// class is initialised.
@@ -43,13 +69,28 @@ static DEBUG: LazyLock<bool> = LazyLock::new(|| {
 
 // n'ton member variables
 
-/// Java `instances`, a `Hashtable` keyed by absolute path.  `Hashtable` is synchronized,
-/// which the `Mutex` supplies; the entries are shared references, which the `Rc` supplies.
-/// The `Mutex` cannot hold a non-`Send` `Rc`, so the table is thread-local, which is
-/// where the single-threaded source keeps it in practice.
-type Instances = HashMap<String, Rc<RefCell<MRCHeader>>>;
-thread_local! {
-    static INSTANCES: RefCell<Instances> = RefCell::new(HashMap::new());
+/// Java `instances`, a static `Hashtable` keyed by absolute path.  `Hashtable` is
+/// synchronized, which the `Mutex` supplies; the entries are shared references, which
+/// the `Arc` supplies.
+type Instances = HashMap<String, Arc<SharedMRCHeader>>;
+static INSTANCES: LazyLock<Mutex<Instances>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// A Java reference to an `MRCHeader`.  The object is shared between threads, and its
+/// `synchronized` methods serialise on it; `borrow` and `borrow_mut` take the lock.
+pub struct SharedMRCHeader(RwLock<MRCHeader>);
+
+impl SharedMRCHeader {
+    pub fn borrow(&self) -> RwLockReadGuard<'_, MRCHeader> {
+        self.0
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn borrow_mut(&self) -> RwLockWriteGuard<'_, MRCHeader> {
+        self.0
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 /// Java's `synchronized createInstance` lock, which is on the class, not on `instances`.
 static CREATE_INSTANCE_LOCK: Mutex<()> = Mutex::new(());
@@ -102,19 +143,19 @@ pub struct MRCHeader {
     /// Java field `commentDataVector`.  Each `CommentData` constructor adds itself to it,
     /// and `parseCommentData` walks it; the elements are the same objects as the five
     /// named fields below, so they are shared handles.
-    comment_data_vector: Vec<Rc<RefCell<CommentData>>>,
+    comment_data_vector: Vec<Arc<Mutex<CommentData>>>,
     // When adding a new comment data tag, make sure there is no conflict. Use order of
     // construction to resolve conflicts.
     /// Java field `binning`.
-    binning: Rc<RefCell<CommentData>>,
+    binning: Arc<Mutex<CommentData>>,
     /// Java field `imageRotation`.
-    image_rotation: Rc<RefCell<CommentData>>,
+    image_rotation: Arc<Mutex<CommentData>>,
     /// Java field `bidir`.
-    bidir: Rc<RefCell<CommentData>>,
+    bidir: Arc<Mutex<CommentData>>,
     /// Java field `doseSym`.
-    dose_sym: Rc<RefCell<CommentData>>,
+    dose_sym: Arc<Mutex<CommentData>>,
     /// Java field `feiPixelSize`.
-    fei_pixel_size: Rc<RefCell<CommentData>>,
+    fei_pixel_size: Arc<Mutex<CommentData>>,
 
     /// Java field `xPixelSpacing`, initialised to `Double.NaN`.
     x_pixel_spacing: f64,
@@ -139,7 +180,7 @@ pub struct MRCHeader {
 impl MRCHeader {
     /// Java `MRCHeader(String, File, AxisID)`, the private constructor.
     fn new(file_location: Option<&str>, file: &str, axis_id: Option<AxisID>) -> MRCHeader {
-        let mut comment_data_vector: Vec<Rc<RefCell<CommentData>>> = Vec::new();
+        let mut comment_data_vector: Vec<Arc<Mutex<CommentData>>> = Vec::new();
         let binning = CommentData::new_with_default(
             Some(&mut comment_data_vector),
             "binning",
@@ -200,7 +241,7 @@ impl MRCHeader {
         manager: &'static dyn BaseManager,
         axis_id: Option<AxisID>,
         file_ext: Option<&str>,
-    ) -> Option<Rc<RefCell<MRCHeader>>> {
+    ) -> Option<Arc<SharedMRCHeader>> {
         MRCHeader::get_instance_in_dir(
             manager.get_property_user_dir().as_deref(),
             Some(&java_io_file_get_absolute_path(
@@ -218,7 +259,7 @@ impl MRCHeader {
         manager: &'static dyn BaseManager,
         axis_id: Option<AxisID>,
         file_name: Option<&str>,
-    ) -> Option<Rc<RefCell<MRCHeader>>> {
+    ) -> Option<Arc<SharedMRCHeader>> {
         MRCHeader::get_instance_in_dir(
             manager.get_property_user_dir().as_deref(),
             Some(&java_io_file_get_absolute_path(
@@ -236,13 +277,13 @@ impl MRCHeader {
         manager: &'static dyn BaseManager,
         axis_id: Option<AxisID>,
         file_type: &std::sync::Arc<crate::imod::etomo::r#type::file_type::FileType>,
-    ) -> Option<Rc<RefCell<MRCHeader>>> {
+    ) -> Option<Arc<SharedMRCHeader>> {
         let key_file = crate::imod::etomo::util::utilities::get_file(
             manager.get_property_user_dir().as_deref().unwrap_or("null"),
             file_type.get_file_name(Some(manager), axis_id).as_deref(),
         );
         let key = MRCHeader::make_key(&key_file.to_string_lossy());
-        let mrc_header = INSTANCES.with(|instances| instances.borrow().get(&key).cloned());
+        let mrc_header = INSTANCES.lock().unwrap().get(&key).cloned();
         if mrc_header.is_none() {
             return Some(MRCHeader::create_instance(
                 manager.get_property_user_dir().as_deref(),
@@ -260,14 +301,14 @@ impl MRCHeader {
         file_location: Option<&str>,
         filename: Option<&str>,
         axis_id: Option<AxisID>,
-    ) -> Option<Rc<RefCell<MRCHeader>>> {
+    ) -> Option<Arc<SharedMRCHeader>> {
         let key_file = crate::imod::etomo::util::utilities::get_file(
             file_location.unwrap_or("null"),
             filename,
         );
         let key_file = key_file.to_string_lossy().to_string();
         let key = MRCHeader::make_key(&key_file);
-        let mrc_header = INSTANCES.with(|instances| instances.borrow().get(&key).cloned());
+        let mrc_header = INSTANCES.lock().unwrap().get(&key).cloned();
         if mrc_header.is_none() {
             return Some(MRCHeader::create_instance(
                 file_location,
@@ -283,14 +324,14 @@ impl MRCHeader {
     pub fn get_instance(
         file_path: Option<&str>,
         axis_id: Option<AxisID>,
-    ) -> Option<Rc<RefCell<MRCHeader>>> {
+    ) -> Option<Arc<SharedMRCHeader>> {
         let file_path = match file_path {
             None => return None,
             Some(file_path) => file_path,
         };
         let key_file = file_path.to_string();
         let key = MRCHeader::make_key(&key_file);
-        let mrc_header = INSTANCES.with(|instances| instances.borrow().get(&key).cloned());
+        let mrc_header = INSTANCES.lock().unwrap().get(&key).cloned();
         if mrc_header.is_none() {
             return Some(MRCHeader::create_instance(
                 crate::imod::etomo::util::utilities::java_io_file_get_parent(&key_file).as_deref(),
@@ -309,18 +350,21 @@ impl MRCHeader {
         key: &str,
         file: &str,
         axis_id: Option<AxisID>,
-    ) -> Rc<RefCell<MRCHeader>> {
+    ) -> Arc<SharedMRCHeader> {
         let _guard = CREATE_INSTANCE_LOCK.lock().unwrap();
-        let mrc_header = INSTANCES.with(|instances| instances.borrow().get(key).cloned());
+        let mrc_header = INSTANCES.lock().unwrap().get(key).cloned();
         if let Some(mrc_header) = mrc_header {
             return mrc_header;
         }
-        let mrc_header = Rc::new(RefCell::new(MRCHeader::new(file_location, file, axis_id)));
-        INSTANCES.with(|instances| {
-            instances
-                .borrow_mut()
-                .insert(key.to_string(), Rc::clone(&mrc_header))
-        });
+        let mrc_header = Arc::new(SharedMRCHeader(RwLock::new(MRCHeader::new(
+            file_location,
+            file,
+            axis_id,
+        ))));
+        INSTANCES
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), Arc::clone(&mrc_header));
         mrc_header
     }
 
@@ -341,7 +385,7 @@ impl MRCHeader {
         &mut self,
         manager: Option<&'static dyn BaseManager>,
         std_output: &[String],
-    ) -> Result<bool, String> {
+    ) -> Result<bool, ReadError> {
         // java.util.regex `\s+`
         let whitespace = Regex::new(r"[ \t\n\x0B\x0C\r]+").unwrap();
         let filename = self.filename.clone();
@@ -354,10 +398,10 @@ impl MRCHeader {
             );
         };
         let java_trim = |s: &str| s.trim_matches(|c: char| c <= ' ').to_owned();
-        let parse_int = |token: &str| -> Result<i32, String> {
+        let parse_int = |token: &str| -> Result<i32, ReadError> {
             token
                 .parse::<i32>()
-                .map_err(|_| format!("For input string: \"{}\"", token))
+                .map_err(|_| ReadError::NumberFormat(format!("For input string: \"{}\"", token)))
         };
         let mut pixels_parsed = false;
         for line in std_output {
@@ -379,7 +423,9 @@ impl MRCHeader {
                 }
                 if tokens.len() < (N_SECTIONS_INDEX + 1) as usize {
                     failed();
-                    return Err("Header returned less than three parameters for image size".into());
+                    return Err(ReadError::Io(
+                        "Header returned less than three parameters for image size".into(),
+                    ));
                 }
                 // Integer.parseInt throws NumberFormatException, uncaught here.
                 self.n_columns = parse_int(&tokens[N_COLUMNS_INDEX as usize])?;
@@ -388,10 +434,10 @@ impl MRCHeader {
                     Err(_) => {
                         self.n_rows = -1;
                         failed();
-                        return Err(format!(
+                        return Err(ReadError::NumberFormat(format!(
                             "nRows not set, token is {}",
                             tokens[N_ROWS_INDEX as usize]
-                        ));
+                        )));
                     }
                 }
                 match parse_int(&tokens[N_SECTIONS_INDEX as usize]) {
@@ -401,10 +447,10 @@ impl MRCHeader {
                         eprintln!("java.lang.NumberFormatException: {}", e);
                         self.n_sections = -1;
                         failed();
-                        return Err(format!(
+                        return Err(ReadError::NumberFormat(format!(
                             "nSections not set, token is {}",
                             tokens[N_SECTIONS_INDEX as usize]
-                        ));
+                        )));
                     }
                 }
             }
@@ -415,7 +461,9 @@ impl MRCHeader {
                 let tokens = java_lang_string_split(line, &whitespace);
                 if tokens.len() < 5 {
                     failed();
-                    return Err("Header returned less than one parameter for the mode".into());
+                    return Err(ReadError::Io(
+                        "Header returned less than one parameter for the mode".into(),
+                    ));
                 }
                 self.mode = parse_int(&tokens[4])?;
             }
@@ -425,7 +473,9 @@ impl MRCHeader {
                 let tokens = java_lang_string_split(line, &whitespace);
                 if tokens.len() < 7 {
                     failed();
-                    return Err("Header returned less than three parameters for pixel size".into());
+                    return Err(ReadError::Io(
+                        "Header returned less than three parameters for pixel size".into(),
+                    ));
                 }
                 // PixelsParsed will be set to true if there are no errors parsing
                 // "Pixel Spacing".
@@ -468,11 +518,11 @@ impl MRCHeader {
         //
         // If the pixel sizes are default value scan, use the FEI pixel size in the
         // comment section (if available).
-        if !self.fei_pixel_size.borrow().is_null()
+        if !self.fei_pixel_size.lock().unwrap().is_null()
             && (self.pixel_equals(1.0) || self.pixel_equals(2.0) || self.pixel_equals(4.0))
         {
             // This was function parseFEIPixelSize:
-            let fei = self.fei_pixel_size.borrow().to_string();
+            let fei = self.fei_pixel_size.lock().unwrap().to_string();
             if Self::parse_pixel_spacing(
                 manager,
                 &mut self.x_pixel_size,
@@ -548,11 +598,14 @@ impl MRCHeader {
 
     /// Java `synchronized read(BaseManager)`: runs `ApplicationManager.getIMODBinPath()
     /// + "header"` on the file through a `SystemProgram` and parses its output with
-    /// [`MRCHeader::read`].  `Err` carries the message of the `IOException` or
-    /// `InvalidParameterException` the source throws (callers catch both alike);
-    /// `Ok(false)` is the source's `return false` for a file that does not exist.
-    /// The `NumberFormatException`s of the size parse come back as `Err` too.
-    pub fn read_with_manager(&mut self, manager: &'static dyn BaseManager) -> Result<bool, String> {
+    /// [`MRCHeader::read`].  `Err` carries the `IOException` or
+    /// `InvalidParameterException` the source throws, or the `NumberFormatException`
+    /// of the size parse; `Ok(false)` is the source's `return false` for a file that
+    /// does not exist.
+    pub fn read_with_manager(
+        &mut self,
+        manager: &'static dyn BaseManager,
+    ) -> Result<bool, ReadError> {
         let file = crate::imod::etomo::util::utilities::get_file(
             self.file_location.as_deref().unwrap_or("null"),
             self.filename.as_deref(),
@@ -568,7 +621,7 @@ impl MRCHeader {
             })
             || file.is_dir()
         {
-            return Err("No filename specified".to_owned());
+            return Err(ReadError::Io("No filename specified".to_owned()));
         }
         if !file.exists() {
             if *DEBUG {
@@ -629,10 +682,10 @@ impl MRCHeader {
                     message = message + messages.get(error, i).unwrap_or("null") + "\n";
                 }
                 failed();
-                return Err(format!(
+                return Err(ReadError::InvalidParameter(format!(
                     "{}:{message}",
                     filename.as_deref().unwrap_or("null")
-                ));
+                )));
             }
         }
         // Throw an exception if the file can not be read
@@ -643,17 +696,17 @@ impl MRCHeader {
                 message = message + line + "\n";
             }
             failed();
-            return Err(format!(
+            return Err(ReadError::InvalidParameter(format!(
                 "{}:{message}",
                 filename.as_deref().unwrap_or("null")
-            ));
+            )));
         }
 
         // Parse the output
         let std_output = header.get_std_output().unwrap_or_default();
         if std_output.is_empty() {
             failed();
-            return Err("header returned no data".to_owned());
+            return Err(ReadError::Io("header returned no data".to_owned()));
         }
         self.parse_std_output(Some(manager), &std_output)
     }
@@ -678,12 +731,12 @@ impl MRCHeader {
 
     /// Java `getTwodir`.
     pub fn get_twodir(&self) -> ConstEtomoNumber {
-        self.bidir.borrow().get()
+        self.bidir.lock().unwrap().get()
     }
 
     /// Java `getDoseSym`.
     pub fn get_dose_sym(&self) -> ConstEtomoNumber {
-        self.dose_sym.borrow().get()
+        self.dose_sym.lock().unwrap().get()
     }
 
     /// Java `getNSections`.
@@ -702,7 +755,7 @@ impl MRCHeader {
     /// header has not been read or the image rotation is not available
     /// imageRotation will be null.
     pub fn get_image_rotation(&self) -> ConstEtomoNumber {
-        self.image_rotation.borrow().get()
+        self.image_rotation.lock().unwrap().get()
     }
 
     /// Java `getXPixelSize`.
@@ -732,7 +785,7 @@ impl MRCHeader {
 
     /// Java `getBinning`.  Return the binning found in the header.
     pub fn get_binning(&self) -> String {
-        self.binning.borrow().to_string()
+        self.binning.lock().unwrap().to_string()
     }
 
     /// Java private `parseCommentData`.  Parse all recognized comment data.
@@ -797,9 +850,9 @@ impl MRCHeader {
                 if split_array[i].as_ref().unwrap().is_empty() {
                     continue;
                 }
-                let comment_data = Rc::clone(&self.comment_data_vector[comment_data_index]);
+                let comment_data = Arc::clone(&self.comment_data_vector[comment_data_index]);
                 // Look for comment data. Value is in the next element of splitArray.
-                if !comment_data.borrow().find(split_array[i].as_deref())
+                if !comment_data.lock().unwrap().find(split_array[i].as_deref())
                     || split_array[i + 1].is_none()
                 {
                     continue;
@@ -812,7 +865,7 @@ impl MRCHeader {
                     continue;
                 }
                 // The value is at the beginning of the next element.
-                comment_data.borrow_mut().set(Some(&value_split[0]));
+                comment_data.lock().unwrap().set(Some(&value_split[0]));
             }
         }
     }
@@ -839,14 +892,14 @@ impl MRCHeader {
                 crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string(
                     self.z_pixel_spacing
                 ),
-                self.image_rotation.borrow(),
-                self.binning.borrow(),
+                self.image_rotation.lock().unwrap(),
+                self.binning.lock().unwrap(),
                 match self.axis_id {
                     None => "null".to_string(),
                     Some(axis_id) => axis_id.to_string(),
                 },
-                self.dose_sym.borrow(),
-                self.fei_pixel_size.borrow()
+                self.dose_sym.lock().unwrap(),
+                self.fei_pixel_size.lock().unwrap()
             );
         }
         format!(
@@ -868,14 +921,14 @@ impl MRCHeader {
             crate::imod::etomo::r#type::const_etomo_number::java_lang_double_to_string(
                 self.z_pixel_spacing
             ),
-            self.image_rotation.borrow(),
-            self.binning.borrow(),
+            self.image_rotation.lock().unwrap(),
+            self.binning.lock().unwrap(),
             match self.axis_id {
                 None => "null".to_string(),
                 Some(axis_id) => axis_id.to_string(),
             },
-            self.bidir.borrow(),
-            self.fei_pixel_size.borrow()
+            self.bidir.lock().unwrap(),
+            self.fei_pixel_size.lock().unwrap()
         )
     }
 }
@@ -913,96 +966,96 @@ impl CommentData {
     /// Java `CommentData(Vector<CommentData>, String)`.  Creates an integer comment data
     /// instance.  `commentDataVector` is optional - the instance is added to this vector.
     pub fn new(
-        comment_data_vector: Option<&mut Vec<Rc<RefCell<CommentData>>>>,
+        comment_data_vector: Option<&mut Vec<Arc<Mutex<CommentData>>>>,
         tag: &str,
-    ) -> Rc<RefCell<CommentData>> {
-        let comment_data = Rc::new(RefCell::new(CommentData {
+    ) -> Arc<Mutex<CommentData>> {
+        let comment_data = Arc::new(Mutex::new(CommentData {
             tag: tag.to_string(),
             alt_tag: None,
             value: EtomoNumber::new(),
             name_ends_with_tag: false,
         }));
         if let Some(comment_data_vector) = comment_data_vector {
-            comment_data_vector.push(Rc::clone(&comment_data));
+            comment_data_vector.push(Arc::clone(&comment_data));
         }
         comment_data
     }
 
     /// Java `CommentData(Vector<CommentData>, String, EtomoNumber.Type)`.
     pub fn new_with_type(
-        comment_data_vector: Option<&mut Vec<Rc<RefCell<CommentData>>>>,
+        comment_data_vector: Option<&mut Vec<Arc<Mutex<CommentData>>>>,
         tag: &str,
         r#type: Type,
-    ) -> Rc<RefCell<CommentData>> {
-        let comment_data = Rc::new(RefCell::new(CommentData {
+    ) -> Arc<Mutex<CommentData>> {
+        let comment_data = Arc::new(Mutex::new(CommentData {
             tag: tag.to_string(),
             alt_tag: None,
             value: EtomoNumber::new_with_type(Some(r#type)),
             name_ends_with_tag: false,
         }));
         if let Some(comment_data_vector) = comment_data_vector {
-            comment_data_vector.push(Rc::clone(&comment_data));
+            comment_data_vector.push(Arc::clone(&comment_data));
         }
         comment_data
     }
 
     /// Java `CommentData(Vector<CommentData>, String, EtomoNumber.Type, Integer)`.
     pub fn new_with_default(
-        comment_data_vector: Option<&mut Vec<Rc<RefCell<CommentData>>>>,
+        comment_data_vector: Option<&mut Vec<Arc<Mutex<CommentData>>>>,
         tag: &str,
         r#type: Type,
         default_value: Option<i32>,
-    ) -> Rc<RefCell<CommentData>> {
+    ) -> Arc<Mutex<CommentData>> {
         let mut value = EtomoNumber::new_with_type(Some(r#type));
         if let Some(default_value) = default_value {
             value.set_display_value_int(default_value);
         }
-        let comment_data = Rc::new(RefCell::new(CommentData {
+        let comment_data = Arc::new(Mutex::new(CommentData {
             tag: tag.to_string(),
             alt_tag: None,
             value,
             name_ends_with_tag: false,
         }));
         if let Some(comment_data_vector) = comment_data_vector {
-            comment_data_vector.push(Rc::clone(&comment_data));
+            comment_data_vector.push(Arc::clone(&comment_data));
         }
         comment_data
     }
 
     /// Java `CommentData(Vector<CommentData>, String, EtomoNumber.Type, boolean)`.
     pub fn new_with_name_ends_with_tag(
-        comment_data_vector: Option<&mut Vec<Rc<RefCell<CommentData>>>>,
+        comment_data_vector: Option<&mut Vec<Arc<Mutex<CommentData>>>>,
         tag: &str,
         r#type: Type,
         name_ends_with_tag: bool,
-    ) -> Rc<RefCell<CommentData>> {
-        let comment_data = Rc::new(RefCell::new(CommentData {
+    ) -> Arc<Mutex<CommentData>> {
+        let comment_data = Arc::new(Mutex::new(CommentData {
             tag: tag.to_string(),
             alt_tag: None,
             value: EtomoNumber::new_with_type(Some(r#type)),
             name_ends_with_tag,
         }));
         if let Some(comment_data_vector) = comment_data_vector {
-            comment_data_vector.push(Rc::clone(&comment_data));
+            comment_data_vector.push(Arc::clone(&comment_data));
         }
         comment_data
     }
 
     /// Java `CommentData(Vector<CommentData>, String, String, EtomoNumber.Type)`.
     pub fn new_with_alt_tag(
-        comment_data_vector: Option<&mut Vec<Rc<RefCell<CommentData>>>>,
+        comment_data_vector: Option<&mut Vec<Arc<Mutex<CommentData>>>>,
         tag: &str,
         alt_tag: Option<&str>,
         r#type: Type,
-    ) -> Rc<RefCell<CommentData>> {
-        let comment_data = Rc::new(RefCell::new(CommentData {
+    ) -> Arc<Mutex<CommentData>> {
+        let comment_data = Arc::new(Mutex::new(CommentData {
             tag: tag.to_string(),
             alt_tag: alt_tag.map(|alt_tag| alt_tag.to_string()),
             name_ends_with_tag: false,
             value: EtomoNumber::new_with_type(Some(r#type)),
         }));
         if let Some(comment_data_vector) = comment_data_vector {
-            comment_data_vector.push(Rc::clone(&comment_data));
+            comment_data_vector.push(Arc::clone(&comment_data));
         }
         comment_data
     }

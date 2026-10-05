@@ -56,6 +56,7 @@ use crate::imod::etomo::comscript::processchunks_param::ProcesschunksParam;
 use crate::imod::etomo::comscript::python_info_param::PythonInfoParam;
 use crate::imod::etomo::comscript::tomosnapshot_param;
 use crate::imod::etomo::etomo_director;
+use crate::imod::etomo::process::process_messages::MessagesArray;
 use crate::imod::etomo::storage::log_file::{LogFile, LogFileError};
 use crate::imod::etomo::storage::parameter_store::ParameterStore;
 use crate::imod::etomo::r#type::axis_id::AxisID;
@@ -127,7 +128,7 @@ pub trait BaseProcessManagerHooks: Send + Sync {
         multi_line_messages: bool,
         run_type: Option<RunType>,
         managed_process_data: Option<Arc<Mutex<ProcessData>>>,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
     ) -> Result<String, AxisBusyException> {
         base.processchunks_base(
             axis_id,
@@ -140,6 +141,30 @@ pub trait BaseProcessManagerHooks: Send + Sync {
             multi_line_messages,
             run_type,
             managed_process_data,
+            messages_array,
+        )
+    }
+    /// Java public `reconnectProcesschunks(AxisID, ProcessData, ProcessResultDisplay,
+    /// ProcessSeries, boolean, boolean, List<ProcessMessages>) throws LockException`.
+    #[allow(clippy::too_many_arguments)]
+    fn reconnect_processchunks(
+        &self,
+        base: &'static BaseProcessManager,
+        axis_id: AxisID,
+        process_data: Arc<Mutex<ProcessData>>,
+        process_result_display: Option<ProcessResultDisplayRef>,
+        process_series: Option<ProcessSeriesRef>,
+        multi_line_messages: bool,
+        popup_chunk_warnings: bool,
+        messages_array: Option<MessagesArray>,
+    ) -> Result<bool, LogFileError> {
+        base.reconnect_processchunks_base(
+            axis_id,
+            process_data,
+            process_result_display,
+            process_series,
+            multi_line_messages,
+            popup_chunk_warnings,
             messages_array,
         )
     }
@@ -330,7 +355,11 @@ impl BaseProcessManager {
         IntermittentBackgroundProcess::stop_instance(self.manager, &*param, &*monitor);
     }
 
-    /// Java `xfmodel`.
+    /// Java `xfmodel(XfmodelParam, AxisID, ProcessResultDisplay, ProcessSeries)`.
+    /// `XfmodelParam` is a `CommandDetails`, so Java's overload resolution picks
+    /// `startBackgroundProcess(CommandDetails, AxisID, ProcessResultDisplay,
+    /// ProcessName, ProcessSeries)`: the process carries the param as its process
+    /// details, which `JoinProcessManager.postProcess` reads the output file from.
     pub fn xfmodel(
         &'static self,
         param: Arc<dyn Command + Send + Sync>,
@@ -338,12 +367,15 @@ impl BaseProcessManager {
         process_result_display: Option<ProcessResultDisplayRef>,
         process_series: Option<ProcessSeriesRef>,
     ) -> Result<String, AxisBusyException> {
-        let background_process = self.start_background_process_command_display(
+        let background_process = self.start_background_process_command(
             param,
+            true,
             axis_id,
-            process_result_display,
             Some(ProcessName::XFMODEL),
+            process_result_display,
             process_series,
+            false,
+            true, // POPUP_CHUNK_WARNINGS_DEFAULT
         )?;
         Ok(background_process.get_name())
     }
@@ -361,7 +393,33 @@ impl BaseProcessManager {
         process_series: Option<ProcessSeriesRef>,
         multi_line_messages: bool,
         popup_chunk_warnings: bool,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
+    ) -> Result<bool, LogFileError> {
+        self.hooks().reconnect_processchunks(
+            self,
+            axis_id,
+            process_data,
+            process_result_display,
+            process_series,
+            multi_line_messages,
+            popup_chunk_warnings,
+            messages_array,
+        )
+    }
+
+    /// The base class's `reconnectProcesschunks(AxisID, ProcessData,
+    /// ProcessResultDisplay, ProcessSeries, boolean, boolean, List<ProcessMessages>)`
+    /// body (the virtual call is `reconnect_processchunks`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn reconnect_processchunks_base(
+        &'static self,
+        axis_id: AxisID,
+        process_data: Arc<Mutex<ProcessData>>,
+        process_result_display: Option<ProcessResultDisplayRef>,
+        process_series: Option<ProcessSeriesRef>,
+        multi_line_messages: bool,
+        popup_chunk_warnings: bool,
+        messages_array: Option<MessagesArray>,
     ) -> Result<bool, LogFileError> {
         let _ = messages_array;
         let monitor = {
@@ -489,7 +547,7 @@ impl BaseProcessManager {
         multi_line_messages: bool,
         run_type: Option<RunType>,
         managed_process_data: Option<Arc<Mutex<ProcessData>>>,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
     ) -> Result<String, AxisBusyException> {
         self.hooks().processchunks(
             self,
@@ -522,7 +580,7 @@ impl BaseProcessManager {
         multi_line_messages: bool,
         run_type: Option<RunType>,
         managed_process_data: Option<Arc<Mutex<ProcessData>>>,
-        messages_array: Option<Arc<Mutex<Vec<ProcessMessages>>>>,
+        messages_array: Option<MessagesArray>,
     ) -> Result<String, AxisBusyException> {
         let _ = (run_type, messages_array);
         self.processchunks_monitor(
@@ -657,23 +715,20 @@ impl BaseProcessManager {
         let file = Path::new(absolute_path);
         let dir = file.parent().unwrap_or(Path::new("."));
         if !dir.exists() && std::fs::create_dir_all(dir).is_err() {
-            ui_harness::post_message_dialog(
+            ui_harness::open_message_dialog_from_process(
                 manager,
-                format!("Unable to create {}", dir.display()),
-                "File Error".to_owned(),
+                &format!("Unable to create {}", dir.display()),
+                "File Error",
                 None,
             );
             return;
         }
-        if dir
-            .metadata()
-            .map(|metadata| metadata.permissions().readonly())
-            .unwrap_or(true)
-        {
-            ui_harness::post_message_dialog(
+        // `File.canWrite()`: the access check, not the mode bits.
+        if !crate::imod::etomo::util::utilities::java_io_file_can_write(&dir.to_string_lossy()) {
+            ui_harness::open_message_dialog_from_process(
                 manager,
-                format!("Cannot write to {}", dir.display()),
-                "File Error".to_owned(),
+                &format!("Cannot write to {}", dir.display()),
+                "File Error",
                 None,
             );
             return;
@@ -1455,9 +1510,9 @@ impl BaseProcessManager {
             exit_value != 0 || (end_state.is_some() && end_state != Some(ProcessEndState::Done));
         if failed {
             if let Some(process_messages) = process.get_monitor_process_messages()
-                && !process_messages.is_empty(MessageType::Error)
+                && !process_messages.is_empty(Some(MessageType::Error))
             {
-                ui_harness::post_error_message_dialog(
+                ui_harness::open_error_message_dialog_and_wait(
                     Some(self.manager),
                     process_messages,
                     "Comscript Terminated (1)".to_owned(),
@@ -1525,41 +1580,37 @@ impl BaseProcessManager {
         if end_state != Some(ProcessEndState::FileLockFailure) {
             if exit_value != 0 {
                 let std_error = script.get_std_error();
-                let mut combined_messages = ProcessMessages::get_instance();
+                let mut combined_messages =
+                    ProcessMessages::get_instance(Some(self.manager), axis_id);
                 // Is the last string "Killed"
                 if let Some(std_error) = &std_error
                     && std_error.last().is_some_and(|line| line.trim() == "Killed")
                 {
                     combined_messages.add_message(
                         MessageType::Error,
-                        format!("<html>Terminated: {}", script.get_com_script_name()),
+                        &format!("<html>Terminated: {}", script.get_com_script_name()),
                     );
                 } else {
-                    let messages = {
-                        let messages = script.get_process_messages();
-                        let mut copy = ProcessMessages::get_instance();
-                        copy.add_process_messages(&messages);
-                        copy
-                    };
+                    let messages = script.get_process_messages().clone();
                     combined_messages.add_message(
                         MessageType::Error,
-                        format!("<html>Com script failed: {}", script.get_com_script_name()),
+                        &format!("<html>Com script failed: {}", script.get_com_script_name()),
                     );
                     combined_messages.add_from(
                         MessageType::Error,
-                        "\n<html><U>Log file errors:</U>",
+                        Some("\n<html><U>Log file errors:</U>"),
                         Some(&messages),
                     );
                     combined_messages.add_array(
                         MessageType::Error,
-                        "\n<html><U>Standard error output:</U>",
+                        Some("\n<html><U>Standard error output:</U>"),
                         std_error.as_deref(),
                     );
                 }
                 if end_state != Some(ProcessEndState::Killed)
                     && end_state != Some(ProcessEndState::Paused)
                 {
-                    ui_harness::post_error_message_dialog(
+                    ui_harness::open_error_message_dialog_and_wait(
                         Some(self.manager),
                         combined_messages,
                         "Comscript Terminated (2)".to_owned(),
@@ -1580,10 +1631,9 @@ impl BaseProcessManager {
                 if messages.size(MessageType::Warning) > 0 {
                     messages.add_message(
                         MessageType::Warning,
-                        format!("Com script: {}", script.get_com_script_name()),
+                        &format!("Com script: {}", script.get_com_script_name()),
                     );
-                    let mut copy = ProcessMessages::get_instance();
-                    copy.add_process_messages(&messages);
+                    let copy = messages.clone();
                     ui_harness::post_warning_message_dialog(
                         Some(self.manager),
                         copy,
@@ -1650,33 +1700,33 @@ impl BaseProcessManager {
         }
         if exit_value != 0 {
             let std_error = script.get_std_error();
-            let mut combined_messages = ProcessMessages::get_instance();
+            let mut combined_messages = ProcessMessages::get_instance(Some(self.manager), axis_id);
             // Is the last string "Killed"
             if let Some(std_error) = &std_error
                 && std_error.last().is_some_and(|line| line.trim() == "Killed")
             {
                 combined_messages
-                    .add_message(MessageType::Error, format!("<html>Terminated: {name}"));
+                    .add_message(MessageType::Error, &format!("<html>Terminated: {name}"));
             } else {
                 let messages = script.get_process_messages();
                 combined_messages.add_message(
                     MessageType::Error,
-                    format!("<html>Com script failed: {name}"),
+                    &format!("<html>Com script failed: {name}"),
                 );
                 combined_messages.add_from(
                     MessageType::Error,
-                    "\n<html><U>Log file errors:</U>",
+                    Some("\n<html><U>Log file errors:</U>"),
                     messages.as_ref(),
                 );
                 combined_messages.add_array(
                     MessageType::Error,
-                    "\n<html><U>Standard error output:</U>",
+                    Some("\n<html><U>Standard error output:</U>"),
                     std_error.as_deref(),
                 );
                 combined_messages.add_from_type(
                     MessageType::Error,
                     MessageType::ChunkError,
-                    "<html><U>Chunk errors:</U>",
+                    Some("<html><U>Chunk errors:</U>"),
                     messages.as_ref(),
                 );
             }
@@ -1684,7 +1734,7 @@ impl BaseProcessManager {
             if end_state != Some(ProcessEndState::Killed)
                 && end_state != Some(ProcessEndState::Paused)
             {
-                ui_harness::post_error_message_dialog(
+                ui_harness::open_error_message_dialog_and_wait(
                     Some(self.manager),
                     combined_messages,
                     "Reconnect Terminated".to_owned(),
@@ -1712,7 +1762,7 @@ impl BaseProcessManager {
                 && popup_chunk_warnings
                 && messages.size(MessageType::Warning) > 0
             {
-                messages.add_message(MessageType::Warning, format!("Com script: {name}"));
+                messages.add_message(MessageType::Warning, &format!("Com script: {name}"));
                 ui_harness::post_warning_message_dialog(
                     Some(self.manager),
                     messages,
@@ -1792,8 +1842,8 @@ impl BaseProcessManager {
                 && end_state != Some(ProcessEndState::Paused)
             {
                 match messages {
-                    Some(messages) if !messages.is_empty(MessageType::Error) => {
-                        ui_harness::post_error_message_dialog(
+                    Some(messages) if !messages.is_empty(Some(MessageType::Error)) => {
+                        ui_harness::open_error_message_dialog_and_wait(
                             Some(self.manager),
                             messages,
                             "Reconnect Terminated".to_owned(),
@@ -2371,24 +2421,13 @@ impl BaseProcessManager {
             return;
         };
         if ProcessName::TOMOSNAPSHOT.equals(&command_name) {
-            // `Utilities.findMessageAndOpenDialog(manager, axisID, stdout,
-            // TomosnapshotParam.OUTPUT_LINE, "Tomosnapshot Complete")`: each
-            // matching line in an info dialog, on the event dispatch thread.
-            let manager = self.manager;
-            let axis_id = process.get_axis_id();
             let std_output = process.get_std_output();
             utilities::find_message_and_open_dialog(
+                Some(self.manager),
+                Some(process.get_axis_id()),
                 std_output.as_deref(),
                 tomosnapshot_param::OUTPUT_LINE,
                 "Tomosnapshot Complete",
-                |line, title| {
-                    ui_harness::open_info_message_dialog_from_process(
-                        Some(manager),
-                        line,
-                        title,
-                        Some(axis_id),
-                    )
-                },
             );
         }
     }

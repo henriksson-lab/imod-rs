@@ -175,7 +175,10 @@ pub trait ConstMetaData: Send + Sync {
     fn is_final_aligned_stack_dialog_saved(&self, axis_id: AxisID) -> bool;
 
     /// Java `getTomoGenTrialTomogramNameList`.
-    fn get_tomo_gen_trial_tomogram_name_list(&self, axis_id: AxisID) -> IntKeyList;
+    fn get_tomo_gen_trial_tomogram_name_list(
+        &self,
+        axis_id: AxisID,
+    ) -> std::sync::Arc<std::sync::Mutex<IntKeyList>>;
 
     /// Java `getTrackRaptorUseRawStack`.
     fn get_track_raptor_use_raw_stack(&self) -> bool;

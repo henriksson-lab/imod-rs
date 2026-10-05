@@ -26,6 +26,7 @@ use super::param_utilities;
 use super::process_details::ProcessDetails;
 use super::tiltalign_solution::TiltalignSolution;
 use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::storage::loggable::{Loggable, LoggableException};
 use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::const_etomo_number::{
     ConstEtomoNumber, java_lang_string_matches_whitespace,
@@ -35,7 +36,6 @@ use crate::imod::etomo::r#type::file_key::FileKey;
 use crate::imod::etomo::r#type::file_type::{self, FileType};
 use crate::imod::etomo::r#type::process_name::ProcessName;
 use crate::imod::etomo::r#type::x_tilt_option::XTiltOption;
-use crate::imod::etomo::ui::swing::log_interface::{Loggable, LoggableException};
 use crate::imod::etomo::util::dataset_files;
 use crate::imod::etomo::util::mrc_header::MRCHeader;
 use crate::imod::etomo::util::utilities;
@@ -1372,13 +1372,19 @@ impl ProcessDetails for TiltalignParam {
     fn get_double_value(&self, field: &dyn FieldInterface) -> Option<f64> {
         self.base.get_double_value(field)
     }
-    fn get_hashtable(&self, field: &dyn FieldInterface) -> Option<Vec<(String, String)>> {
+    fn get_hashtable(
+        &self,
+        field: &dyn FieldInterface,
+    ) -> Option<super::process_details::Hashtable> {
         self.base.get_hashtable(field)
     }
     fn get_etomo_number(&self, field: &dyn FieldInterface) -> Option<ConstEtomoNumber> {
         self.base.get_etomo_number(field)
     }
-    fn get_int_key_list(&self, field: &dyn FieldInterface) -> Option<Vec<(i32, String)>> {
+    fn get_int_key_list(
+        &self,
+        field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::int_key_list::IntKeyList> {
         self.base.get_int_key_list(field)
     }
     fn get_string(&self, field: &dyn FieldInterface) -> Option<String> {
@@ -1387,7 +1393,10 @@ impl ProcessDetails for TiltalignParam {
     fn get_string_array(&self, field: &dyn FieldInterface) -> Option<Vec<String>> {
         self.base.get_string_array(field)
     }
-    fn get_iterator_element_list(&self, field: &dyn FieldInterface) -> Option<Vec<i32>> {
+    fn get_iterator_element_list(
+        &self,
+        field: &dyn FieldInterface,
+    ) -> Option<crate::imod::etomo::r#type::iterator_element_list::IteratorElementList> {
         self.base.get_iterator_element_list(field)
     }
 }

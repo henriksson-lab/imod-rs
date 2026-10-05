@@ -15,7 +15,7 @@
 //
 // Appearance only: no callbacks, no state, static defaults everywhere.
 
-import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtomoStyle, EtomoBridge } from "../../etomo-ui-common/ui/widgets.slint";
 import { Colors, SimpleButton, ProcessControlPanel } from "MainWindowWidgets.slint";
 import { AxisProcessPanel } from "AxisProcessPanel.slint";
 
@@ -53,6 +53,18 @@ export component TomogramProcessPanel inherits Rectangle {
     // `showAxisB(true)` hides the panel entirely (`:391-393`).
     in property <string> axis-button-1-text: root.axis-id == "FIRST" ? "Axis B" : "Axis B";
     in property <string> axis-button-2-text: root.axis-id == "FIRST" ? "Both" : "Axis B";
+    property <bool> axis-a-shown: EtomoBridge.wired
+        && EtomoBridge.visible-value("bn", "Axis A", false, EtomoBridge.generation);
+    property <bool> axis-b-shown: EtomoBridge.wired
+        && EtomoBridge.visible-value("bn", "Axis B", false, EtomoBridge.generation);
+    property <bool> both-shown: EtomoBridge.wired
+        && EtomoBridge.visible-value("bn", "Both", false, EtomoBridge.generation);
+    property <bool> shown-axis-buttons: !EtomoBridge.wired
+        || root.axis-a-shown || root.axis-b-shown || root.both-shown;
+    property <string> shown-axis-button-1-text: !EtomoBridge.wired ? root.axis-button-1-text
+        : root.axis-a-shown ? "Axis A" : "Axis B";
+    property <string> shown-axis-button-2-text: !EtomoBridge.wired ? root.axis-button-2-text
+        : root.both-shown ? "Both" : "Axis B";
 
     background: root.panel-background;
 
@@ -70,14 +82,20 @@ export component TomogramProcessPanel inherits Rectangle {
         // ---- axisButtonPanel (`:193`) -----------------------------------
         // Tooltips: `bothAxisTooltip` "See Axis A and B.", `axisATooltip`
         // "See Axis A only.", `axisBTooltip` "See Axis B only." (`:600-605`).
-        if root.show-axis-buttons: HorizontalLayout {
+        // Wired, the two buttons carry the texts `setButton` gave the Swing
+        // `SimpleButton`s, which `SimpleButton.setText` also names them from
+        // ("bn.axis-a", "bn.axis-b", "bn.both"): `axisButton1` is "Axis A" or
+        // "Axis B", `axisButton2` "Both" or "Axis B" (`showAxisA`/`showAxisB`);
+        // the row is drawn while `axisButtonPanel` shows (`showAxisB(true)`
+        // hides it in the B frame when both axes are shown).
+        if root.show-axis-buttons && root.shown-axis-buttons: HorizontalLayout {
             alignment: center;
             spacing: 0px;
-            SimpleButton { text: root.axis-button-1-text; width: 70px; }
+            SimpleButton { text: root.shown-axis-button-1-text; width: 70px; }
             // `FixedDim.x40_y0` normally, `FixedDim.x0_y5` under compact
             // display (`:458-463`) — which also stacks the two buttons.
             Rectangle { width: root.compact-display ? 0px : 40px; }
-            SimpleButton { text: root.axis-button-2-text; width: 70px; }
+            SimpleButton { text: root.shown-axis-button-2-text; width: 70px; }
         }
 
         // `panelProcessSelect.add(Box.createRigidArea(FixedDim.x0_y10))` (`:471`).

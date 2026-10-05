@@ -21,6 +21,14 @@ pub struct DirectiveEditorMetaData {
     root_name: Mutex<Option<String>>,
 }
 
+// Safety: every field is a `Mutex` of owned data or `Copy` except
+// `BaseMetaDataBase`'s `&'static` references.  The manager is `Send + Sync`; the log
+// properties are the manager's log window, which `DirectiveEditorManager` never creates
+// (`createLogWindow` returns null), so the reference is always null.  Same argument as
+// `tools_meta_data.rs`.
+unsafe impl Send for DirectiveEditorMetaData {}
+unsafe impl Sync for DirectiveEditorMetaData {}
+
 impl DirectiveEditorMetaData {
     /// Java `DirectiveEditorMetaData(BaseManager, DirectiveFileType, LogProperties, boolean)`.
     pub fn new(
@@ -75,7 +83,7 @@ impl Storable for DirectiveEditorMetaData {
     }
 
     /// Java inherited `BaseMetaData.load(Properties)`.
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         if self
             .base
             .load_with_created_prepend(properties, self.get_group_key().as_deref())
@@ -85,7 +93,7 @@ impl Storable for DirectiveEditorMetaData {
     }
 
     /// Java inherited `BaseMetaData.load(Properties, String)`.
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         if self
             .base
             .load_with_created_prepend(properties, self.create_prepend(prepend).as_deref())

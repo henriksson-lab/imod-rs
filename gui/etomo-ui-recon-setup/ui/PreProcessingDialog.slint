@@ -30,7 +30,7 @@ export component PreProcessingDialog inherits Rectangle {
         if root.show-dm-convert: BeveledBorder {
             title: "Digital Micrograph Conversion";
             VerticalLayout {
-                spacing: EtomoStyle.gap;
+                spacing: EtomoStyle.row-gap;
                 Text { text: "No digital micrograph files detected:  "; }
                 Rectangle { height: 0px; }
                 // `disableDM2MRC()` also clears and disables this box.
@@ -52,19 +52,19 @@ export component PreProcessingDialog inherits Rectangle {
                 EtchedBorder {
                     title: "Automatic X-ray Replacement";
                     VerticalLayout {
-                        spacing: EtomoStyle.gap;
+                        spacing: EtomoStyle.row-gap;
                         CheckBox { text: "Automatic x-ray replacement"; checked: true; }
-                        LabeledTextField { label: "Peak criterion:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Difference criterion:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Maximum radius:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Extra-large peak criterion:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Extra-large difference criterion:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Maximum radius of extra-large peak:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Grow criterion:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Edge exclusion:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Annulus width:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "XY scan size:"; label-width: 250px; text: ""; }
-                        LabeledTextField { label: "Scan criterion:"; label-width: 250px; text: ""; }
+                        LabeledTextField { label: "Peak criterion:"; text: ""; }
+                        LabeledTextField { label: "Difference criterion:"; text: ""; }
+                        LabeledTextField { label: "Maximum radius:"; text: ""; }
+                        LabeledTextField { label: "Extra-large peak criterion:"; text: ""; }
+                        LabeledTextField { label: "Extra-large difference criterion:"; text: ""; }
+                        LabeledTextField { label: "Maximum radius of extra-large peak:"; text: ""; }
+                        LabeledTextField { label: "Grow criterion:"; text: ""; }
+                        LabeledTextField { label: "Edge exclusion:"; text: ""; }
+                        LabeledTextField { label: "Annulus width:"; text: ""; }
+                        LabeledTextField { label: "XY scan size:"; text: ""; }
+                        LabeledTextField { label: "Scan criterion:"; text: ""; }
                         // `pnlXRayButtons`.  The Java labels come from
                         // `ProcessResultDisplayFactory.findXRays` and from
                         // `btnViewXRayModel`.
@@ -81,26 +81,30 @@ export component PreProcessingDialog inherits Rectangle {
                 // "Manual Pixel Region Replacement" panel header and its body.
                 EtchedBorder {
                     VerticalLayout {
-                        spacing: EtomoStyle.gap;
-                        PanelHeader { title: "Manual Pixel Region Replacement"; }
-                        // `pnlManualReplacementBody`
-                        VerticalLayout {
-                            spacing: EtomoStyle.gap;
-                            CheckBox { text: "Manual replacement"; }
-                            LabeledTextField { label: "All section replacement list: "; label-width: 220px; text: ""; }
-                            LabeledTextField { label: "Line replacement list: "; label-width: 220px; text: ""; }
-                            LabeledTextField { label: "Boundary replacement list: "; label-width: 220px; text: ""; }
-                            // `pnlManualButtons`
-                            HorizontalLayout {
-                                alignment: center;
-                                MultiLineButton { text: "Create Manual Replacement Model"; width: 260px; }
+                        spacing: EtomoStyle.row-gap;
+                        ph-body-22 := PanelHeader { title: "Manual Pixel Region Replacement"; }
+                        // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+                        if ph-body-22.shown-open: VerticalLayout {
+                            spacing: EtomoStyle.row-gap;
+                            // `pnlManualReplacementBody`
+                            VerticalLayout {
+                                spacing: EtomoStyle.row-gap;
+                                CheckBox { text: "Manual replacement"; }
+                                LabeledTextField { label: "All section replacement list: "; text: ""; }
+                                LabeledTextField { label: "Line replacement list: "; text: ""; }
+                                LabeledTextField { label: "Boundary replacement list: "; text: ""; }
+                                // `pnlManualButtons`
+                                HorizontalLayout {
+                                    alignment: center;
+                                    MultiLineButton { text: "Create Manual Replacement Model"; width: 260px; }
+                                }
                             }
                         }
                     }
                 }
 
-                LabeledTextField { label: "Border pixels: "; label-width: 250px; text: ""; }
-                LabeledTextField { label: "Polynomial order: "; label-width: 250px; text: ""; }
+                LabeledTextField { label: "Border pixels: "; text: ""; }
+                LabeledTextField { label: "Polynomial order: "; text: ""; }
                 CheckBox { text: "Include adjacent points"; }
 
                 Rectangle { height: 5px; }
@@ -109,7 +113,7 @@ export component PreProcessingDialog inherits Rectangle {
                 // (`createFixedStack` is `CcdEraserXRaysPanel.ERASE_LABEL`,
                 // `useFixedStack` is `USE_FIXED_STACK_LABEL`).
                 VerticalLayout {
-                    spacing: EtomoStyle.gap;
+                    spacing: EtomoStyle.row-gap;
                     HorizontalLayout {
                         spacing: 20px;
                         alignment: center;
@@ -135,7 +139,7 @@ export component PreProcessingDialog inherits Rectangle {
             MultiLineButton { text: "Cancel"; width: 120px; }
             MultiLineButton { text: "Postpone"; width: 120px; }
             MultiLineButton { text: "Done"; width: 120px; }
-            MultiLineButton { text: "Advanced"; width: 120px; }
+            MultiLineButton { text: "Advanced"; labels: "Advanced|Basic"; width: 120px; }
         }
     }
 }

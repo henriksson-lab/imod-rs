@@ -93,11 +93,15 @@ struct State {
     pc_options_map: Option<PcOptionsMap>,
     /// Java private final field `computerList`: list of computer names.
     computer_list: Vec<String>,
-    /// Java private final field `computerMap`, a `Hashtable`.
+    /// Java private final field `computerMap`, a `Hashtable`.  Its walks (the
+    /// `Network` totals and maximum) do not depend on the order, so a Rust `HashMap`.
     computer_map: HashMap<String, Arc<Node>>,
     /// Java private final field `queueList`.
     queue_list: Vec<String>,
-    /// Java private final field `queueMap`, a `Hashtable`.
+    /// Java private final field `queueMap`, a `Hashtable`.  Its walks (`hasQueues`,
+    /// `hasSecondaryQueues`, `validate`, whose message names no queue, `workaround`,
+    /// whose one message is the same for every queue, and the `Network` totals) do
+    /// not depend on the order, so a Rust `HashMap`.
     queue_map: HashMap<String, Arc<Node>>,
     /// Java private final field `minNice`.
     min_nice: EtomoNumber,
@@ -1031,7 +1035,8 @@ impl CpuAdoc {
 /// sectionType (computer and queue), and each excluded interface mentioned in the
 /// cpu.adoc.  This class does not take the user list into account.
 struct OrListMap {
-    /// Java private field `interfaceTypeSet`: section type + interface.
+    /// Java private field `interfaceTypeSet`: section type + interface.  Its one walk
+    /// ORs values into each member's list, which does not depend on the order.
     interface_type_set: Option<HashSet<String>>,
     /// Java private field `orMap`: key is section type + interface, value is an orList.
     or_map: Option<HashMap<String, [bool; OR_VALUE_TOTAL]>>,

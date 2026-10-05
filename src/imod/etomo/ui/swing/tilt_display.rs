@@ -56,6 +56,3 @@ pub trait TiltDisplay: ProcessDisplay {
     /// Java `setDebug(boolean)`.
     fn set_debug(&self, debug: bool);
 }
-
-// TODO(unit): AbstractTiltPanel.java and ReprojectModelPanel.java implement
-// TiltDisplay; the impls wait for faithful translations of those panels.

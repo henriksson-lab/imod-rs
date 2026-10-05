@@ -1,269 +1,248 @@
 //! `IMOD/Etomo/src/etomo/ui/swing/SphericalSamplingForThetaAndPsiPanel.java`.
 //!
-//! Swing component construction and `BaseManager` message presentation remain
-//! explicit boundaries.  The source unit's selection, field, parameter, and
-//! validation behavior is retained here without introducing a second PEET
-//! controller.
-#![allow(dead_code)]
+//! The PEET dialog's "Spherical Sampling for Theta and Psi" box.  An event dispatch
+//! thread object, created as `Rc<Self>` by
+//! [`SphericalSamplingForThetaAndPsiPanel::get_instance`]; it keeps a weak reference to
+//! its parent.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
-use crate::imod::etomo::ui::field_type::FieldType;
-
-use super::labeled_text_field::{FieldValidationFailedException, LabeledTextField};
-use super::radio_button::{EnumeratedTypeBoundary, RadioButton, RadioButtonGroup};
+use super::abstract_radio_button_model::AbstractRadioButtonModel;
+use super::etched_border::EtchedBorder;
+use super::etomo_panel::EtomoPanel;
+use super::labeled_text_field::LabeledTextField;
+use super::radio_button::{RadioButton, RadioButtonModel};
+use super::radio_button_interface::EnumeratedTypeRef;
 use super::spherical_sampling_for_theta_and_psi_parent::SphericalSamplingForThetaAndPsiParent;
+use super::swing_component::SwingComponent;
+use super::ui_harness;
+use crate::imod::etomo::base_manager::BaseManager;
+use crate::imod::etomo::jdk::{ActionEvent, ActionListener, ButtonGroup, JComponent};
+use crate::imod::etomo::storage::matlab_param::{MatlabParam, SampleSphere};
+use crate::imod::etomo::ui::field::Field;
+use crate::imod::etomo::ui::field_type::FieldType;
+use crate::imod::etomo::ui::shared_strings;
+use crate::imod::etomo::ui::ui_component::UIComponent;
 
-pub const SAMPLE_INTERVAL_LABEL: &str = "Sample interval";
-pub const SAMPLE_SPHERE_LABEL: &str = "Sample sphere";
+/// Java private static final `SAMPLE_INTERVAL_LABEL`.
+const SAMPLE_INTERVAL_LABEL: &str = "Sample interval";
 
-/// Java `MatlabParam.SampleSphere`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SampleSphere {
-    None,
-    Full,
-    Half,
+/// Java package-private `final class SphericalSamplingForThetaAndPsiPanel implements
+/// UIComponent, SwingComponent`.
+pub struct SphericalSamplingForThetaAndPsiPanel {
+    /// Java private final `pnlRoot`.
+    pnl_root: Rc<EtomoPanel>,
+    /// Java private final `bgSampleSphere`.
+    bg_sample_sphere: Rc<ButtonGroup>,
+    /// Java private final `rbSampleSphereNone`.
+    rb_sample_sphere_none: Rc<RadioButton>,
+    /// Java private final `rbSampleSphereFull`.
+    rb_sample_sphere_full: Rc<RadioButton>,
+    /// Java private final `rbSampleSphereHalf`.
+    rb_sample_sphere_half: Rc<RadioButton>,
+    /// Java private final `ltfSampleInterval`.
+    ltf_sample_interval: Rc<LabeledTextField>,
+    /// Java private final `manager`.
+    manager: &'static dyn BaseManager,
+    /// Java private final `parent`.
+    parent: Weak<dyn SphericalSamplingForThetaAndPsiParent>,
+    /// Java `this`.
+    self_ref: Weak<SphericalSamplingForThetaAndPsiPanel>,
 }
 
-impl SampleSphere {
-    /// Java `SampleSphere.toString()`.
-    pub const fn to_string(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Full => "full",
-            Self::Half => "half",
-        }
-    }
-}
-
-/// The `MatlabParam` calls made by this source unit.
-pub trait SphericalSamplingForThetaAndPsiMatlabParam {
-    fn get_sample_sphere(&self) -> SampleSphere;
-    fn get_sample_interval(&self) -> String;
-    fn set_sample_sphere(&mut self, sample_sphere: SampleSphere);
-    fn set_sample_interval(&mut self, sample_interval: String);
-}
-
-/// Java `UIHarness.INSTANCE.openMessageDialog(BaseManager, ...)` boundary.
-pub trait SphericalSamplingForThetaAndPsiManager {
-    fn open_message_dialog(&mut self, message: String, title: &str);
-}
-
-/// Source-visible Swing layout and listener attachment state.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct SphericalSamplingForThetaAndPsiPanelLayout {
-    pub root_box_layout_x_axis: bool,
-    pub root_border_title: Option<String>,
-    pub root_component_order: Vec<String>,
-    pub action_listener_registered: bool,
-}
-
-/// Java final `SphericalSamplingForThetaAndPsiPanel`.
-pub struct SphericalSamplingForThetaAndPsiPanel<
-    M: SphericalSamplingForThetaAndPsiManager,
-    P: SphericalSamplingForThetaAndPsiParent,
-> {
-    pub pnl_root: SphericalSamplingForThetaAndPsiPanelLayout,
-    pub bg_sample_sphere: Rc<RefCell<RadioButtonGroup>>,
-    pub rb_sample_sphere_none: RadioButton,
-    pub rb_sample_sphere_full: RadioButton,
-    pub rb_sample_sphere_half: RadioButton,
-    pub ltf_sample_interval: LabeledTextField,
-    pub manager: M,
-    pub parent: P,
-}
-
-impl<M: SphericalSamplingForThetaAndPsiManager, P: SphericalSamplingForThetaAndPsiParent>
-    SphericalSamplingForThetaAndPsiPanel<M, P>
-{
-    /// Java private constructor.
-    fn new(manager: M, parent: P) -> Self {
-        let bg_sample_sphere = Rc::new(RefCell::new(RadioButtonGroup::new()));
-        Self {
-            pnl_root: SphericalSamplingForThetaAndPsiPanelLayout::default(),
-            rb_sample_sphere_none: RadioButton::new_with_enumerated_type(
-                Some("None".into()),
-                EnumeratedTypeBoundary {
-                    label: "None".into(),
-                    default: true,
-                    value: Some(SampleSphere::None.to_string().into()),
-                },
-                Some(bg_sample_sphere.clone()),
-            ),
-            rb_sample_sphere_full: RadioButton::new_with_enumerated_type(
-                Some("Full sphere".into()),
-                EnumeratedTypeBoundary {
-                    label: "Full sphere".into(),
-                    default: false,
-                    value: Some(SampleSphere::Full.to_string().into()),
-                },
-                Some(bg_sample_sphere.clone()),
-            ),
-            rb_sample_sphere_half: RadioButton::new_with_enumerated_type(
-                Some("Half sphere".into()),
-                EnumeratedTypeBoundary {
-                    label: "Half sphere".into(),
-                    default: false,
-                    value: Some(SampleSphere::Half.to_string().into()),
-                },
-                Some(bg_sample_sphere.clone()),
-            ),
-            bg_sample_sphere,
-            ltf_sample_interval: LabeledTextField::new(
-                FieldType::FloatingPoint,
-                &format!("{SAMPLE_INTERVAL_LABEL} (degrees) : "),
-            ),
-            manager,
-            parent,
-        }
+impl SphericalSamplingForThetaAndPsiPanel {
+    /// Java private `SphericalSamplingForThetaAndPsiPanel(BaseManager,
+    /// SphericalSamplingForThetaAndPsiParent)`, with the field initializers.
+    fn new(
+        manager: &'static dyn BaseManager,
+        parent: Weak<dyn SphericalSamplingForThetaAndPsiParent>,
+    ) -> Rc<SphericalSamplingForThetaAndPsiPanel> {
+        let bg_sample_sphere = ButtonGroup::new();
+        Rc::new_cyclic(|self_ref: &Weak<SphericalSamplingForThetaAndPsiPanel>| {
+            SphericalSamplingForThetaAndPsiPanel {
+                pnl_root: EtomoPanel::new(),
+                rb_sample_sphere_none: RadioButton::new_string_enumerated_type_button_group(
+                    Some("None"),
+                    Some(EnumeratedTypeRef::new(SampleSphere::None)),
+                    Some(&bg_sample_sphere),
+                ),
+                rb_sample_sphere_full: RadioButton::new_string_enumerated_type_button_group(
+                    Some("Full sphere"),
+                    Some(EnumeratedTypeRef::new(SampleSphere::Full)),
+                    Some(&bg_sample_sphere),
+                ),
+                rb_sample_sphere_half: RadioButton::new_string_enumerated_type_button_group(
+                    Some("Half sphere"),
+                    Some(EnumeratedTypeRef::new(SampleSphere::Half)),
+                    Some(&bg_sample_sphere),
+                ),
+                bg_sample_sphere,
+                ltf_sample_interval: LabeledTextField::new_field_type_string(
+                    FieldType::FloatingPoint,
+                    Some(&format!("{SAMPLE_INTERVAL_LABEL} (degrees) : ")),
+                ),
+                manager,
+                parent,
+                self_ref: self_ref.clone(),
+            }
+        })
     }
 
-    /// Java static `getInstance`.
-    pub fn get_instance(manager: M, parent: P) -> Self {
-        let mut instance = Self::new(manager, parent);
+    /// Java static `getInstance(BaseManager, SphericalSamplingForThetaAndPsiParent)`.
+    pub fn get_instance(
+        manager: &'static dyn BaseManager,
+        parent: Weak<dyn SphericalSamplingForThetaAndPsiParent>,
+    ) -> Rc<SphericalSamplingForThetaAndPsiPanel> {
+        let instance = SphericalSamplingForThetaAndPsiPanel::new(manager, parent);
         instance.create_panel();
         instance.set_tooltips();
         instance.add_listeners();
         instance
     }
 
-    /// Java private `addListeners`.
-    fn add_listeners(&mut self) {
-        let _action_listener = SphericalSamplingForThetaAndPsiActionListener::new();
-        self.rb_sample_sphere_none.add_action_listener();
-        self.rb_sample_sphere_full.add_action_listener();
-        self.rb_sample_sphere_half.add_action_listener();
-        self.pnl_root.action_listener_registered = true;
+    /// Java private `addListeners()` with
+    /// `SphericalSamplingForThetaAndPsiActionListener`.
+    fn add_listeners(&self) {
+        let adaptee = self.self_ref.clone();
+        let action_listener: ActionListener = Rc::new(move |event: &ActionEvent| {
+            if let Some(panel) = adaptee.upgrade() {
+                panel.action(event.get_action_command().unwrap_or(""));
+            }
+        });
+        self.rb_sample_sphere_none
+            .add_action_listener(action_listener.clone());
+        self.rb_sample_sphere_full
+            .add_action_listener(action_listener.clone());
+        self.rb_sample_sphere_half
+            .add_action_listener(action_listener);
     }
 
-    /// Java private `createPanel`.
-    fn create_panel(&mut self) {
-        self.ltf_sample_interval.set_preferred_width(60, None);
-        self.pnl_root.root_box_layout_x_axis = true;
-        self.pnl_root.root_border_title = Some(SAMPLE_SPHERE_LABEL.into());
-        self.pnl_root.root_component_order = vec![
-            "FixedDim.x20_y0".into(),
-            "rbSampleSphereNone".into(),
-            "FixedDim.x10_y0".into(),
-            "rbSampleSphereFull".into(),
-            "FixedDim.x10_y0".into(),
-            "rbSampleSphereHalf".into(),
-            "FixedDim.x70_y0".into(),
-            "ltfSampleInterval".into(),
-            "Box.createHorizontalGlue".into(),
-        ];
+    /// Java private `createPanel()`.
+    fn create_panel(&self) {
+        // init
+        self.ltf_sample_interval.set_preferred_width(60);
+        // root (BoxLayout X_AXIS, rigid areas between, horizontal glue at the end)
+        self.pnl_root
+            .set_border(&EtchedBorder::new(Some(shared_strings::SAMPLE_SPHERE_LABEL)).get_border());
+        let root = self.pnl_root.get_component();
+        root.add(&self.rb_sample_sphere_none.get_component());
+        root.add(&self.rb_sample_sphere_full.get_component());
+        root.add(&self.rb_sample_sphere_half.get_component());
+        root.add(&self.ltf_sample_interval.get_container());
     }
 
-    /// Java `getUIComponent`.
-    pub fn get_ui_component(&self) -> &Self {
-        self
-    }
-
-    /// Java `getComponent`; actual Swing `Component` presentation is a GUI boundary.
-    pub fn get_component(&self) -> &SphericalSamplingForThetaAndPsiPanelLayout {
-        &self.pnl_root
-    }
-
-    /// Java `updateDisplay`.
-    pub fn update_display(&mut self) {
+    /// Java package-private `updateDisplay()`.  Called from parent updateDisplay().
+    pub fn update_display(&self) {
         self.ltf_sample_interval
             .set_enabled(!self.rb_sample_sphere_none.is_selected());
     }
 
-    /// Java `isSampleSphereNoneSelected`.
+    /// Java package-private `isSampleSphereNoneSelected()`.
     pub fn is_sample_sphere_none_selected(&self) -> bool {
         self.rb_sample_sphere_none.is_selected()
     }
 
-    /// Java `setParameters(MatlabParam)`.
-    pub fn set_parameters<T: SphericalSamplingForThetaAndPsiMatlabParam>(
-        &mut self,
-        matlab_param: &T,
-    ) {
-        match matlab_param.get_sample_sphere() {
-            SampleSphere::None => self.rb_sample_sphere_none.set_selected(true),
-            SampleSphere::Full => self.rb_sample_sphere_full.set_selected(true),
-            SampleSphere::Half => self.rb_sample_sphere_half.set_selected(true),
+    /// Java package-private `setParameters(MatlabParam)`.  Load data from
+    /// MatlabParamFile.
+    pub fn set_parameters(&self, matlab_param: &MatlabParam) {
+        let sample_sphere = matlab_param.get_sample_sphere(Some(self as &dyn UIComponent));
+        if sample_sphere == SampleSphere::None {
+            self.rb_sample_sphere_none.set_selected_boolean(true);
+        } else if sample_sphere == SampleSphere::Full {
+            self.rb_sample_sphere_full.set_selected_boolean(true);
+        } else if sample_sphere == SampleSphere::Half {
+            self.rb_sample_sphere_half.set_selected_boolean(true);
         }
         self.ltf_sample_interval
-            .set_text(&matlab_param.get_sample_interval());
+            .set_text_string(matlab_param.get_sample_interval().as_deref());
     }
 
-    /// Java `getParameters(MatlabParam, boolean)`.
-    pub fn get_parameters<T: SphericalSamplingForThetaAndPsiMatlabParam>(
-        &self,
-        matlab_param: &mut T,
-        do_validation: bool,
-    ) -> bool {
-        let sample_sphere = if self.rb_sample_sphere_none.is_selected() {
-            SampleSphere::None
-        } else if self.rb_sample_sphere_full.is_selected() {
-            SampleSphere::Full
-        } else if self.rb_sample_sphere_half.is_selected() {
-            SampleSphere::Half
-        } else {
-            // Java dereferences `bgSampleSphere.getSelection()` here.
-            panic!("bgSampleSphere.getSelection() is null")
-        };
-        matlab_param.set_sample_sphere(sample_sphere);
-        match self.ltf_sample_interval.get_text_validated(do_validation) {
-            Ok(sample_interval) => {
-                matlab_param.set_sample_interval(sample_interval);
-                true
-            }
-            Err(FieldValidationFailedException(_)) => false,
+    /// Java package-private `getParameters(MatlabParam, boolean)`.
+    pub fn get_parameters(&self, matlab_param: &mut MatlabParam, do_validation: bool) -> bool {
+        // ((RadioButton.RadioButtonModel) bgSampleSphere.getSelection())
+        // .getEnumeratedType()
+        let selected = self
+            .bg_sample_sphere
+            .get_selection()
+            .and_then(|button| button.get_model())
+            .and_then(|model| {
+                model
+                    .as_any()
+                    .downcast_ref::<RadioButtonModel>()
+                    .and_then(|model| model.get_enumerated_type())
+            })
+            .and_then(|enumerated_type| enumerated_type.downcast_ref::<SampleSphere>().copied());
+        // Fixed in translation: with no radio button selected Java throws
+        // NullPointerException; the sample sphere is left as it is.
+        if let Some(selected) = selected {
+            matlab_param.set_sample_sphere(selected);
         }
+        let Ok(sample_interval) = self.ltf_sample_interval.get_text_boolean(do_validation) else {
+            // catch (FieldValidationFailedException e) { return false; }
+            return false;
+        };
+        matlab_param.set_sample_interval(sample_interval.as_deref());
+        true
     }
 
-    /// Java `reset`.
-    pub fn reset(&mut self) {
+    /// Java package-private `reset()`.  Reset values and set defaults.
+    pub fn reset(&self) {
         self.ltf_sample_interval.clear();
     }
 
-    /// Java `setDefaults`.
-    pub fn set_defaults(&mut self) {
-        self.rb_sample_sphere_none.set_selected(true);
+    /// Java package-private `setDefaults()`.
+    pub fn set_defaults(&self) {
+        self.rb_sample_sphere_none.set_selected_boolean(true);
     }
 
-    /// Java `validateRun`.
-    pub fn validate_run(&mut self) -> bool {
+    /// Java package-private `validateRun()`.  Validate for run.  Pops up error message
+    /// if invalid.
+    pub fn validate_run(&self) -> bool {
+        // spherical sampling for theta and psi:
+        // If full sphere or half sphere is selected, sample interval is required.
         if (self.rb_sample_sphere_full.is_selected() || self.rb_sample_sphere_half.is_selected())
             && self.ltf_sample_interval.is_enabled()
             && self.ltf_sample_interval.is_empty()
         {
-            self.manager.open_message_dialog(
-                format!(
-                    "In {SAMPLE_SPHERE_LABEL}, {SAMPLE_INTERVAL_LABEL} is required when either {} or {} is selected.",
-                    SampleSphere::Full.to_string(),
-                    SampleSphere::Half.to_string(),
-                ),
-                "Entry Error",
-            );
+            ui_harness::with(|harness| {
+                harness.open_message_dialog_base_manager_string_string(
+                    Some(self.manager),
+                    &format!(
+                        "In {}, {SAMPLE_INTERVAL_LABEL} is required when either {} or {} is selected.",
+                        shared_strings::SAMPLE_SPHERE_LABEL,
+                        SampleSphere::Full,
+                        SampleSphere::Half
+                    ),
+                    "Entry Error",
+                )
+            });
             return false;
         }
         true
     }
 
     /// Java private `action(String)`.
-    fn action(&mut self, action_command: &str) {
-        if action_command == self.rb_sample_sphere_none.get_action_command()
-            || action_command == self.rb_sample_sphere_full.get_action_command()
-            || action_command == self.rb_sample_sphere_half.get_action_command()
+    fn action(&self, action_command: &str) {
+        let action_command = Some(action_command);
+        if action_command == self.rb_sample_sphere_none.get_action_command().as_deref()
+            || action_command == self.rb_sample_sphere_full.get_action_command().as_deref()
+            || action_command == self.rb_sample_sphere_half.get_action_command().as_deref()
         {
-            self.parent.update_display(false);
+            if let Some(parent) = self.parent.upgrade() {
+                parent.update_display(false);
+            }
         }
     }
 
-    /// Java private `setTooltips`.
-    fn set_tooltips(&mut self) {
-        self.rb_sample_sphere_none.set_tool_tip_text(Some(
+    /// Java private `setTooltips()`.
+    fn set_tooltips(&self) {
+        self.rb_sample_sphere_none.set_tool_tip_text_string(Some(
             "Use the angular search parameters specified in the Iteration Table for the first iteration.",
         ));
-        self.rb_sample_sphere_full.set_tool_tip_text(Some(
+        self.rb_sample_sphere_full.set_tool_tip_text_string(Some(
             "At the first iteration, perform an optimized search with Theta varying from -90 to 90 degrees and Psi, varying from -180 to 180 degrees. Optimization prevents over-sampling near the poles. Phi Max should be set to 180 degrees.",
         ));
-        self.rb_sample_sphere_half.set_tool_tip_text(Some(
+        self.rb_sample_sphere_half.set_tool_tip_text_string(Some(
             "At the first iteration, perform an optimized search with Theta and Psi both varying from -90 to 90 degrees. Optimization prevents over-sampling near the poles. Phi Max should be set to 180 degrees.",
         ));
         self.ltf_sample_interval.set_tool_tip_text(Some(
@@ -272,135 +251,20 @@ impl<M: SphericalSamplingForThetaAndPsiManager, P: SphericalSamplingForThetaAndP
     }
 }
 
-/// Java private `SphericalSamplingForThetaAndPsiActionListener`.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct SphericalSamplingForThetaAndPsiActionListener;
-
-impl SphericalSamplingForThetaAndPsiActionListener {
-    /// Java private `SphericalSamplingForThetaAndPsiActionListener(...)` constructor.
-    fn new() -> Self {
-        Self
-    }
-
-    /// Java `actionPerformed(ActionEvent)`.
-    pub fn action_performed<
-        M: SphericalSamplingForThetaAndPsiManager,
-        P: SphericalSamplingForThetaAndPsiParent,
-    >(
-        &self,
-        spherical_sampling_for_theta_and_psi_panel: &mut SphericalSamplingForThetaAndPsiPanel<M, P>,
-        action_command: &str,
-    ) {
-        spherical_sampling_for_theta_and_psi_panel.action(action_command);
+impl SwingComponent for SphericalSamplingForThetaAndPsiPanel {
+    /// Java `getComponent()`.
+    fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_component()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[derive(Default)]
-    struct Manager(Vec<(String, String)>);
-    impl SphericalSamplingForThetaAndPsiManager for Manager {
-        fn open_message_dialog(&mut self, message: String, title: &str) {
-            self.0.push((message, title.into()));
-        }
+impl UIComponent for SphericalSamplingForThetaAndPsiPanel {
+    /// Java `getUIComponent()`.
+    fn get_ui_component(&self) -> &dyn SwingComponent {
+        self
     }
 
-    #[derive(Default)]
-    struct Parent(Vec<bool>);
-    impl SphericalSamplingForThetaAndPsiParent for Parent {
-        fn update_display(&mut self, init: bool) {
-            self.0.push(init);
-        }
-    }
-
-    #[derive(Default)]
-    struct Matlab {
-        sample_sphere: Option<SampleSphere>,
-        sample_interval: String,
-    }
-    impl SphericalSamplingForThetaAndPsiMatlabParam for Matlab {
-        fn get_sample_sphere(&self) -> SampleSphere {
-            self.sample_sphere.unwrap_or(SampleSphere::None)
-        }
-        fn get_sample_interval(&self) -> String {
-            self.sample_interval.clone()
-        }
-        fn set_sample_sphere(&mut self, sample_sphere: SampleSphere) {
-            self.sample_sphere = Some(sample_sphere);
-        }
-        fn set_sample_interval(&mut self, sample_interval: String) {
-            self.sample_interval = sample_interval;
-        }
-    }
-
-    #[test]
-    fn creates_source_layout_and_tooltips() {
-        let panel = SphericalSamplingForThetaAndPsiPanel::get_instance(
-            Manager::default(),
-            Parent::default(),
-        );
-        assert!(panel.pnl_root.root_box_layout_x_axis);
-        assert_eq!(
-            panel.pnl_root.root_border_title.as_deref(),
-            Some(SAMPLE_SPHERE_LABEL)
-        );
-        assert_eq!(
-            panel.ltf_sample_interval.text_preferred_size.unwrap().width,
-            60
-        );
-        assert_eq!(
-            panel.rb_sample_sphere_full.radio_button.action_command,
-            None
-        );
-        assert_eq!(
-            panel.rb_sample_sphere_half.get_tooltip(),
-            Some(
-                "<html>At the first iteration, perform an optimized search with Theta and Psi both varying from -90 to 90 degrees. Optimization prevents over-sampling near the poles. Phi Max should be set to 180 degrees."
-            )
-        );
-    }
-
-    #[test]
-    fn routes_parameter_selection_and_validation() {
-        let mut panel = SphericalSamplingForThetaAndPsiPanel::get_instance(
-            Manager::default(),
-            Parent::default(),
-        );
-        panel.rb_sample_sphere_half.set_selected(true);
-        panel.ltf_sample_interval.set_text("4.5");
-        let mut matlab = Matlab::default();
-        assert!(panel.get_parameters(&mut matlab, true));
-        assert_eq!(matlab.sample_sphere, Some(SampleSphere::Half));
-        assert_eq!(matlab.sample_interval, "4.5");
-
-        panel.set_parameters(&Matlab {
-            sample_sphere: Some(SampleSphere::Full),
-            sample_interval: "6".into(),
-        });
-        assert!(panel.rb_sample_sphere_full.is_selected());
-        assert_eq!(panel.ltf_sample_interval.get_text(), "6");
-    }
-
-    #[test]
-    fn validates_only_active_spherical_sampling_and_dispatches_action() {
-        let mut panel = SphericalSamplingForThetaAndPsiPanel::get_instance(
-            Manager::default(),
-            Parent::default(),
-        );
-        panel.rb_sample_sphere_full.set_selected(true);
-        panel.update_display();
-        assert!(!panel.validate_run());
-        assert_eq!(panel.manager.0.len(), 1);
-        assert!(panel.manager.0[0].0.contains("full"));
-
-        let listener = SphericalSamplingForThetaAndPsiActionListener;
-        listener.action_performed(&mut panel, "Full sphere");
-        assert_eq!(panel.parent.0, vec![false]);
-
-        panel.rb_sample_sphere_none.set_selected(true);
-        panel.update_display();
-        assert!(panel.validate_run());
+    fn get_component(&self) -> Rc<JComponent> {
+        self.pnl_root.get_component()
     }
 }

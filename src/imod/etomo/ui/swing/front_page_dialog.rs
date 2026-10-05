@@ -200,8 +200,6 @@ impl FrontPageDialog {
         } else if action_command == self.btn_generic.get_action_command() {
             let _ = etomo_director::INSTANCE.open_generic_parallel(true, Some(self.axis_id));
         } else if action_command == self.btn_peet.get_action_command() {
-            // NEEDS etomo/PeetManager.java's static `isInterfaceAvailable()` as
-            // `PeetManager::is_interface_available() -> bool` (peet_manager.rs).
             if PeetManager::is_interface_available() {
                 let _ =
                     etomo_director::INSTANCE.open_peet_boolean_axis_id(true, Some(self.axis_id));

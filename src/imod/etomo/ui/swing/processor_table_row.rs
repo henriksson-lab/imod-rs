@@ -68,11 +68,6 @@ const DEFAULT_CPUS_SELECTED: i32 = 1;
 /// Java private static final `DUAL_SELECTION_MIN`.
 const DUAL_SELECTION_MIN: i32 = 2;
 
-/// Java `QueueTable.NUMBER_JOBS_LABEL1` (`QueueTable.java:56`).
-// TODO(unit): needs etomo/ui/swing/QueueTable.java - use queue_table::NUMBER_JOBS_LABEL1
-// once that module is faithful; the value is the Java constant.
-const QUEUE_TABLE_NUMBER_JOBS_LABEL1: &str = "# Jobs";
-
 /// The concrete class of Java `cellCPUsSelected` (`instanceof SpinnerCell` /
 /// `FieldCell`).
 #[derive(Clone)]
@@ -600,7 +595,7 @@ impl ProcessorTableRow {
         let header_label1 = if queue_type == Some(QueueType::Node)
             || queue_type == Some(QueueType::NodeWithoutGpu)
         {
-            Some(QUEUE_TABLE_NUMBER_JOBS_LABEL1.to_string())
+            Some(super::queue_table::NUMBER_JOBS_LABEL1.to_string())
         } else {
             self.table().getheader1_number_cpus_title()
         };
@@ -1531,10 +1526,10 @@ impl Storable for ProcessorTableRow {
     fn store_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         self.store_properties_string(properties, prepend);
     }
-    fn load(&self, properties: &BTreeMap<String, String>) {
+    fn load(&self, properties: &mut BTreeMap<String, String>) {
         self.load_properties(properties);
     }
-    fn load_with_prepend(&self, properties: &BTreeMap<String, String>, prepend: &str) {
+    fn load_with_prepend(&self, properties: &mut BTreeMap<String, String>, prepend: &str) {
         self.load_properties_string(properties, prepend);
     }
 }

@@ -5,6 +5,16 @@
 export global EtomoStyle {
     out property <length> field-height: 22px;
     out property <length> gap: 4px;
+    // The spacing of a column (a `VerticalLayout` standing for a Swing
+    // `BoxLayout.Y_AXIS` panel): Swing's BoxLayout puts no space between its
+    // components, so a column's rows touch, and a widget that is not showing
+    // (zero height) takes no room at all -- with a nonzero spacing it would
+    // still leave the spacing on both sides.  Rigid areas are drawn as
+    // explicit spacer rectangles.
+    out property <length> row-gap: 0px;
+    // A check box's or radio button's margin (Swing's `AbstractButton`
+    // margin, 2 pixels on each side), drawn only while it shows.
+    out property <length> button-margin: 2px;
     out property <length> inset: 6px;
     out property <color> background: #d9d9d9;
     out property <color> panel: #d9d9d9;
@@ -14,6 +24,36 @@ export global EtomoStyle {
     out property <color> field-background: #ffffff;
     out property <color> disabled-text: #808080;
     out property <int> font-size-pt: 12;
+}
+
+// One cell of a `BridgedTable` row: the Swing component's position among the
+// table panel's children, its kind ("hc" header cell, "bn" button, "tb"
+// toggle button, "tf" text field, "cb" check box, "rb" radio button, "sp"
+// spinner, "lb" label, "" other), its text (a spinner's value), whether it is
+// enabled, editable and selected, and its GridBag `gridwidth` (0 is
+// REMAINDER, the row's last cell).
+export struct BridgedTableCell {
+    index: int,
+    kind: string,
+    text: string,
+    enabled: bool,
+    editable: bool,
+    selected: bool,
+    span: int,
+}
+
+// One row of a `BridgedTable`: the cells up to and including the one whose
+// `gridwidth` is REMAINDER.
+export struct BridgedTableRow {
+    cells: [BridgedTableCell],
+}
+
+// One entry of the showing `JPopupMenu` (`BridgedPopupMenu`, below): a
+// `JMenuItem`'s text and enabled state, or a `JPopupMenu.Separator`.
+export struct BridgedPopupItem {
+    text: string,
+    enabled: bool,
+    separator: bool,
 }
 
 // The link between the drawn widgets and the translated Swing units in
@@ -44,17 +84,140 @@ export global EtomoBridge {
     pure callback text-value(string /* kind */, string /* label */, string /* default */, int /* generation */) -> string;
     pure callback bool-value(string /* kind */, string /* label */, bool /* default */, int /* generation */) -> bool;
     pure callback enabled-value(string /* kind */, string /* label */, bool /* default */, int /* generation */) -> bool;
+    // Whether the Swing component a widget stands for is showing
+    // (`Component.isShowing()`: it and every ancestor visible, and on the
+    // selected tab of a tabbed pane).  A widget whose component is not showing
+    // -- an advanced-only field in basic mode, a panel the Java hid with
+    // `setVisible(false)`, a body under a closed `PanelHeader`, a widget the
+    // Java does not build in this configuration -- is not drawn and takes no
+    // room (`slint_bridge.rs`, `visible_value`).  Kind "brd" is a panel by its
+    // titled border; "mbo"/"mba"/"mbm" are a `PanelHeader`'s open/close,
+    // advanced/basic and more/less `ExpandButton`s.
+    pure callback visible-value(string /* kind */, string /* label */, bool /* default */, int /* generation */) -> bool;
+    // Tables (`BridgedTable`, below): the rows of the GridBag table named
+    // `table` (the title of its titled border, or the table panel's name), read
+    // from the Swing component tree, and the user acting on cell `index` of that
+    // table (the cell's position among the table panel's children).
+    pure callback table-rows(string /* table */, int /* generation */) -> [BridgedTableRow];
+    callback table-cell-activated(string /* table */, int /* index */);
+    callback table-cell-toggled(string /* table */, int /* index */, bool);
+    callback table-cell-edited(string /* table */, int /* index */, string);
+    // Context menus: a right mouse press on the widget `kind`/`label` (kind
+    // "brd": the panel whose titled border is `label`; kind "": the dialog's
+    // background) at window position (x, y), delivered as Swing delivers a
+    // mouse press (`jdk::dispatch_mouse_pressed`).  The showing `JPopupMenu`
+    // (`ContextPopup`, `Run3dmodMenu`) comes back as `popup-*`, drawn by
+    // `BridgedPopupMenu`; choosing item `index` or pressing outside the menu
+    // reports back.
+    callback context-requested(string /* kind */, string /* label */, length /* x */, length /* y */);
+    in property <bool> popup-shown: false;
+    in property <length> popup-x;
+    in property <length> popup-y;
+    in property <[BridgedPopupItem]> popup-items: [];
+    callback popup-item-chosen(int /* index */);
+    callback popup-cancelled();
+    // A `JFileChooser` the Java adds to a panel (`CleanupPanel`, with
+    // `setControlButtonsAreShown(false)`): the showing one's current
+    // directory, its list (what the chooser accepts: its file filter, file
+    // hiding, selection mode; directories end in "/"), which entries are
+    // selected, the "Files of Type" filters and the current one.  A click
+    // selects an entry (Ctrl toggles it in a multi-selection chooser), a double
+    // click enters a directory, "Up" goes to the parent.
+    pure callback chooser-directory(int /* generation */) -> string;
+    pure callback chooser-entries(int /* generation */) -> [string];
+    pure callback chooser-selected(int /* generation */) -> [bool];
+    pure callback chooser-filters(int /* generation */) -> [string];
+    pure callback chooser-current-filter(int /* generation */) -> int;
+    pure callback chooser-file-name(int /* generation */) -> string;
+    callback chooser-entry-clicked(int /* index */, bool /* control */);
+    callback chooser-entry-entered(int /* index */);
+    callback chooser-filter-chosen(int /* index */);
+    callback chooser-up();
 }
+
+// Rust-only wiring primitive (not a Swing class): an area that reports a right
+// mouse press through `EtomoBridge.context-requested`.  Placed first in a group
+// box so the widgets drawn over it keep their own presses.
+export component ContextArea inherits TouchArea {
+    in property <string> kind: "";
+    in property <string> label: "";
+    pointer-event(event) => {
+        if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+            EtomoBridge.context-requested(root.kind, root.label,
+                self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+        }
+    }
+}
+
+// Rust-only wiring primitive: the showing `JPopupMenu`, drawn over the whole
+// window at the point it was shown.  A press outside the menu cancels it
+// (`BasicPopupMenuUI`'s `MouseGrabber`).
+export component BridgedPopupMenu inherits Rectangle {
+    TouchArea {
+        clicked => { EtomoBridge.popup-cancelled(); }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                EtomoBridge.popup-cancelled();
+            }
+        }
+    }
+    menu := Rectangle {
+        x: min(EtomoBridge.popup-x, root.width - self.width);
+        y: min(EtomoBridge.popup-y, root.height - self.height);
+        // Swing sizes the menu to its widest item; Slint cannot measure a
+        // repeated text's width here, so the menu is wide enough for eTomo's.
+        width: 280px;
+        height: menu-layout.preferred-height;
+        background: EtomoStyle.field-background;
+        border-width: 1px;
+        border-color: EtomoStyle.border;
+        TouchArea { }
+        menu-layout := VerticalLayout {
+            width: parent.width;
+            padding: 1px;
+            for item[index] in EtomoBridge.popup-items: Rectangle {
+                height: item.separator ? 5px : EtomoStyle.field-height;
+                background: !item.separator && item.enabled && item-area.has-hover ? EtomoStyle.panel : transparent;
+                if item.separator: Rectangle {
+                    y: 2px;
+                    height: 1px;
+                    background: EtomoStyle.border;
+                }
+                if !item.separator: HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    Text {
+                        text: item.text;
+                        vertical-alignment: center;
+                        color: item.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+                    }
+                }
+                item-area := TouchArea {
+                    enabled: !item.separator && item.enabled;
+                    clicked => { EtomoBridge.popup-item-chosen(index); }
+                }
+            }
+        }
+    }
+}
+
 
 // `BeveledBorder` (`BeveledBorder.java`): a titled, bevelled group box.
 export component BeveledBorder inherits Rectangle {
     in property <string> title;
+    // Wired: false while the titled panel is not showing (`visible-value`
+    // "brd"); the box then takes no room.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.title == ""
+        || EtomoBridge.visible-value("brd", root.title, true, EtomoBridge.generation);
     background: EtomoStyle.panel;
-    border-width: 1px;
+    border-width: root.shown-visible ? 1px : 0px;
     border-color: EtomoStyle.border;
-    VerticalLayout {
+    height: root.shown-visible ? beveled-layout.preferred-height : 0px;
+    ContextArea { kind: "brd"; label: root.title; visible: root.shown-visible; }
+    beveled-layout := VerticalLayout {
+        visible: root.shown-visible;
         padding: EtomoStyle.inset;
-        spacing: EtomoStyle.gap;
+        spacing: EtomoStyle.row-gap;
         if title != "": Text {
             text: title;
             font-size: EtomoStyle.font-size-pt * 1px;
@@ -65,36 +228,114 @@ export component BeveledBorder inherits Rectangle {
     }
 }
 
-// `PanelHeader` (`PanelHeader.java`): the open/close header strip above a panel.
+// `PanelHeader` (`PanelHeader.java`): the header strip above a panel.  The
+// constructor (`:131-214`) lays out `northPanel` as a GridBag row: the
+// open/close `ExpandButton` (when `openClose`), the title `HeaderCell`
+// (weightx 1), the advanced/basic `ExpandButton` (when `advancedBasic`), the
+// more/less `ExpandButton` (when `moreLess`), and a 23-pixel rigid area when
+// there is neither of the last two.  All three buttons are named
+// "mb." + the title.  Wired, each button is drawn only when the translated
+// header built it, with the text it carries (`ExpandButton.Type`'s symbols:
+// "-"/"+" open/close, "B"/"A" advanced/basic, "<"/">" more/less), and a press
+// clicks it.  `open` is the open/close button's state (true when there is
+// none), for the dialog to draw the header's body only while it is open, as
+// the Java's `expand` shows and hides it.
 export component PanelHeader inherits Rectangle {
     in property <string> title;
+    // The title the header is named from, when `setText` later changes the
+    // drawn one (`BatchRunTomoDatasetDialog`'s row instance: named "Global
+    // Dataset Values", showing " Dataset Values").
+    in property <string> name-label: root.title;
     in property <bool> open: true;
-    property <bool> shown-open: EtomoBridge.wired
-        ? EtomoBridge.bool-value("mb", root.title, root.open, EtomoBridge.generation)
-        : root.open;
-    height: EtomoStyle.field-height;
+    property <bool> has-open-close: !EtomoBridge.wired
+        || EtomoBridge.visible-value("mbo", root.name-label, true, EtomoBridge.generation);
+    property <string> open-close-text: EtomoBridge.wired
+        ? EtomoBridge.text-value("mbo", root.name-label, root.open ? "-" : "+", EtomoBridge.generation)
+        : (root.open ? "-" : "+");
+    property <bool> has-advanced-basic: EtomoBridge.wired
+        && EtomoBridge.visible-value("mba", root.name-label, false, EtomoBridge.generation);
+    property <string> advanced-basic-text: EtomoBridge.wired
+        ? EtomoBridge.text-value("mba", root.name-label, "A", EtomoBridge.generation) : "A";
+    property <bool> has-more-less: EtomoBridge.wired
+        && EtomoBridge.visible-value("mbm", root.name-label, false, EtomoBridge.generation);
+    property <string> more-less-text: EtomoBridge.wired
+        ? EtomoBridge.text-value("mbm", root.name-label, ">", EtomoBridge.generation) : ">";
+    // Whether the header's body is drawn: the open/close button shows "-"
+    // (`OPEN_EXPANDED_SYMBOL`), or there is no open/close button.
+    out property <bool> shown-open: !root.has-open-close || root.open-close-text == "-";
+    // Wired: false while the header itself is not showing (its panel hidden).
+    out property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("ph", root.name-label, true, EtomoBridge.generation);
+    height: root.shown-visible ? EtomoStyle.field-height : 0px;
     TouchArea {
-        clicked => { EtomoBridge.activated("mb", root.title); }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                EtomoBridge.context-requested("mb", root.name-label,
+                    self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
     }
     background: EtomoStyle.panel;
-    border-width: 1px;
+    border-width: root.shown-visible ? 1px : 0px;
     border-color: EtomoStyle.border;
-    HorizontalLayout {
+    if root.shown-visible: HorizontalLayout {
         padding-left: EtomoStyle.inset;
         padding-right: EtomoStyle.inset;
         spacing: EtomoStyle.gap;
-        alignment: start;
-        Text {
-            text: root.shown-open ? "-" : "+";
-            vertical-alignment: center;
-            color: EtomoStyle.text;
+        if root.has-open-close: Rectangle {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - 18px) / 2;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text {
+                text: root.open-close-text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: EtomoStyle.text;
+            }
+            TouchArea { clicked => { EtomoBridge.activated("mbo", root.name-label); } }
         }
+        // `cellTitle`, a `HeaderCell`: the title centred.
         Text {
             text: root.title;
+            horizontal-alignment: center;
             vertical-alignment: center;
             font-weight: 700;
             color: EtomoStyle.text;
+            horizontal-stretch: 1;
         }
+        if root.has-advanced-basic: Rectangle {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - 18px) / 2;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text {
+                text: root.advanced-basic-text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: EtomoStyle.text;
+            }
+            TouchArea { clicked => { EtomoBridge.activated("mba", root.name-label); } }
+        }
+        if root.has-more-less: Rectangle {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - 18px) / 2;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Text {
+                text: root.more-less-text;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                color: EtomoStyle.text;
+            }
+            TouchArea { clicked => { EtomoBridge.activated("mbm", root.name-label); } }
+        }
+        // `Box.createRigidArea(new Dimension(23, 0))` when there is neither an
+        // advanced/basic nor a more/less button.
+        if !root.has-advanced-basic && !root.has-more-less: Rectangle { width: 23px; }
     }
 }
 
@@ -125,14 +366,34 @@ export component BridgedTextBox inherits Rectangle {
         }
     }
     init => { input.text = root.model-text; }
-    height: EtomoStyle.field-height;
-    background: root.shown-enabled ? EtomoStyle.field-background : EtomoStyle.panel;
-    border-width: 1px;
+    // Wired: false while the Swing field is not showing; the box then takes no
+    // room and its text is not drawn.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.label == ""
+        || EtomoBridge.visible-value(root.kind, root.label, true, EtomoBridge.generation);
+    height: root.shown-visible ? EtomoStyle.field-height : 0px;
+    // A `JTextField` keeps a preferred width where its row does not stretch it.
+    preferred-width: root.shown-visible ? 100px : 0px;
+    background: !root.shown-visible ? transparent
+        : root.shown-enabled ? EtomoStyle.field-background : EtomoStyle.panel;
+    border-width: root.shown-visible ? 1px : 0px;
     border-color: EtomoStyle.border;
+    // A right press on the field: `TextInput` ignores the right button, so the
+    // press falls through to this area below it and reaches the field's mouse
+    // listeners (`LabeledTextField`'s context menu) through the bridge.
+    TouchArea {
+        enabled: root.shown-visible;
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                EtomoBridge.context-requested(root.kind, root.label,
+                    self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
     input := TextInput {
+        visible: root.shown-visible;
         x: 3px;
         width: parent.width - 6px;
-        enabled: root.shown-enabled;
+        enabled: root.shown-enabled && root.shown-visible;
         vertical-alignment: center;
         single-line: true;
         color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
@@ -154,8 +415,18 @@ export component BridgedButton inherits TouchArea {
     out property <bool> shown-enabled: EtomoBridge.wired
         ? EtomoBridge.enabled-value(root.kind, root.label, root.default-enabled, EtomoBridge.generation)
         : root.default-enabled;
-    enabled: root.shown-enabled;
+    // Wired: false while the Swing button is not showing (the widget drawing
+    // it hides itself; this area then takes no press).
+    out property <bool> shown-visible: !EtomoBridge.wired || root.label == ""
+        || EtomoBridge.visible-value(root.kind, root.label, true, EtomoBridge.generation);
+    enabled: root.shown-enabled && root.shown-visible;
     clicked => { EtomoBridge.activated(root.kind, root.label); }
+    pointer-event(event) => {
+        if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+            EtomoBridge.context-requested(root.kind, root.label,
+                self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+        }
+    }
 }
 
 // A check-box/radio-button state area: `checked` is the shown state.
@@ -172,8 +443,17 @@ export component BridgedToggle inherits TouchArea {
     out property <bool> shown-enabled: EtomoBridge.wired
         ? EtomoBridge.enabled-value(root.kind, root.label, root.default-enabled, EtomoBridge.generation)
         : root.default-enabled;
-    enabled: root.shown-enabled;
+    // Wired: false while the Swing check box / radio button is not showing.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.label == ""
+        || EtomoBridge.visible-value(root.kind, root.label, true, EtomoBridge.generation);
+    enabled: root.shown-enabled && root.shown-visible;
     clicked => { EtomoBridge.toggled(root.kind, root.label, root.radio ? true : !root.checked); }
+    pointer-event(event) => {
+        if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+            EtomoBridge.context-requested(root.kind, root.label,
+                self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+        }
+    }
 }
 
 // A drop-down: the selected item, and a popup listing the items.
@@ -182,6 +462,10 @@ export component BridgedComboBox inherits Rectangle {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
+    // An editable `JComboBox` (`ComboBox.getEditableInstance`): the box is a
+    // text entry whose text is committed (`edited`, i.e. `setSelectedItem`)
+    // on Enter or when it loses the focus, as the Swing editor does.
+    in property <bool> editable: false;
     out property <bool> shown-enabled: EtomoBridge.wired
         ? EtomoBridge.enabled-value(root.kind, root.label, root.enabled, EtomoBridge.generation)
         : root.enabled;
@@ -191,17 +475,35 @@ export component BridgedComboBox inherits Rectangle {
     property <[string]> shown-items: EtomoBridge.wired
         ? EtomoBridge.items(root.kind, root.label, EtomoBridge.generation)
         : [];
-    height: EtomoStyle.field-height;
-    background: EtomoStyle.field-background;
-    border-width: 1px;
+    // Wired: false while the Swing combo box is not showing; it then takes no
+    // room.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.label == ""
+        || EtomoBridge.visible-value(root.kind, root.label, true, EtomoBridge.generation);
+    height: root.shown-visible ? EtomoStyle.field-height : 0px;
+    background: root.shown-visible ? EtomoStyle.field-background : transparent;
+    border-width: root.shown-visible ? 1px : 0px;
     border-color: EtomoStyle.border;
     HorizontalLayout {
+        visible: root.shown-visible;
         padding-left: 3px;
-        Text {
+        if !root.editable: Text {
             text: root.shown-text;
             vertical-alignment: center;
             overflow: elide;
             color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+        if root.editable: editor := TextInput {
+            text: root.shown-text;
+            enabled: root.shown-enabled && root.shown-visible;
+            single-line: true;
+            vertical-alignment: center;
+            color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            accepted => { EtomoBridge.edited(root.kind, root.label, self.text); }
+            changed has-focus => {
+                if !self.has-focus {
+                    EtomoBridge.edited(root.kind, root.label, self.text);
+                }
+            }
         }
         Rectangle {
             width: 16px;
@@ -212,7 +514,10 @@ export component BridgedComboBox inherits Rectangle {
         }
     }
     TouchArea {
-        enabled: root.shown-enabled && root.shown-items.length > 0;
+        // Editable: only the arrow opens the list; the text box takes the rest.
+        x: root.editable ? root.width - 19px : 0px;
+        width: root.editable ? 19px : root.width;
+        enabled: root.shown-visible && root.shown-enabled && root.shown-items.length > 0;
         clicked => { popup.show(); }
     }
     popup := PopupWindow {
@@ -242,7 +547,105 @@ export component BridgedComboBox inherits Rectangle {
     }
 }
 
-// `LabeledTextField` (`LabeledTextField.java`): label then entry box.
+// A `JList` in a `JScrollPane` (`setVisibleRowCount`): the list's items, the
+// selected row highlighted, a click selecting a row; it scrolls when it holds
+// more rows than it shows.  Wired with kind "lsx", `label` is the text of the
+// `JLabel` just before the scroll pane in the same panel (an unnamed `JList`:
+// `SettingsDialog.listFontFamily`, after "Font family:"); the selection comes
+// back through `text-value` as the selected index ("-1": none).  Unwired, the
+// static `rows` and `selected`.
+export component BridgedList inherits Rectangle {
+    in property <string> kind: "lsx";
+    in property <string> label;
+    in property <[string]> rows;
+    in property <int> selected: -1;
+    in property <int> visible-rows: 3;
+    property <[string]> shown-rows: EtomoBridge.wired
+        ? EtomoBridge.items(root.kind, root.label, EtomoBridge.generation)
+        : root.rows;
+    property <int> shown-selected: EtomoBridge.wired
+        ? EtomoBridge.text-value(root.kind, root.label, root.selected, EtomoBridge.generation).to-float()
+        : root.selected;
+    height: EtomoStyle.field-height * root.visible-rows + 2px;
+    background: EtomoStyle.field-background;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    HorizontalLayout {
+        padding: 1px;
+        flick := Flickable {
+            viewport-height: EtomoStyle.field-height * root.shown-rows.length;
+            VerticalLayout {
+                alignment: start;
+                for row[index] in root.shown-rows: Rectangle {
+                    height: EtomoStyle.field-height;
+                    background: index == root.shown-selected ? #b8cfe5 : EtomoStyle.field-background;
+                    HorizontalLayout {
+                        padding-left: 3px;
+                        Text {
+                            text: row;
+                            vertical-alignment: center;
+                            color: EtomoStyle.text;
+                        }
+                    }
+                    TouchArea {
+                        clicked => {
+                            if EtomoBridge.wired {
+                                EtomoBridge.selected(root.kind, root.label, index);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The JScrollPane's vertical bar: a thumb over the visible part.
+        Rectangle {
+            width: 14px;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.shown-rows.length > root.visible-rows: Rectangle {
+                x: 2px;
+                width: parent.width - 4px;
+                height: parent.height * root.visible-rows / root.shown-rows.length;
+                y: (parent.height - self.height) * (-flick.viewport-y)
+                    / max(1px, flick.viewport-height - flick.height);
+                background: EtomoStyle.border;
+            }
+        }
+    }
+}
+
+// Rust-only wiring primitive: an unnamed `JLabel` whose text the Java builds at
+// run time (`CpuGpuPanel.lMaxGpus`, ": Maximum number of GPUs recommended is
+// " + the cpu.adoc value; `TrimvolPanel.warning`, "... values have been
+// restored to defaults").  Wired, it shows the showing Swing label whose text
+// starts or ends with `prefix`, the part of it that is fixed (bridge kind
+// "lbp"; several alternatives are separated by "|", for a label the Java sets
+// to unrelated texts), and nothing when there is none.  With `kind: "l"` it is
+// instead an eTomo `Label` named from `prefix` (`Label(String)`,
+// `Label.getNamedInstance`: the name stays when `setText` changes the text);
+// "#N" after either picks the N-th showing match.
+export component BridgedLabel inherits HorizontalLayout {
+    in property <string> kind: "lbp";
+    in property <string> prefix;
+    in property <string> text;
+    in property <color> color: EtomoStyle.text;
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value(root.kind, root.prefix, true, EtomoBridge.generation);
+    if root.shown-visible: Text {
+        text: EtomoBridge.wired
+            ? EtomoBridge.text-value(root.kind, root.prefix, root.text, EtomoBridge.generation)
+            : root.text;
+        vertical-alignment: center;
+        color: root.color;
+    }
+}
+
+// `LabeledTextField` (`LabeledTextField.java`): label then entry box.  The
+// constructor (`:290-295`) lays them out in a `BoxLayout.X_AXIS` panel: the
+// `JLabel` at its preferred width, a rigid area of `hgap` pixels when the
+// constructor got one (0 for every other constructor), then the field, which
+// takes the rest of the row.
 export component LabeledTextField inherits HorizontalLayout {
     // Wired: "#N" when the dialog draws N showing widgets with this label
     // (the A and B axis copies); appended to the bridge label.
@@ -250,27 +653,38 @@ export component LabeledTextField inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
-    in property <length> label-width: 180px;
+    in property <length> hgap: 0px;
+    // The label the Java names the field from, when `setLabel` later changes
+    // the drawn one (`RadialPanel`: named "Standard Gaussian, cutoff: ",
+    // labelled "cutoff: ").
+    in property <string> name-label: root.label;
     property <bool> shown-enabled: EtomoBridge.wired
-        ? EtomoBridge.enabled-value("tf", root.label + root.occurrence, root.enabled, EtomoBridge.generation)
+        ? EtomoBridge.enabled-value("tf", root.name-label + root.occurrence, root.enabled, EtomoBridge.generation)
         : root.enabled;
-    spacing: EtomoStyle.gap;
-    Text {
-        text: root.label;
-        width: root.label-width;
-        vertical-alignment: center;
-        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        font-size: EtomoStyle.font-size-pt * 1px;
-    }
-    BridgedTextBox {
-        kind: "tf";
-        label: root.label + root.occurrence;
-        text: root.text;
-        enabled: root.enabled;
+    // Wired: the field's panel is drawn only while the Swing field shows.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("tf", root.name-label + root.occurrence, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: root.hgap;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            font-size: EtomoStyle.font-size-pt * 1px;
+        }
+        BridgedTextBox {
+            kind: "tf";
+            label: root.name-label + root.occurrence;
+            text: root.text;
+            enabled: root.enabled;
+        }
     }
 }
 
-// `LabeledSpinner` (`LabeledSpinner.java`): label, entry box, up/down arrows.
+// `LabeledSpinner` (`LabeledSpinner.java`): label, entry box, up/down arrows,
+// laid out as `LabeledTextField` (`:196-201`): the label at its preferred
+// width, `hgap` (`getInstance(..., hgap)`, else 0), the spinner.
 export component LabeledSpinner inherits HorizontalLayout {
     // Wired: "#N" when the dialog draws N showing widgets with this label
     // (the A and B axis copies); appended to the bridge label.
@@ -278,37 +692,45 @@ export component LabeledSpinner inherits HorizontalLayout {
     in property <string> label;
     in property <string> text;
     in property <bool> enabled: true;
-    in property <length> label-width: 180px;
-    spacing: EtomoStyle.gap;
-    Text {
-        text: root.label;
-        width: root.label-width;
-        vertical-alignment: center;
-        color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-    }
-    BridgedTextBox {
-        width: 60px;
-        kind: "sp";
-        label: root.label + root.occurrence;
-        text: root.text;
-        enabled: root.enabled;
-    }
-    Rectangle {
-        width: 14px;
-        height: EtomoStyle.field-height;
-        background: EtomoStyle.panel;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        VerticalLayout {
-            Text {
-                text: "^";
-                horizontal-alignment: center;
-                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, true); } }
-            }
-            Text {
-                text: "v";
-                horizontal-alignment: center;
-                TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, false); } }
+    in property <length> hgap: 0px;
+    // Wired: the spinner's panel is drawn only while the Swing spinner shows.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("sp", root.label + root.occurrence, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: root.hgap;
+        Text {
+            text: root.label;
+            horizontal-stretch: 0;
+            vertical-alignment: center;
+            color: root.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+        }
+        // A `JSpinner`'s maximum width is unbounded (`LabeledSpinner.java:207-213`
+        // limits only its height): it keeps this width where its row does not
+        // stretch it.
+        BridgedTextBox {
+            preferred-width: self.shown-visible ? 60px : 0px;
+            kind: "sp";
+            label: root.label + root.occurrence;
+            text: root.text;
+            enabled: root.enabled;
+        }
+        Rectangle {
+            width: 14px;
+            height: EtomoStyle.field-height;
+            background: EtomoStyle.panel;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            VerticalLayout {
+                Text {
+                    text: "^";
+                    horizontal-alignment: center;
+                    TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, true); } }
+                }
+                Text {
+                    text: "v";
+                    horizontal-alignment: center;
+                    TouchArea { clicked => { EtomoBridge.toggled("sp", root.label + root.occurrence, false); } }
+                }
             }
         }
     }
@@ -316,46 +738,78 @@ export component LabeledSpinner inherits HorizontalLayout {
 
 // `CheckBox` (`CheckBox.java`).
 export component CheckBox inherits HorizontalLayout {
+    // A `JCheckBox`'s maximum size is its preferred size: in a row it keeps that
+    // width while the row's text fields take the extra room.
+    horizontal-stretch: 0;
     // Wired: "#N" when the dialog draws N showing widgets with this label
     // (the A and B axis copies); appended to the bridge label.
     in property <string> occurrence;
     in property <string> text;
     in property <bool> checked;
     in property <bool> enabled: true;
+    // The label the Java names the check box from, when its text is set later
+    // (`CpuGpuPanel`: named "Parallel processing", text ending in the CPU
+    // limit from cpu.adoc).  Wired, the drawn text is always the Swing one, so
+    // a text set at run time (`CheckTextField.switchLabels`, `setText`) shows.
+    in property <string> name-label: root.text;
+    property <string> shown-text: EtomoBridge.wired
+        ? EtomoBridge.text-value("cb", root.name-label + root.occurrence, root.text, EtomoBridge.generation)
+        : root.text;
     property <bool> shown-checked: EtomoBridge.wired
-        ? EtomoBridge.bool-value("cb", root.text + root.occurrence, root.checked, EtomoBridge.generation)
+        ? EtomoBridge.bool-value("cb", root.name-label + root.occurrence, root.checked, EtomoBridge.generation)
         : root.checked;
     property <bool> shown-enabled: EtomoBridge.wired
-        ? EtomoBridge.enabled-value("cb", root.text + root.occurrence, root.enabled, EtomoBridge.generation)
+        ? EtomoBridge.enabled-value("cb", root.name-label + root.occurrence, root.enabled, EtomoBridge.generation)
         : root.enabled;
-    spacing: EtomoStyle.gap;
-    alignment: start;
-    Rectangle {
-        width: 13px;
-        height: 13px;
-        y: (parent.height - 13px) / 2;
-        background: EtomoStyle.field-background;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        if root.shown-checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
-        TouchArea {
-            enabled: root.shown-enabled;
-            clicked => { EtomoBridge.toggled("cb", root.text + root.occurrence, !root.shown-checked); }
+    // Wired: drawn only while the Swing check box shows.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("cb", root.name-label + root.occurrence, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        padding: EtomoStyle.button-margin;
+        Rectangle {
+            width: 13px;
+            height: 13px;
+            y: (parent.height - 13px) / 2;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.shown-checked: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+            TouchArea {
+                enabled: root.shown-enabled;
+                clicked => { EtomoBridge.toggled("cb", root.name-label + root.occurrence, !root.shown-checked); }
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                        EtomoBridge.context-requested("cb", root.name-label + root.occurrence,
+                            self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    }
+                }
+            }
         }
-    }
-    Text {
-        text: root.text;
-        vertical-alignment: center;
-        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        TouchArea {
-            enabled: root.shown-enabled;
-            clicked => { EtomoBridge.toggled("cb", root.text + root.occurrence, !root.shown-checked); }
+        Text {
+            text: root.shown-text;
+            vertical-alignment: center;
+            color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            TouchArea {
+                enabled: root.shown-enabled;
+                clicked => { EtomoBridge.toggled("cb", root.name-label + root.occurrence, !root.shown-checked); }
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                        EtomoBridge.context-requested("cb", root.name-label + root.occurrence,
+                            self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    }
+                }
+            }
         }
     }
 }
 
 // `RadioButton` (`RadioButton.java`).
 export component RadioButton inherits HorizontalLayout {
+    // A `JRadioButton`'s maximum size is its preferred size: in a row it keeps that
+    // width while the row's text fields take the extra room.
+    horizontal-stretch: 0;
     // Wired: "#N" when the dialog draws N showing widgets with this label
     // (the A and B axis copies); appended to the bridge label.
     in property <string> occurrence;
@@ -365,37 +819,59 @@ export component RadioButton inherits HorizontalLayout {
     property <bool> shown-selected: EtomoBridge.wired
         ? EtomoBridge.bool-value("rb", root.text + root.occurrence, root.selected, EtomoBridge.generation)
         : root.selected;
+    // Wired, the drawn text is the Swing one (a text set at run time shows).
+    property <string> shown-text: EtomoBridge.wired
+        ? EtomoBridge.text-value("rb", root.text + root.occurrence, root.text, EtomoBridge.generation)
+        : root.text;
     property <bool> shown-enabled: EtomoBridge.wired
         ? EtomoBridge.enabled-value("rb", root.text + root.occurrence, root.enabled, EtomoBridge.generation)
         : root.enabled;
-    spacing: EtomoStyle.gap;
-    alignment: start;
-    Rectangle {
-        width: 13px;
-        height: 13px;
-        y: (parent.height - 13px) / 2;
-        border-radius: 6px;
-        background: EtomoStyle.field-background;
-        border-width: 1px;
-        border-color: EtomoStyle.border;
-        if root.shown-selected: Rectangle {
-            width: 7px;
-            height: 7px;
-            border-radius: 3px;
-            background: EtomoStyle.text;
+    // Wired: drawn only while the Swing radio button shows.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("rb", root.text + root.occurrence, true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: EtomoStyle.gap;
+        alignment: start;
+        padding: EtomoStyle.button-margin;
+        Rectangle {
+            width: 13px;
+            height: 13px;
+            y: (parent.height - 13px) / 2;
+            border-radius: 6px;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            if root.shown-selected: Rectangle {
+                width: 7px;
+                height: 7px;
+                border-radius: 3px;
+                background: EtomoStyle.text;
+            }
+            TouchArea {
+                enabled: root.shown-enabled;
+                clicked => { EtomoBridge.toggled("rb", root.text + root.occurrence, true); }
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                        EtomoBridge.context-requested("rb", root.text + root.occurrence,
+                            self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    }
+                }
+            }
         }
-        TouchArea {
-            enabled: root.shown-enabled;
-            clicked => { EtomoBridge.toggled("rb", root.text + root.occurrence, true); }
-        }
-    }
-    Text {
-        text: root.text;
-        vertical-alignment: center;
-        color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
-        TouchArea {
-            enabled: root.shown-enabled;
-            clicked => { EtomoBridge.toggled("rb", root.text + root.occurrence, true); }
+        Text {
+            text: root.shown-text;
+            vertical-alignment: center;
+            color: root.shown-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            TouchArea {
+                enabled: root.shown-enabled;
+                clicked => { EtomoBridge.toggled("rb", root.text + root.occurrence, true); }
+                pointer-event(event) => {
+                    if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                        EtomoBridge.context-requested("rb", root.text + root.occurrence,
+                            self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                    }
+                }
+            }
         }
     }
 }
@@ -407,20 +883,33 @@ export component MultiLineButton inherits Rectangle {
     in property <string> occurrence;
     in property <string> text;
     in property <bool> enabled: true;
+    // Every label the button can carry ("Advanced|Basic" for the global
+    // expand button, whose name follows its text); the shown text is then the
+    // Swing button's.
+    in property <string> labels: root.text;
+    property <string> bridge-label: root.labels + root.occurrence;
+    property <string> shown-text: EtomoBridge.wired && root.labels != root.text
+        ? EtomoBridge.text-value("bn", root.bridge-label, root.text, EtomoBridge.generation)
+        : root.text;
     property <bool> shown-enabled: EtomoBridge.wired
-        ? EtomoBridge.enabled-value("bn", root.text + root.occurrence, root.enabled, EtomoBridge.generation)
+        ? EtomoBridge.enabled-value("bn", root.bridge-label, root.enabled, EtomoBridge.generation)
         : root.enabled;
     // A toggle-style process button (`MultiLineButton.getToggleButtonInstance`)
     // stays pressed after its process succeeded.
     property <bool> shown-selected: EtomoBridge.wired
-        ? EtomoBridge.bool-value("bn", root.text + root.occurrence, false, EtomoBridge.generation)
+        ? EtomoBridge.bool-value("bn", root.bridge-label, false, EtomoBridge.generation)
         : false;
-    height: 28px;
-    background: root.shown-selected ? EtomoStyle.panel.darker(20%) : EtomoStyle.panel;
-    border-width: 2px;
+    // Wired: drawn only while the Swing button shows; it then takes no room.
+    property <bool> shown-visible: !EtomoBridge.wired
+        || EtomoBridge.visible-value("bn", root.bridge-label, true, EtomoBridge.generation);
+    height: root.shown-visible ? 28px : 0px;
+    background: !root.shown-visible ? transparent
+        : root.shown-selected ? EtomoStyle.panel.darker(20%) : EtomoStyle.panel;
+    border-width: root.shown-visible ? 2px : 0px;
     border-color: EtomoStyle.border;
     Text {
-        text: root.text;
+        visible: root.shown-visible;
+        text: root.shown-text;
         horizontal-alignment: center;
         vertical-alignment: center;
         wrap: word-wrap;
@@ -428,8 +917,14 @@ export component MultiLineButton inherits Rectangle {
         font-weight: 700;
     }
     TouchArea {
-        enabled: root.shown-enabled;
-        clicked => { EtomoBridge.activated("bn", root.text + root.occurrence); }
+        enabled: root.shown-enabled && root.shown-visible;
+        clicked => { EtomoBridge.activated("bn", root.bridge-label); }
+        pointer-event(event) => {
+            if event.button == PointerEventButton.right && event.kind == PointerEventKind.down {
+                EtomoBridge.context-requested("bn", root.bridge-label,
+                    self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
     }
 }
 
@@ -456,6 +951,140 @@ export component TabbedPane inherits VerticalLayout {
                 padding-left: 8px;
                 padding-right: 8px;
                 Text { text: tab; vertical-alignment: center; }
+            }
+        }
+    }
+    @children
+}
+
+// Rust-only wiring (not a Swing class): a GridBag table read from the
+// translated Swing tree, for the dynamic tables (`SectionTablePanel`,
+// `BoundaryTable`, and any other table built from cells laid out with
+// `GridBagLayout`).  `table` is the title of the table's titled border.  The
+// rows, their cells and the cells' state come from `EtomoBridge.table-rows`;
+// a click, toggle or edit goes back to the cell by its index.  Each cell is
+// `cell-width` wide per grid column it spans (the bridge resolves a REMAINDER
+// cell to the columns its row leaves of the widest row).
+export component BridgedTable inherits VerticalLayout {
+    in property <string> table;
+    in property <length> cell-width: 64px;
+    property <[BridgedTableRow]> rows: EtomoBridge.wired
+        ? EtomoBridge.table-rows(root.table, EtomoBridge.generation) : [];
+    spacing: 0px;
+    alignment: start;
+    for row in root.rows: HorizontalLayout {
+        spacing: 0px;
+        alignment: start;
+        for cell in row.cells: Rectangle {
+            width: max(cell.span, 1) * root.cell-width;
+            height: EtomoStyle.field-height;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            background: cell.kind == "hc" || cell.kind == "bn" || cell.kind == "tb"
+                ? (cell.selected ? #a0a0ff : #cccccc)
+                : cell.kind == "tf" || cell.kind == "sp"
+                    ? (cell.enabled && cell.editable ? EtomoStyle.field-background : EtomoStyle.panel)
+                    : EtomoStyle.panel;
+            if cell.kind == "tf" || cell.kind == "sp": TextInput {
+                x: 3px;
+                width: parent.width - 6px;
+                text: cell.text;
+                enabled: cell.enabled && cell.editable;
+                single-line: true;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                font-size: EtomoStyle.font-size-pt * 1px;
+                color: cell.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+                edited => { EtomoBridge.table-cell-edited(root.table, cell.index, self.text); }
+            }
+            if cell.kind == "cb" || cell.kind == "rb": HorizontalLayout {
+                padding-left: 3px;
+                spacing: 3px;
+                Rectangle {
+                    width: 13px;
+                    height: 13px;
+                    y: (parent.height - 13px) / 2;
+                    background: EtomoStyle.field-background;
+                    border-width: 1px;
+                    border-color: EtomoStyle.border;
+                    border-radius: cell.kind == "rb" ? 6px : 0px;
+                    if cell.selected: Text { text: "x"; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Text {
+                    text: cell.text;
+                    vertical-alignment: center;
+                    font-size: EtomoStyle.font-size-pt * 1px;
+                    color: cell.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+                }
+                TouchArea {
+                    enabled: cell.enabled;
+                    clicked => { EtomoBridge.table-cell-toggled(root.table, cell.index, cell.kind == "rb" ? true : !cell.selected); }
+                }
+            }
+            if cell.kind != "tf" && cell.kind != "sp" && cell.kind != "cb" && cell.kind != "rb": Text {
+                x: 3px;
+                width: parent.width - 6px;
+                text: cell.text;
+                horizontal-alignment: cell.kind == "lb" ? left : center;
+                vertical-alignment: center;
+                overflow: elide;
+                font-weight: cell.kind == "hc" ? 700 : 400;
+                font-size: EtomoStyle.font-size-pt * 1px;
+                color: cell.enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+            }
+            if cell.kind == "bn" || cell.kind == "tb" || cell.kind == "hc": TouchArea {
+                enabled: cell.enabled;
+                clicked => {
+                    if cell.kind == "tb" {
+                        EtomoBridge.table-cell-toggled(root.table, cell.index, !cell.selected);
+                    } else {
+                        EtomoBridge.table-cell-activated(root.table, cell.index);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Rust-only wiring: the tab strip of a translated `TabbedPane`, bridged by
+// kind "tbi" and a tab title.  The selected tab and each tab's enabled state
+// are read from the Swing tabbed pane that has a tab of that title; clicking
+// an enabled tab selects it there (Swing's change listeners then move the
+// tab's components).  `shown-current` is the selected index, for showing only
+// the selected tab's body.
+export component BridgedTabbedPane inherits VerticalLayout {
+    in property <[string]> tabs;
+    in property <int> current: 0;
+    out property <int> shown-current: EtomoBridge.wired && root.tabs.length > 0
+        ? EtomoBridge.text-value("tbi", root.tabs[0], root.current, EtomoBridge.generation).to-float()
+        : root.current;
+    // Wired: false while the Swing tabbed pane is not showing (another
+    // tracking method's panel, a dialog part the Java hid); the strip is then
+    // not drawn, and the tab bodies hide themselves.
+    out property <bool> shown-visible: !EtomoBridge.wired || root.tabs.length == 0
+        || EtomoBridge.visible-value("tbi", root.tabs[0], true, EtomoBridge.generation);
+    if root.shown-visible: HorizontalLayout {
+        spacing: 2px;
+        alignment: start;
+        for tab[index] in root.tabs: tab-rect := Rectangle {
+            property <bool> tab-enabled: EtomoBridge.wired
+                ? EtomoBridge.enabled-value("tbi", tab, true, EtomoBridge.generation) : true;
+            height: EtomoStyle.field-height;
+            background: index == root.shown-current ? EtomoStyle.panel : EtomoStyle.background.darker(10%);
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                Text {
+                    text: tab;
+                    vertical-alignment: center;
+                    color: tab-rect.tab-enabled ? EtomoStyle.text : EtomoStyle.disabled-text;
+                }
+            }
+            TouchArea {
+                enabled: tab-rect.tab-enabled;
+                clicked => { EtomoBridge.activated("tbi", tab); }
             }
         }
     }

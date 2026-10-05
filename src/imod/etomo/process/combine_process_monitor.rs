@@ -36,8 +36,10 @@ use crate::imod::etomo::r#type::axis_id::AxisID;
 use crate::imod::etomo::r#type::combine_process_type::CombineProcessType;
 use crate::imod::etomo::r#type::process_end_state::ProcessEndState;
 use crate::imod::etomo::r#type::process_name::ProcessName;
+use crate::imod::etomo::r#type::process_result_display::ProcessResultDisplayHandle;
+use crate::imod::etomo::ui::swing::process_result_display_factory::ProcessResultDisplayFactory;
 use crate::imod::etomo::ui::swing::ui_harness;
-use crate::imod::etomo::util::event_queue;
+use crate::imod::etomo::util::event_queue::{self, EdtRef};
 use crate::imod::etomo::util::utilities;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
@@ -68,9 +70,10 @@ pub struct CombineProcessMonitor {
     self_test: bool,
     /// Java field `combineComscriptState`.
     combine_comscript_state: Arc<CombineComscriptState>,
-    // Java field `displayFactory` (`manager.getProcessResultDisplayFactory(axisID)`).
-    // TODO(unit): held once the faithful ProcessResultDisplayFactory is
-    // integrated; meanwhile the restart displays below are null.
+    /// Java field `displayFactory` (`manager.getProcessResultDisplayFactory(axisID)`).
+    /// The factory's buttons are Swing components, confined to the event
+    /// dispatch thread; the monitor thread reaches them there.
+    display_factory: Arc<EdtRef<ProcessResultDisplayFactory>>,
     /// Java field `manager`.
     manager: &'static ApplicationManager,
     /// Java field `axisID`.
@@ -145,11 +148,17 @@ impl CombineProcessMonitor {
             let busy_status_mediator = manager.get_busy_status_mediator();
             busy_status_mediator.msg_monitor_constructed(axis_id);
             let self_test = etomo_director::ARGUMENTS.lock().unwrap().is_self_test();
+            let display_factory = event_queue::invoke_and_wait(move || {
+                Arc::new(EdtRef::new(
+                    manager.get_process_result_display_factory(axis_id),
+                ))
+            });
             CombineProcessMonitor {
                 emergency_monitor,
                 busy_status_mediator,
                 self_test,
                 combine_comscript_state,
+                display_factory,
                 manager,
                 axis_id,
                 tool_kit,
@@ -293,7 +302,14 @@ impl CombineProcessMonitor {
             *self.child_log_writing_id.lock().unwrap() = Some(child_log.open_for_writing()?);
         }
         if current_command == Some(ProcessName::MATCHVOL1) {
-            next_process_result_display = None /* TODO(unit): displayFactory.get_restart_matchvol1() */;
+            let display_factory = Arc::clone(&self.display_factory);
+            next_process_result_display = Some(event_queue::invoke_and_wait(
+                move || -> ProcessResultDisplayRef {
+                    let display: ProcessResultDisplayHandle =
+                        display_factory.get().get_restart_matchvol1();
+                    Arc::new(EdtRef::new(display))
+                },
+            ));
             self.set_next_process_result_display(next_process_result_display.clone());
             self.manager.show_pane(
                 combine_comscript_state::COMSCRIPT_NAME,
@@ -306,7 +322,14 @@ impl CombineProcessMonitor {
             );
             *self.child_monitor.lock().unwrap() = Some(child);
         } else if current_command == Some(ProcessName::PATCHCORR) {
-            next_process_result_display = None /* TODO(unit): displayFactory.get_restart_patchcorr() */;
+            let display_factory = Arc::clone(&self.display_factory);
+            next_process_result_display = Some(event_queue::invoke_and_wait(
+                move || -> ProcessResultDisplayRef {
+                    let display: ProcessResultDisplayHandle =
+                        display_factory.get().get_restart_patchcorr();
+                    Arc::new(EdtRef::new(display))
+                },
+            ));
             self.set_next_process_result_display(next_process_result_display.clone());
             self.manager.show_pane(
                 combine_comscript_state::COMSCRIPT_NAME,
@@ -319,7 +342,14 @@ impl CombineProcessMonitor {
             );
             *self.child_monitor.lock().unwrap() = Some(child);
         } else if current_command == Some(ProcessName::MATCHORWARP) {
-            next_process_result_display = None /* TODO(unit): displayFactory.get_restart_matchorwarp() */;
+            let display_factory = Arc::clone(&self.display_factory);
+            next_process_result_display = Some(event_queue::invoke_and_wait(
+                move || -> ProcessResultDisplayRef {
+                    let display: ProcessResultDisplayHandle =
+                        display_factory.get().get_restart_matchorwarp();
+                    Arc::new(EdtRef::new(display))
+                },
+            ));
             self.set_next_process_result_display(next_process_result_display.clone());
             self.manager.show_pane(
                 combine_comscript_state::COMSCRIPT_NAME,
@@ -332,7 +362,14 @@ impl CombineProcessMonitor {
             );
             *self.child_monitor.lock().unwrap() = Some(child);
         } else if current_command == Some(ProcessName::VOLCOMBINE) {
-            next_process_result_display = None /* TODO(unit): displayFactory.get_restart_volcombine() */;
+            let display_factory = Arc::clone(&self.display_factory);
+            next_process_result_display = Some(event_queue::invoke_and_wait(
+                move || -> ProcessResultDisplayRef {
+                    let display: ProcessResultDisplayHandle =
+                        display_factory.get().get_restart_volcombine();
+                    Arc::new(EdtRef::new(display))
+                },
+            ));
             self.set_next_process_result_display(next_process_result_display.clone());
             self.manager.show_pane(
                 combine_comscript_state::COMSCRIPT_NAME,

@@ -14,18 +14,6 @@
 //! declaration order, so the first-wins rule of `MAP.put` behaves as in the source.
 //!
 //! `equals` and `hashCode` compare standard keys; see [`DirectiveDef::equals`].
-// TODO(unit): needs etomo/storage/DirectiveFile.java - nested `Module`, `Comfile` and
-// `Command` (storage::directive_file::{Module, Comfile, Command}, associated constants
-// named as in Java, each implementing Display as the Java toString).
-// TODO(unit): needs etomo/storage/DirectiveAttribute.java - nested `Match`
-// (storage::directive_attribute::Match with variants Primary and Secondary).
-// TODO(unit): needs etomo/storage/DirectiveDescrFile.java,
-// etomo/storage/DirectiveDescrElement.java and etomo/storage/DirectiveValueType.java -
-// `DirectiveDescrFile.INSTANCE.get(String)` for `loadDirectiveDescr`
-// (storage::directive_descr_file::INSTANCE.get(Option<&str>) ->
-// Option<DirectiveDescrElement>, element methods get_value_type() ->
-// Option<DirectiveValueType>, is_template(), is_batch(), get_description() ->
-// Option<String>; storage::directive_value_type::DirectiveValueType::Boolean).
 #![allow(dead_code)]
 
 use std::collections::HashMap;

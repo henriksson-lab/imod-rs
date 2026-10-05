@@ -6,14 +6,13 @@
 //! program happens inside `SystemProgram`.
 //!
 //! **The option map's order.**  Java collects the options in a `HashMap` and
-//! writes them in its iteration order, which follows the keys' hash buckets.
-//! Here the map is a vector in insertion order: `overrideParameter`'s
-//! remove-then-put moves a key to the end, and a plain `put` of an existing
-//! key replaces it in place, as `HashMap` does within a bucket.  copytomocoms
-//! reads the lines through PIP, where the order of distinct options has no
-//! effect, so only the order of the lines on its standard input differs.
+//! writes them in its iteration order; the map here is `JavaHashMap`, which
+//! iterates in the same order, so the lines reach copytomocoms's standard input
+//! in the Java's order.
 
 use std::sync::{Arc, MutexGuard};
+
+use crate::imod::etomo::util::java_hash_map::JavaHashMap;
 
 use crate::imod::etomo::application_manager::ApplicationManager;
 use crate::imod::etomo::base_manager::BaseManager;
@@ -170,28 +169,25 @@ impl CopyTomoComs {
 
     /// Java private `overrideParameter(Map, String, String)`.
     fn override_parameter(
-        command_map: &mut Vec<(String, Option<String>)>,
+        command_map: &mut JavaHashMap<String, Option<String>>,
         key: &str,
         value: Option<String>,
     ) {
-        if let Some(index) = command_map.iter().position(|(k, _)| k == key) {
-            command_map.remove(index);
+        if command_map.contains_key(key) {
+            command_map.remove(key);
         }
-        command_map.push((key.to_owned(), value));
+        command_map.insert(key.to_owned(), value);
     }
 
     /// Java private `genOptions`.
     fn gen_options(&mut self) -> bool {
-        // `commandMap.put(key, value)`: replaces an existing key in place.
-        let put = |command_map: &mut Vec<(String, Option<String>)>,
+        // `commandMap.put(key, value)`.
+        let put = |command_map: &mut JavaHashMap<String, Option<String>>,
                    key: String,
                    value: Option<String>| {
-            match command_map.iter_mut().find(|(k, _)| *k == key) {
-                Some(entry) => entry.1 = value,
-                None => command_map.push((key, value)),
-            }
+            command_map.insert(key, value);
         };
-        let mut command_map: Vec<(String, Option<String>)> = Vec::new();
+        let mut command_map: JavaHashMap<String, Option<String>> = JavaHashMap::new();
         // Add options from the directive file collection. This is the main source of
         // parameters for batch processing. For interactive processing, this fills in the
         // parameters that setup dialog doesn't know about. The parameters that setup dialog
@@ -408,7 +404,7 @@ impl CopyTomoComs {
                 // both image rotation values. Use the directive file B image rotation if it
                 // exists.
                 let key = DirectiveDef::BROTATION.get_name_for_axis(Some(AxisID::Second));
-                if !command_map.iter().any(|(k, _)| *k == key) {
+                if !command_map.contains_key(&key) {
                     let n = meta_data.get_image_rotation(AxisID::Second);
                     if !n.is_null() {
                         put(&mut command_map, key, Some(n.to_string()));

@@ -13,6 +13,3 @@ pub trait CcdEraserDisplay: ProcessDisplay {
     fn get_parameters_makecomfile(&self, param: &mut MakecomfileParam, do_validation: bool)
     -> bool;
 }
-
-// TODO(unit): CcdEraserXRaysPanel.java and CcdEraserBeadsPanel.java implement
-// CcdEraserDisplay; the impls wait for faithful translations of those panels.
