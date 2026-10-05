@@ -1,0 +1,73 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/SubFrame.java`: the second top-level
+// window that shows axis B of a dual-axis reconstruction when both axes are
+// shown (`MainFrame.showBothAxis`, the "Both" axis button, View > Both Axes).
+//
+// `initialize` (`:66-95`) gives it the `EtomoFrame` menu bar (`EtomoMenu`,
+// the same `dataset` menus as the main frame), a `BorderLayout` content pane
+// named "pnl.sub-frame" holding, from `setAxis` (`:209-217`), the axis B
+// scroll pane `MainPanel.showBothAxis()` returns in the CENTER and `pnlStatus`
+// (the status bar and axis B's busy label) in the SOUTH.  `moveSubFrame`
+// (`:220-231`) places it to the right of the main frame.  Closing it
+// (`processWindowEvent`, `WINDOW_CLOSING`) calls `mainFrame.showAxisA()`.
+//
+// Wired (`slint_bridge.rs`), this window has its own `EtomoBridge` global,
+// whose lookups resolve under the `SubFrame`'s content pane and menu bar, so
+// its widgets reach axis B's components while the main window's reach axis
+// A's, with the same labels.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors } from "MainWindowWidgets.slint";
+import { MainFrame } from "MainFrame.slint";
+import { MainTomogramPanel } from "MainTomogramPanel.slint";
+import { ReconDialogColumn } from "ReconDialogColumn.slint";
+import { ParallelPanelRow } from "ParallelPanel.slint";
+import { BridgedPopupMenu, EtomoBridge } from "../../etomo-ui-common/ui/widgets.slint";
+
+export component SubFrameWindow inherits Window {
+    // `setTitle(bAxisTitle + title + " ")` (`MainFrame.java:589`, `:726`).
+    in property <string> title-text: "B Axis - Etomo";
+    in property <string> status-bar-text: "";
+    // The current dialog of axis B (`DialogType` name, "" none).
+    in property <string> dialog: "";
+    in property <bool> peet-available: true;
+    // Axis B's `parallelStatusPanel` (see `ReconDialogColumn`).
+    in property <bool> show-parallel-panel: false;
+    in property <[ParallelPanelRow]> parallel-rows: [];
+    callback parallel-row-toggled(int);
+    title: root.title-text;
+    preferred-width: 1000px;
+    preferred-height: 820px;
+    background: EtomoStyle.background;
+    MainFrame {
+        peet-available: root.peet-available;
+        HorizontalLayout {
+            alignment: start;
+            // `MainPanel.showBothAxis` returns `scrollPaneB`: axis B's
+            // `TomogramProcessPanel` (its axis buttons hidden by
+            // `showAxisB(true)`), with `pnlStatus` below.
+            MainTomogramPanel {
+                // `TomogramProcessPanel`'s column: the 200-pixel process
+                // buttons and the two axis buttons with their 40-pixel gap.
+                width: 215px;
+                status-bar-text: root.status-bar-text;
+                axis-type: "DUAL_AXIS";
+                showing-axis: "B";
+                show-status-panel: false;
+            }
+            ReconDialogColumn {
+                dialog: root.dialog;
+                panel-background: Colors.background-b;
+                show-parallel-panel: root.show-parallel-panel;
+                parallel-rows: root.parallel-rows;
+                parallel-row-toggled(row) => { root.parallel-row-toggled(row); }
+            }
+        }
+    }
+    // The showing `JPopupMenu` (context menus), above everything else.
+    if EtomoBridge.popup-shown: BridgedPopupMenu {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+    }
+}

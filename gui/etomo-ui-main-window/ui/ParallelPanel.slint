@@ -1,0 +1,150 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/ParallelPanel.java`: the "Parallel
+// Processing" panel that `AxisProcessPanel.buildParallelPanel` puts in
+// `parallelStatusPanel` (under the progress bar) when the processing method is
+// parallel.
+//
+// The constructor (`:131-209`): `rootPanel` (Y_AXIS, etched border) holds
+// `header` (`PanelHeader.getMoreLessInstance(TITLE, ...)`, TITLE "Parallel
+// Processing") and `bodyPanel` (Y_AXIS): a rigid area, `tablePanel` (the
+// current `ProcessorTable`, a `CpuTable` unless a cluster is used) and
+// `southPanel` (X_AXIS: `ltfCPUsSelected` "Cores: ", `ltfSecondaryCPUsSelected`
+// "GPUs: " (hidden), `btnRestartLoad` "Restart Load", `sNice` "Nice: ",
+// `btnPause` "Pause", `btnResume` "Resume", `btnSaveDefaults` "Save As
+// Defaults").  The "Use a cluster" check box is added only when the network
+// has queues (`:192-200`), which needs a cpu.adoc with queues; it is drawn
+// behind `has-queues`.
+//
+// `ProcessorTable` (`ProcessorTable.java`, `CpuTable.java`): two rows of
+// `HeaderCell`s, then one `ProcessorTableRow` per computer.  The header cells
+// drawn are the ones the Java shows for a plain computer table (the reference
+// run's dump lists hc.computer, hc.#-cores, hc.load-average, hc.retries,
+// hc.chunks, hc.failure / hc.used, hc.1-min, hc.5-min, hc.done, hc.reason).
+// Wired, each computer row is `ProcessorTableRow` from `cells.slint`, filled
+// from the translated table by `slint_bridge.rs` (`table-rows`).
+
+import {
+    EtomoStyle, EtomoBridge, PanelHeader, LabeledTextField, CheckBox,
+} from "../../etomo-ui-common/ui/widgets.slint";
+import { PlainButton, InlineSpinner } from "../../etomo-ui-shell/ui/ShellWidgets.slint";
+
+// `HeaderCell` (`HeaderCell.java`): a bold, bordered, unclickable header button.
+component HeaderCellText inherits Rectangle {
+    in property <string> text;
+    // Wired: a column the processor table does not show (the non-runnable
+    // batch table has no Retries/Chunks/Failure columns) is not drawn; `column`
+    // names it for its blank second-row cell.
+    in property <string> column: root.text;
+    in property <length> cell-width: 60px;
+    property <bool> shown: !EtomoBridge.wired || root.column == ""
+        || EtomoBridge.visible-value("hc", root.column, true, EtomoBridge.generation);
+    visible: root.shown;
+    width: root.shown ? root.cell-width : 0px;
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    background: EtomoStyle.panel;
+    height: EtomoStyle.field-height;
+    Text {
+        text: root.text;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        color: EtomoStyle.text;
+    }
+}
+
+// One computer row, as the bridge reports it: the row's computer check box
+// (named "cb.computer", text the computer name) and its displayed cells in
+// order.
+export struct ParallelPanelRow {
+    computer: string,
+    selected: bool,
+    cells: [string],
+}
+
+export component ParallelPanel inherits Rectangle {
+    in property <bool> has-queues: false;
+    // The header title: `TITLE` for a runnable panel, `NON_RUNNABLE_TITLE`
+    // ("Resources") for the batch interface's (`ParallelPanel.java:149`).
+    in property <string> title: "Parallel Processing";
+    // False when the dialog has moved `btnPause`/`btnResume` into its own
+    // button row (`BatchRunTomoDialog.createPanel`, `getParallelPauseButton`).
+    in property <bool> pause-resume-here: true;
+    // Wired: the rows of the current processor table (Rust-only plumbing).
+    in property <[ParallelPanelRow]> rows: [];
+    callback row-toggled(int /* row */);
+    border-width: 1px;
+    border-color: EtomoStyle.border;
+    background: EtomoStyle.background;
+    VerticalLayout {
+        padding: 2px;
+        spacing: EtomoStyle.row-gap;
+        ph-body-6 := PanelHeader { title: root.title; }
+        // The header's body: drawn while it is open (`PanelHeader`, `expand`).
+        if ph-body-6.shown-open: VerticalLayout {
+            spacing: EtomoStyle.row-gap;
+            // `tablePanel`: the current ProcessorTable.
+            VerticalLayout {
+                spacing: 0px;
+                // header row 1 (`ProcessorTable.createTable`).
+                HorizontalLayout {
+                    spacing: 0px;
+                    HeaderCellText { text: "Computer"; cell-width: 120px; }
+                    HeaderCellText { text: "# Cores"; cell-width: 60px; }
+                    HeaderCellText { text: "Load Average"; cell-width: 100px; }
+                    HeaderCellText { text: "Retries"; cell-width: 60px; }
+                    HeaderCellText { text: "Chunks"; cell-width: 60px; }
+                    HeaderCellText { text: "Failure"; cell-width: 120px; }
+                }
+                // header row 2.
+                HorizontalLayout {
+                    spacing: 0px;
+                    HeaderCellText { text: ""; cell-width: 120px; }
+                    HeaderCellText { text: "Used"; cell-width: 60px; }
+                    HeaderCellText { text: "1 Min."; cell-width: 50px; }
+                    HeaderCellText { text: "5 Min."; cell-width: 50px; }
+                    HeaderCellText { text: ""; column: "Retries"; cell-width: 60px; }
+                    HeaderCellText { text: "Done"; cell-width: 60px; }
+                    HeaderCellText { text: "Reason"; cell-width: 120px; }
+                }
+                for row[index] in root.rows: HorizontalLayout {
+                    spacing: 0px;
+                    Rectangle {
+                        width: 120px;
+                        height: EtomoStyle.field-height;
+                        border-width: 1px;
+                        border-color: EtomoStyle.border;
+                        HorizontalLayout {
+                            padding-left: 3px;
+                            spacing: 3px;
+                            Text { text: row.selected ? "[x]" : "[ ]"; vertical-alignment: center; }
+                            Text { text: row.computer; vertical-alignment: center; }
+                        }
+                        TouchArea { clicked => { root.row-toggled(index); } }
+                    }
+                    for cell[cell-index] in row.cells: Rectangle {
+                        width: cell-index == 0 ? 60px : cell-index <= 2 ? 50px : cell-index == 5 ? 120px : 60px;
+                        height: EtomoStyle.field-height;
+                        border-width: 1px;
+                        border-color: EtomoStyle.border;
+                        background: EtomoStyle.field-background;
+                        Text { x: 3px; text: cell; vertical-alignment: center; }
+                    }
+                }
+            }
+            // `southPanel` (X_AXIS).
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                LabeledTextField { label: "Cores: "; width: 110px; }
+                PlainButton { text: "Restart Load"; }
+                InlineSpinner { label: "Nice: "; text: "15"; }
+                if root.pause-resume-here: PlainButton { text: "Pause"; }
+                if root.pause-resume-here: PlainButton { text: "Resume"; }
+                PlainButton { text: "Save As Defaults"; }
+            }
+            if root.has-queues: HorizontalLayout {
+                alignment: start;
+                CheckBox { text: "Use a cluster"; }
+            }
+        }
+    }
+}

@@ -1,0 +1,49 @@
+// Mirrors `IMOD/Etomo/src/etomo/ui/swing/DirectivesDialog.java`
+// (`createPanel`, :129-195), the advanced view of a
+// `BatchRunTomoDatasetDialog`: pnlControl (X_AXIS: pnlShow, a 143-pixel rigid
+// area, pnlButtons), then the `DirectivesTable`.
+//
+// pnlShow is EtchedBorder("Which Directives to Show") with cbShowUnchanged
+// (only for a directive file type, never in the batch interface),
+// cbShowIfSet and cbShowIncludedOnly.  pnlButtons (Y_AXIS, right aligned):
+// pnlSave (Save, Cancel; only with a directive file type), (a 5-pixel rigid
+// area when the basic button is shifted) the parent's btnBasic, glue, Close
+// All Sections.
+//
+// The `DirectivesTable` is a GridBag grid of `DirectivesSectionRow`s and
+// `DirectivesDirectiveRow`s on an untitled panel, the sibling of pnlControl:
+// `BridgedTable` finds it two levels above the "Which Directives to Show"
+// panel ("Which Directives to Show/../..") and draws its real rows.
+
+import { EtomoStyle, EtomoBridge, CheckBox, BridgedTable }
+    from "../../etomo-ui-common/ui/widgets.slint";
+import { BridgedEtchedBorder, SingleLineButton } from "LocalWidgets.slint";
+
+export component DirectivesDialog inherits VerticalLayout {
+    spacing: EtomoStyle.row-gap;
+    alignment: start;
+    // pnlControl
+    HorizontalLayout {
+        alignment: start;
+        BridgedEtchedBorder {
+            title: "Which Directives to Show";
+            CheckBox { text: "Show unchanged"; }
+            CheckBox { text: "Only items containing a value"; }
+            CheckBox { text: "Only items output to batch files"; }
+        }
+        Rectangle { width: 143px; }
+        VerticalLayout {
+            alignment: start;
+            HorizontalLayout {
+                alignment: space-around;
+                SingleLineButton { text: "Save"; }
+                SingleLineButton { text: "Cancel"; }
+            }
+            HorizontalLayout { alignment: end; SingleLineButton { text: "Basic"; } }
+            Rectangle { vertical-stretch: 1; }
+            HorizontalLayout { alignment: end; SingleLineButton { text: "Close All Sections"; } }
+        }
+    }
+    // table.getContainer()
+    BridgedTable { table: "Which Directives to Show/../.."; cell-width: 200px; }
+}

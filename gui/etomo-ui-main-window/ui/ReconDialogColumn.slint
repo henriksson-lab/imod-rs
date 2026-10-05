@@ -1,0 +1,73 @@
+// Rust-only composition (not a Swing class): the right-hand side of one
+// reconstruction axis column, `AxisProcessPanel.panelProcessInfo`
+// (`AxisProcessPanel.java:355-370`): `outerStatusPanel` (the
+// `AxisProgressPanel`) in the NORTH and `panelDialog` -- the axis's current
+// process dialog -- in the CENTER, scrolled as `MainPanel`'s `JScrollPane`
+// scrolls the axis.  The main window draws the axis `MainPanel` shows in
+// `panelCenter` with it, and the `SubFrame` window (`SubFrame.slint`) the B
+// axis when both axes are shown, so the two draw the same dialog set.
+// `dialog` is the `DialogType` name of the axis's current dialog ("" none).
+
+import { EtomoStyle, ContextArea } from "../../etomo-ui-common/ui/widgets.slint";
+import { Colors, AxisProgressPanel } from "MainWindowWidgets.slint";
+import { ParallelPanel, ParallelPanelRow } from "ParallelPanel.slint";
+import { PreProcessingDialog } from "../../etomo-ui-recon-setup/ui/PreProcessingDialog.slint";
+import { CoarseAlignDialog } from "../../etomo-ui-recon-setup/ui/CoarseAlignDialog.slint";
+import { FiducialModelDialog } from "../../etomo-ui-recon-align/ui/FiducialModelDialog.slint";
+import { AlignmentEstimationDialog } from "../../etomo-ui-recon-align/ui/AlignmentEstimationDialog.slint";
+import { TomogramPositioningDialog } from "../../etomo-ui-recon-align/ui/TomogramPositioningDialog.slint";
+import { FinalAlignedStackDialog } from "../../etomo-ui-recon-align/ui/FinalAlignedStackDialog.slint";
+import { TomogramGenerationDialog } from "../../etomo-ui-recon-gen/ui/TomogramGenerationDialog.slint";
+import { TomogramCombinationDialog } from "../../etomo-ui-recon-gen/ui/TomogramCombinationDialog.slint";
+import { PostProcessingDialog } from "../../etomo-ui-recon-gen/ui/PostProcessingDialog.slint";
+import { CleanUpDialog } from "../../etomo-ui-recon-gen/ui/CleanUpDialog.slint";
+
+export component ReconDialogColumn inherits Rectangle {
+    in property <string> dialog: "";
+    // `Colors.getBackgroundA()` / `getBackgroundB()`, which `showAxisA` /
+    // `showAxisB` give the axis panel.
+    in property <color> panel-background: Colors.background-a;
+    // `AxisProcessPanel.parallelStatusPanel` (below the progress panel in
+    // `outerStatusPanel`) while `showParallelPanel(true)` shows it -- the
+    // dialog's "Parallel processing" check box is set -- and the rows of its
+    // `ProcessorTable`.
+    in property <bool> show-parallel-panel: false;
+    in property <[ParallelPanelRow]> parallel-rows: [];
+    callback parallel-row-toggled(int);
+    background: root.panel-background;
+    VerticalLayout {
+        AxisProgressPanel { }
+        if root.show-parallel-panel: HorizontalLayout {
+            alignment: start;
+            ParallelPanel {
+                rows: root.parallel-rows;
+                row-toggled(row) => { root.parallel-row-toggled(row); }
+            }
+        }
+        Flickable {
+            viewport-height: recon-dialog.preferred-height;
+            viewport-width: max(self.width, recon-dialog.preferred-width);
+            // A right press on the dialog's background goes to the
+            // dialog's outermost context-menu panel (`slint_bridge.rs`).
+            ContextArea {
+                x: 0;
+                y: 0;
+                width: max(parent.width, recon-dialog.preferred-width);
+                height: max(recon-dialog.preferred-height, 0px);
+            }
+            recon-dialog := VerticalLayout {
+                alignment: start;
+                if root.dialog == "PRE_PROCESSING": PreProcessingDialog { }
+                if root.dialog == "COARSE_ALIGNMENT": CoarseAlignDialog { }
+                if root.dialog == "FIDUCIAL_MODEL": FiducialModelDialog { }
+                if root.dialog == "FINE_ALIGNMENT": AlignmentEstimationDialog { }
+                if root.dialog == "TOMOGRAM_POSITIONING": TomogramPositioningDialog { }
+                if root.dialog == "FINAL_ALIGNED_STACK": FinalAlignedStackDialog { }
+                if root.dialog == "TOMOGRAM_GENERATION": TomogramGenerationDialog { }
+                if root.dialog == "TOMOGRAM_COMBINATION": TomogramCombinationDialog { }
+                if root.dialog == "POST_PROCESSING": PostProcessingDialog { }
+                if root.dialog == "CLEAN_UP": CleanUpDialog { }
+            }
+        }
+    }
+}

@@ -1,0 +1,80 @@
+// Mirrors `IMOD/Etomo/src/etomo/plugin/demo/DemoPanel.java`: the demo
+// `TomoGenMethodPlugin`'s panel, which `TomogramGenerationDialog` adds below its
+// own panels and selects with the "Demo" radio button (`etomo -plugin`).
+// `DemoPanel.createPanel()` gives the structure: an etched box (`pnlDemo`) with
+// the advanced/basic panel header and its body, then the button row.  The
+// plugin's `DemoTiltPanel` (`DemoTiltPanel.java`) has no layout of its own: it
+// is `TiltPanel` with fields hidden, disabled and relabelled, which the
+// bridged widgets of `TiltPanel` in `TomogramGenerationDialog.slint` follow.
+
+import { EtomoStyle, EtomoBridge, PanelHeader, LabeledTextField, CheckBox, RadioButton,
+         MultiLineButton } from "../../etomo-ui-common/ui/widgets.slint";
+import { EtchedBorder, TextField, FileTextField } from "LocalWidgets.slint";
+
+// `DemoPanel` (`DemoPanel.java`).
+export component DemoPanel inherits VerticalLayout {
+    // `pnlRoot`: BoxLayout Y_AXIS, `pnlDemo`, a 0x10 rigid area, `pnlButtons`.
+    spacing: 0px;
+    // `pnlDemo`: untitled etched border, `phDemo` then `pnlDemoBody`.
+    EtchedBorder {
+        title: "";
+        ph-demo := PanelHeader { title: "Demo"; }
+        // `pnlDemoBody`: drawn while the header is open (`DemoPanel.expand`).
+        if ph-demo.shown-open: VerticalLayout {
+            spacing: 0px;
+            Rectangle { height: 2px; }
+            // `pnlSleepTime`: BoxLayout X_AXIS.
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                CheckBox { text: "Modify sleep time"; }
+                RadioButton { text: "2 sec"; selected: true; enabled: false; }
+                RadioButton { text: "3 sec"; enabled: false; }
+                // `rtfSleepTime`, a `RadioTextField` built from
+                // `SleepTime.USER_ENTRY`: the radio button is labelled
+                // "Sleep time:"; the field has no label, so it is named
+                // "tf.null".
+                RadioButton { text: "Sleep time:"; enabled: false; }
+                TextField { label: "null"; text: ""; enabled: false; width: 60px; }
+            }
+            Rectangle { height: 2px; }
+            // `ctfMessage`, a `CheckTextField` (advanced only).
+            HorizontalLayout {
+                alignment: start;
+                spacing: EtomoStyle.gap;
+                CheckBox { text: "Override default message: "; }
+                TextField { label: "Override default message: "; text: ""; enabled: false; width: 200px; }
+            }
+            Rectangle { height: 2px; }
+            // `pnlFile`: BoxLayout X_AXIS, `ftfFile` (`FileTextField2`) and
+            // `cbSwapYZ`.
+            HorizontalLayout {
+                spacing: EtomoStyle.gap;
+                FileTextField { label: "Choose a file: "; text: ""; }
+                CheckBox { text: "Swap Y and Z axes"; }
+            }
+            Rectangle { height: 10px; }
+            // `pnlOutput`: BoxLayout X_AXIS, a 10x0 rigid area between the
+            // two read-only fields.
+            HorizontalLayout {
+                spacing: 10px;
+                LabeledTextField { label: "Sleep time used: "; text: ""; }
+                LabeledTextField { label: "Cores selected: "; text: ""; }
+            }
+            Rectangle { height: 2px; }
+        }
+    }
+    Rectangle { height: 10px; }
+    // `pnlButtons`: BoxLayout X_AXIS.
+    HorizontalLayout {
+        alignment: start;
+        spacing: EtomoStyle.gap;
+        // `btnEtomoPluginDemo`: `Run3dmodButton.getDeferredToggle3dmodInstance`
+        // from `DemoProcessResultDisplayFactory`.
+        MultiLineButton { text: "Run EtomoPluginDemo"; min-width: 190px; }
+        // `btn3dmod`: `Run3dmodButton.get3dmodInstance("Open File", this)`.
+        MultiLineButton { text: "Open File"; min-width: 120px; }
+        // `btnUnselectDependencies`: `MultiLineButton.getToggleButtonInstance`.
+        MultiLineButton { text: "Unselect Dependencies"; min-width: 190px; }
+    }
+}

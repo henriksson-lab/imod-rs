@@ -1,0 +1,180 @@
+// Rust-only wiring (`ui/swing/slint_bridge.rs`, `present_file_chooser`): the
+// modal `JFileChooser` dialog `FileChooser.showOpenDialog`/`showSaveDialog`
+// shows.  Like the option-pane popup it is drawn by a child process
+// (`imod etomo-filechooser`), so the main window's event dispatch thread waits
+// for the answer as Swing's modal dialog does.
+//
+// Swing's chooser is a look-and-feel component, not an eTomo class: this
+// stands in for the working parts of the Metal `JFileChooser`
+// (`MetalFileChooserUI`) - the "Look In" directory and its Up button, the
+// list of entries (directories first, each part sorted by name, as
+// `BasicDirectoryModel` loads them; directories end in "/"), the "File Name"
+// field, the "Files of Type" filter combo box (the look and feel's "All Files"
+// filter, then the chooser's choosable filters), and the approve ("Open" /
+// "Save") and "Cancel" buttons.  The entries are the ones the chooser itself
+// accepts: the parent process evaluates the chooser's `FileFilter` (eTomo's
+// translated filters) and its file hiding for every directory listed.  A click
+// selects an entry (with Ctrl, toggles it in a multi-selection chooser), a
+// double click enters a directory or approves a file.
+
+import { EtomoStyle } from "../../etomo-ui-common/ui/widgets.slint";
+
+export component FileChooserWindow inherits Window {
+    in property <string> title-text: "Open";
+    in property <string> directory;
+    in property <[string]> entries;
+    // Which entries are selected (the list's selection model).
+    in property <[bool]> selected-entries;
+    in property <string> approve-text: "Open";
+    // "Files of Type": the filter descriptions and the current one.
+    in property <[string]> filters;
+    in property <int> current-filter: 0;
+    in-out property <string> file-name;
+    property <bool> filters-open: false;
+    callback entry-clicked(int /* index */, bool /* control */);
+    callback enter(string /* entry */);
+    callback up();
+    callback filter-chosen(int /* index */);
+    callback approve(string /* file name */);
+    callback cancel();
+    title: root.title-text;
+    background: EtomoStyle.background;
+    preferred-width: 560px;
+    preferred-height: 440px;
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: "Look In:"; vertical-alignment: center; color: EtomoStyle.text; }
+            Rectangle {
+                height: EtomoStyle.field-height;
+                background: EtomoStyle.field-background;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { x: 3px; text: root.directory; vertical-alignment: center; overflow: elide; }
+            }
+            Rectangle {
+                width: 40px;
+                height: EtomoStyle.field-height;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { text: "Up"; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.up(); } }
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            background: EtomoStyle.field-background;
+            border-width: 1px;
+            border-color: EtomoStyle.border;
+            Flickable {
+                viewport-height: list.preferred-height;
+                list := VerticalLayout {
+                    alignment: start;
+                    for entry[index] in root.entries: Rectangle {
+                        height: 20px;
+                        background: root.selected-entries[index] ? #c0c0ff : transparent;
+                        Text { x: 4px; text: entry; vertical-alignment: center; color: EtomoStyle.text; }
+                        entry-area := TouchArea {
+                            clicked => { root.entry-clicked(index, entry-area.pressed-control); }
+                            double-clicked => { root.enter(entry); }
+                            property <bool> pressed-control: false;
+                            pointer-event(event) => {
+                                if event.kind == PointerEventKind.down {
+                                    self.pressed-control = event.modifiers.control;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: "File Name:"; vertical-alignment: center; width: 90px; color: EtomoStyle.text; }
+            Rectangle {
+                height: EtomoStyle.field-height;
+                background: EtomoStyle.field-background;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                name-input := TextInput {
+                    x: 3px;
+                    width: parent.width - 6px;
+                    text <=> root.file-name;
+                    single-line: true;
+                    vertical-alignment: center;
+                    accepted => { root.approve(root.file-name); }
+                }
+            }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Text { text: "Files of Type:"; vertical-alignment: center; width: 90px; color: EtomoStyle.text; }
+            filter-box := Rectangle {
+                height: EtomoStyle.field-height;
+                background: EtomoStyle.field-background;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                HorizontalLayout {
+                    padding-left: 3px;
+                    Text {
+                        text: root.filters.length > root.current-filter ? root.filters[root.current-filter] : "";
+                        vertical-alignment: center;
+                        overflow: elide;
+                        color: EtomoStyle.text;
+                    }
+                    Rectangle {
+                        width: 16px;
+                        background: EtomoStyle.panel;
+                        border-width: 1px;
+                        border-color: EtomoStyle.border;
+                        Text { text: "v"; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                TouchArea { clicked => { filter-popup.show(); } }
+                filter-popup := PopupWindow {
+                    x: 0;
+                    y: - root.filters.length * EtomoStyle.field-height;
+                    width: filter-box.width;
+                    Rectangle {
+                        background: EtomoStyle.field-background;
+                        border-width: 1px;
+                        border-color: EtomoStyle.border;
+                        VerticalLayout {
+                            for filter[index] in root.filters: Rectangle {
+                                height: EtomoStyle.field-height;
+                                background: filter-item.has-hover ? EtomoStyle.panel : transparent;
+                                Text { x: 3px; text: filter; vertical-alignment: center; color: EtomoStyle.text; }
+                                filter-item := TouchArea { clicked => { root.filter-chosen(index); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 6px;
+            Rectangle {
+                width: 80px;
+                height: 26px;
+                background: EtomoStyle.panel;
+                border-width: 2px;
+                border-color: EtomoStyle.border;
+                Text { text: root.approve-text; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.approve(root.file-name); } }
+            }
+            Rectangle {
+                width: 80px;
+                height: 26px;
+                background: EtomoStyle.panel;
+                border-width: 1px;
+                border-color: EtomoStyle.border;
+                Text { text: "Cancel"; horizontal-alignment: center; vertical-alignment: center; }
+                TouchArea { clicked => { root.cancel(); } }
+            }
+        }
+    }
+}
