@@ -31,6 +31,13 @@ pub struct ImodpyError {
     pub arguments: Vec<String>,
 }
 
+/// `STRING_VALUE`, `INT_VALUE`, `FLOAT_VALUE`, `BOOL_VALUE`: the `optionValue`
+/// value types (module constants of `IMOD/pysrc/imodpy.py`).
+pub const STRING_VALUE: i32 = 0;
+pub const INT_VALUE: i32 = 1;
+pub const FLOAT_VALUE: i32 = 2;
+pub const BOOL_VALUE: i32 = 3;
+
 /// Return variants of `optionValue` (`IMOD/pysrc/imodpy.py:1153`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum OptionValue {
@@ -129,7 +136,7 @@ pub fn run_cmd(
     // `run_cmd_in_process`).  Only when standard error is left alone: the
     // in-process runner redirects standard input and output, not error.
     if in_stderr.is_none()
-        && let Some((own, words)) = own_command_words(command)
+        && let Some((own, words)) = own_command_words(command, true)
     {
         return run_own_command(
             command,
@@ -176,10 +183,34 @@ pub fn run_cmd(
         joined = Some(text.into_bytes());
     }
 
+    // Rust-only (owner goal 2026-10-05: nothing depends on native IMOD at
+    // run time): a command of ours that does not run in process -- a window
+    // program such as `genhstplt`, or a Python-script translation -- runs as
+    // a child of our own binary when this process is the `imod` launcher,
+    // not as whatever `PATH` finds.  Everything else about `runcmd` is
+    // unchanged.
+    let own_child = own_command_words(command, false).and_then(|(_, words)| {
+        let exe = std::env::current_exe().ok()?;
+        if exe.file_name()? != "imod" {
+            return None;
+        }
+        Some((exe, words))
+    });
     // `Popen(cmd, shell=True)` runs `/bin/sh -c cmd` with `argv[0]` "sh"
-    let mut process = Command::new("/bin/sh");
-    std::os::unix::process::CommandExt::arg0(&mut process, "sh");
-    process.arg("-c").arg(command);
+    let mut process = match &own_child {
+        Some((exe, words)) => {
+            let mut process = Command::new(exe);
+            std::os::unix::process::CommandExt::arg0(&mut process, exe.with_file_name(&words[0]));
+            process.args(&words[1..]);
+            process
+        }
+        None => {
+            let mut process = Command::new("/bin/sh");
+            std::os::unix::process::CommandExt::arg0(&mut process, "sh");
+            process.arg("-c").arg(command);
+            process
+        }
+    };
     // `Popen(..., stdin=PIPE)` in all three of the source's forms, so the
     // command reads the given input and then end-of-file, never the caller's
     // standard input
@@ -390,7 +421,7 @@ pub fn run_cmd_in_process(
 ) -> Result<Option<Vec<String>>, ImodpyError> {
     let command = avoid_local_com_file(command);
     let command = command.as_str();
-    match own_command_words(command) {
+    match own_command_words(command, true) {
         Some((own, words)) => {
             run_own_command(command, own, words, input, outfile, &[], true, false)
         }
@@ -484,6 +515,7 @@ pub fn call_own_program<R: Send + 'static>(
 /// would still expand it.
 fn own_command_words(
     command: &str,
+    require_in_process: bool,
 ) -> Option<(&'static crate::imod::commands::Command, Vec<String>)> {
     let mut words: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -539,7 +571,7 @@ fn own_command_words(
         words.push(current);
     }
     let own = crate::imod::commands::find(words.first()?)?;
-    if !own.in_process {
+    if require_in_process && !own.in_process {
         return None;
     }
     Some((own, words))
@@ -617,6 +649,21 @@ fn run_own_command(
         }
         prnstr("-------------------------", "\n", true);
     }
+    if let Some(filename) = outfile.filter(|name| *name != "stdout") {
+        // `runcmd` hands a file object to the child as its standard output,
+        // so the file gets the output whether or not the command then fails
+        // (`gputilttest` reads its log after a failed `tilt`).
+        if let Err(error) = fs::write(filename, &output) {
+            let message = format!("Writing to file: {filename}  - {error}");
+            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
+            return Err(ImodpyError {
+                arguments: vec![message],
+            });
+        }
+        if status == 0 || ignore_status.contains(&status) {
+            return Ok(None);
+        }
+    }
     if status != 0 && !ignore_status.contains(&status) {
         let mut errors: Vec<String> = lines
             .iter()
@@ -627,19 +674,6 @@ fn run_own_command(
         errors.push(format!("{command}: exited with status {status}"));
         *ERR_STRINGS.lock().expect("imodpy errors mutex") = errors.clone();
         return Err(ImodpyError { arguments: errors });
-    }
-    if let Some(filename) = outfile.filter(|name| *name != "stdout") {
-        // `runcmd` hands a file object to the child as its standard output;
-        // the only callers pass `'stdout'`, so a named file keeps
-        // `run_cmd`'s shape of writing the collected text.
-        if let Err(error) = fs::write(filename, &output) {
-            let message = format!("Writing to file: {filename}  - {error}");
-            *ERR_STRINGS.lock().expect("imodpy errors mutex") = vec![message.clone()];
-            return Err(ImodpyError {
-                arguments: vec![message],
-            });
-        }
-        return Ok(None);
     }
     if !collect {
         return Ok(None);
@@ -821,7 +855,7 @@ pub fn multi_char_split(line: &str, characters: &str) -> Vec<String> {
 ///
 /// Full output reproduces, in order: the `imopen` file line and file-type line
 /// (`wrap_iiunit.f90`), the multi-volume note, from `irdhdr` the `Pixel
-/// spacing` line, the titles (first 79 bytes, FORMAT 1020) and the `idtype`
+/// spacing` line, the `Space group,# extra bytes` line, the titles (first 79 bytes, FORMAT 1020) and the `idtype`
 /// line, then every line `header.f90:170-340` prints (extended header, mdoc).
 /// The other `irdhdr` lines carry none of the keys any caller looks for
 /// (`Pixel spacing`, `size in nanometers =`, `axis`+`angle`, `This is a`,
@@ -860,7 +894,7 @@ pub fn header_in_process(
     use crate::imod::libiimod::unit_header::{
         iiu_ret_basic_head, iiu_ret_data_type, iiu_ret_delta, iiu_ret_extended_data,
         iiu_ret_extended_type, iiu_ret_imod_flags, iiu_ret_labels, iiu_ret_num_extended,
-        iiu_ret_origin, iiu_ret_size,
+        iiu_ret_origin, iiu_ret_size, iiu_ret_space_group,
     };
 
     *ERR_STATUS.lock().expect("imodpy status mutex") = 0;
@@ -1112,6 +1146,16 @@ pub fn header_in_process(
                 g_edit(delta[0], 11, 4),
                 g_edit(delta[1], 11, 4),
                 g_edit(delta[2], 11, 4)
+            ));
+            // FORMAT 1020's `Space group,# extra bytes,idtype,lens .` line
+            // (`irdhdr.f90:119`, 4I9), which `copyheader` reads.
+            let (idtype, lensnum, _, _, _, _) = iiu_ret_data_type(im_unit);
+            out.push_str(&format!(
+                " Space group,# extra bytes,idtype,lens .{:>9}{:>9}{:>9}{:>9}\n\n",
+                iiu_ret_space_group(im_unit),
+                iiu_ret_num_extended(im_unit),
+                idtype,
+                lensnum
             ));
             let mut labels = [[0_u8; 80]; 10];
             let mut num_labels = 0;
@@ -3780,4 +3824,57 @@ mod tests {
             Some(OptionValue::Integers(vec![4, 5, 6]))
         );
     }
+}
+
+/// Rust-only: rewrites a pattern written for Python's `re` module into the
+/// `regex` crate's syntax, for the constructs the two spell differently.
+/// Inside a character class Python takes `[` literally and has no set
+/// operations, while the crate starts a nested class at `[` and treats `&&`,
+/// `--` and `~~` as intersection, difference and symmetric difference; those
+/// are escaped.  Everything else (escapes, groups, quantifiers) is the same in
+/// both for the patterns the scripts build.  `sorttiltframes` builds its
+/// pattern from user-entered delimiters, `[` and `]` by default.
+pub fn py_regex(pattern: &str) -> String {
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut out = String::with_capacity(pattern.len() + 8);
+    let mut ind = 0usize;
+    let mut in_class = false;
+    let mut class_start = 0usize;
+    while ind < chars.len() {
+        let c = chars[ind];
+        if c == '\\' {
+            out.push(c);
+            if let Some(&next) = chars.get(ind + 1) {
+                out.push(next);
+            }
+            ind += 2;
+            continue;
+        }
+        if !in_class {
+            if c == '[' {
+                in_class = true;
+                class_start = ind;
+            }
+            out.push(c);
+            ind += 1;
+            continue;
+        }
+        // Inside a class: a `]` right after `[` or `[^` is a literal.
+        let first =
+            ind == class_start + 1 || (ind == class_start + 2 && chars[class_start + 1] == '^');
+        if c == ']' && !first {
+            in_class = false;
+            out.push(c);
+        } else if c == '[' || (c == ']' && first) {
+            out.push('\\');
+            out.push(c);
+        } else if matches!(c, '&' | '-' | '~') && chars.get(ind + 1) == Some(&c) {
+            out.push('\\');
+            out.push(c);
+        } else {
+            out.push(c);
+        }
+        ind += 1;
+    }
+    out
 }

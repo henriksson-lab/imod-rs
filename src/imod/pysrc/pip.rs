@@ -136,7 +136,7 @@ static PIP_ERRNO: AtomicI32 = AtomicI32::new(0);
 
 /// Python runtime: an uncaught exception prints a traceback on stderr and
 /// the interpreter exits with status 1 (after flushing `sys.stdout`).
-fn python_uncaught(exception: &str) -> ! {
+pub fn python_uncaught(exception: &str) -> ! {
     let _ = std::io::stdout().flush();
     eprintln!("Traceback (most recent call last):");
     eprintln!("{exception}");

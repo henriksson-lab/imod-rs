@@ -381,8 +381,11 @@ pub fn util_print(format: &str, args: &[CArg]) {
     if let Some(func) = S_PRINT_FUNC.with(|c| c.get()) {
         func(&error_mess);
     } else {
-        print!("{error_mess}");
-        let _ = std::io::stdout().flush();
-        let _ = std::io::stdout().flush();
+        // `printf` and `fflush(stdout)`: the C stdout stream, which the
+        // caller's own `printf`s share, so the two keep their order when
+        // standard output is a pipe or a file (`ImodFile::Stdout`).
+        let _ = ImodFile::Stdout.write_all(error_mess.as_bytes());
+        let _ = ImodFile::Stdout.flush();
+        let _ = ImodFile::Stdout.flush();
     }
 }

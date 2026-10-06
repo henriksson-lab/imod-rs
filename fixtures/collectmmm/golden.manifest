@@ -6,11 +6,11 @@ r-001.log
 r-002.log
 r-003.log
 
-sha256 4645b5a8066a56807d98e063b11cf6be7be339b183e298e3922dc48149f55af5 2728 golden/basic.out
+sha256 200f3350b1a76f1d033eddb83eb22a171ef6b76f95084806ffd3424b2cb5bd25 2728 golden/basic.out
 text 2 golden/basic.rc
 0
 
-sha256 4d284c12765e4ace85b3771009f3d91bda8661fdbafe27a04cd6bf4a689a8b07 3904 golden/basic/img.mrc
+sha256 b75bd1be4df1f7846cb50a87ef80e9d7f058afa7ad93d2b345c6742fa337d773 3904 golden/basic/img.mrc
 text 38 golden/err_int.files
 img.mrc
 r-001.log
@@ -87,11 +87,11 @@ img.mrc
 sub/r-002.log
 sub/r-003.log
 
-sha256 2a9012d3422fbaf77956218b9ff2cbd9a02e2265cb8f75d969cf670ac47db915 2728 golden/start_dir.out
+sha256 e553082be5c599242738aeffcbeaf5a7e4a57212aca290a311757f76fcc069a8 2728 golden/start_dir.out
 text 2 golden/start_dir.rc
 0
 
-sha256 e8842474f3646157b924ac69f21e7ff57453a3fe12979fbb69e49280613f6846 3904 golden/start_dir/img.mrc
+sha256 c385d4af273fa181bb782fbfd35791495f46d72356453b4a2309bdecf89288d1 3904 golden/start_dir/img.mrc
 text 0 golden/usage.files
 
 text 439 golden/usage.out

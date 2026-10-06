@@ -2,3 +2,4 @@
 
 pub mod dlaev2;
 pub mod dspsv;
+pub mod dsysv;

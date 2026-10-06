@@ -596,6 +596,13 @@ pub fn iiu_alt_num_extended(i: i32, n: i32) {
     unsafe {
         (*h).next = n;
         (*h).header_size = 1024 + n;
+        // The C unit's header *is* the image file's (`iiuOpen` points one at
+        // the other), so the new header size is what the next section write
+        // positions by.  Here the unit owns a copy, synced into the image
+        // record at the unit API boundary, so the change has to be synced
+        // too, or a write before the next `iiuAltSize` lands at the old
+        // header size (`edmont -renumber` wrote its sections there).
+        iiu_sync_with_mrc_header(i);
     }
 }
 pub fn iiu_ret_extended_type(i: i32) -> [i32; 2] {

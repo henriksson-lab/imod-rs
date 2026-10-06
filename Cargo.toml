@@ -48,6 +48,14 @@ glutin-winit = { version = "0.5.0", optional = true }
 glow = { version = "0.17.0", optional = true }
 raw-window-handle = { version = "0.6", optional = true }
 faer = { version = "0.24", default-features = false, features = ["std", "linalg"] }
+# Text in the plot windows and saved plots of the graphics library
+# (`flib/subrs/graphics/qtplax.rs`, which draws without Qt): glyph outlines
+# from a system TrueType font.  Pure Rust; already in the lock file through
+# Slint.
+ab_glyph = "0.2"
+# Reading gzip files (`archiveorig`); the default backend is already the one
+# `png` pulls in, so this changes no other output.
+flate2 = "1.1"
 
 # One binary for every command.  Upstream IMOD installs one executable per
 # command; this crate deliberately deviates and dispatches from a single

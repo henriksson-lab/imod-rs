@@ -212,7 +212,7 @@ pub fn matchrotpairs(arguments: &[OsString]) -> i32 {
     // Run the search
     let (asec_best, bsec_best, diff_list, all_xf_list) = search_pairs(
         progname, zero_a, zero_b, nviews_a, nviews_b, &image_a, &image_b, nxa, nxb, nya, nyb, aa,
-        bb, "", 0, 0, &distort, bilinear, all_xf_out, 1,
+        bb, "", 0, 0, &distort, bilinear, all_xf_out, "1",
     );
 
     // `try: ... except KeyboardInterrupt: pass`

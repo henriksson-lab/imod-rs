@@ -1,13 +1,20 @@
+
+pub mod boxstartend;
 pub mod ccderaser;
 pub mod clipmodel;
 pub mod convertmod;
 pub mod corrsearch3d;
+pub mod edmont;
 pub mod filltomo;
 pub mod findwarp;
 pub mod get_region_contours;
+pub mod model2point;
 pub mod refinematch;
+pub mod remapmodel;
+pub mod repackseed;
 pub mod solve_wo_outliers;
 pub mod solvematch;
 pub mod sortbeadsurfs;
 pub mod tomopitch;
+pub mod xfjointomo;
 pub mod xfmodel;

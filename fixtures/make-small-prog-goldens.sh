@@ -41,6 +41,7 @@ sed "${FULL:+s/^#full\t//;}/^#/d" "$F/cases.tsv" | while IFS=$'\t' read -r name 
   if [ -n "$sub" ] && [ "$sub" != "-" ]; then sed -e "$sub" "$S/stdout" > "$F/golden/$name.stdout"
   else cp "$S/stdout" "$F/golden/$name.stdout"; fi
   for f in "$d"/*; do
+    [ -e "$f" ] || continue
     b=$(basename "$f")
     src=$F/$b
     for s in $SHARED; do [ "$(basename "$s")" = "$b" ] && src=$F/$s; done

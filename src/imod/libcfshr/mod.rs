@@ -55,3 +55,4 @@ pub mod taperpad;
 pub mod winversion;
 pub mod writelist;
 pub mod zoomdown;
+pub mod sparselsqr;

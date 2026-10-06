@@ -109,7 +109,7 @@ pub fn imodauto(argv: &[String]) -> i32 {
         imod_version(Some(&progname));
         imod_copyright();
         usage();
-        std::process::exit(3);
+        crate::imod::libcfshr::b3dutil::exit(3);
     }
 
     setExitPrefix(b"\nERROR: imodauto - ");
@@ -280,7 +280,7 @@ pub fn imodauto(argv: &[String]) -> i32 {
                 }
                 _ => {
                     usage();
-                    std::process::exit(3);
+                    crate::imod::libcfshr::b3dutil::exit(3);
                 }
             }
         } else {
@@ -291,12 +291,12 @@ pub fn imodauto(argv: &[String]) -> i32 {
 
     if (dim < 0) || (dim > 3) {
         usage();
-        std::process::exit(1);
+        crate::imod::libcfshr::b3dutil::exit(1);
     }
 
     if i >= argc - 1 {
         usage();
-        std::process::exit(3);
+        crate::imod::libcfshr::b3dutil::exit(3);
     }
     if smoothflags < 0 {
         exit_error(b"Only one of -x, -i and -o may be entered.");
@@ -354,7 +354,7 @@ pub fn imodauto(argv: &[String]) -> i32 {
                 &[CArg::Str(&progname), CArg::Str(arg(image_arg))],
             ));
             perror_imodauto("imodauto open image");
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         }
     }
 
@@ -366,7 +366,7 @@ pub fn imodauto(argv: &[String]) -> i32 {
                 &[CArg::Str(&progname), CArg::Str(im_ref_file)],
             ));
             perror_imodauto("imodauto open image");
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         }
     }
 
@@ -467,7 +467,7 @@ pub fn imodauto(argv: &[String]) -> i32 {
                 &[CArg::Str(&progname), CArg::Str(arg(i))],
             ));
             perror_imodauto("imodauto open model");
-            std::process::exit(3);
+            crate::imod::libcfshr::b3dutil::exit(3);
         }
     }
 
@@ -545,7 +545,7 @@ pub fn imodauto(argv: &[String]) -> i32 {
 
     let _ = imod_write(imod, &mut fout);
     drop(fout);
-    std::process::exit(0);
+    crate::imod::libcfshr::b3dutil::exit(0);
 }
 
 /// `perror(prefix)`: the C library writes `"<prefix>: <strerror(errno)>\n"` to

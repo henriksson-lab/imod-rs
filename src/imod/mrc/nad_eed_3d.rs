@@ -132,7 +132,7 @@ pub fn gauss_conv(
     if length > nx {
         let _ = ImodFile::Stdout.write_all(b"gauss_conv: sigma too large \n");
         let _ = ImodFile::Stdout.flush();
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
 
     /* allocate storage for convolution vector */
@@ -191,7 +191,7 @@ pub fn gauss_conv(
     if length > ny {
         let _ = ImodFile::Stdout.write_all(b"gauss_conv: sigma too large \n");
         let _ = ImodFile::Stdout.flush();
-        std::process::exit(0);
+        crate::imod::libcfshr::b3dutil::exit(0);
     }
 
     let mut conv = vector(0, length as isize);
@@ -623,7 +623,8 @@ pub fn eed(
 
     /* `sqrt()` is the double routine, so each of these weights is a double
     expression truncated to `float` on assignment. */
-    let abs = |x: f32| ((x as f64) * (x as f64)).sqrt();
+    // `sqrt(d * d)`: the product of two floats is a float, then widened.
+    let abs = |x: f32| ((x * x) as f64).sqrt();
 
     /* diffuse */
     for i in 1..=nx {
@@ -837,7 +838,7 @@ pub fn usage(progname: &str, ht: f32, pmax: i32, sigma: f32, lambda: f32) -> ! {
         ],
     ));
     let _ = ImodFile::Stdout.flush();
-    std::process::exit(1);
+    crate::imod::libcfshr::b3dutil::exit(1);
 }
 
 /// C `testNumericEntry`.
@@ -895,6 +896,19 @@ pub fn nad_eed_3d(argv: &[String]) -> i32 {
     let mut iarg: usize = 1;
     while iarg < argc as usize {
         if argv[iarg].as_bytes().first().copied().unwrap_or(0) == b'-' {
+            // Fixed in translation (BUGS.md, `nad_eed_3d`): an option that
+            // takes a value, given last, makes the source read `argv[argc]`
+            // (NULL) and crash.  Defined: an error naming the option.
+            if matches!(
+                argv[iarg].as_bytes().get(1).copied().unwrap_or(0),
+                b'k' | b's' | b'n' | b'o' | b'm' | b't' | b'i' | b'e' | b'F'
+            ) && iarg + 1 >= argc as usize
+            {
+                exit_error(&c_format_bytes(
+                    "Option %s must be followed by an entry",
+                    &[CArg::Bytes(argv[iarg].as_bytes())],
+                ));
+            }
             match argv[iarg].as_bytes().get(1).copied().unwrap_or(0) {
                 b'k' => {
                     iarg += 1;
@@ -1294,7 +1308,7 @@ pub fn nad_eed_3d(argv: &[String]) -> i32 {
         nz as isize + 1,
     );
     let _ = ImodFile::Stdout.flush();
-    std::process::exit(0);
+    crate::imod::libcfshr::b3dutil::exit(0);
 }
 
 /// The four `printf("%1.10f")` statistics lines `main` writes after every call

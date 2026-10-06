@@ -70,6 +70,44 @@ fn walk(directory: &Path, base: &Path, files: &mut Vec<String>) {
     }
 }
 
+/// `common::mask_stamps`, except that a gzip file (`archiveorig`'s
+/// `_xray.ext.gz`) is compared as its header with the modification time
+/// zeroed followed by its masked decompressed content: the deflate stream
+/// itself carries the label stamps of the image inside, so it cannot be
+/// masked in place.  Identical content gives identical compressed bytes
+/// (checked against native in `TODO.md`).
+///
+/// A PNG image (`genhstplt`'s saved plot, which Qt rendered natively and a
+/// Rust-native painter renders here) is compared as its size, bit depth and
+/// color type; what it shows is checked through the plot calls that drew it
+/// (`genhstplt.calls`, compared byte for byte).
+fn mask_file(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Read as _;
+    if bytes.len() >= 26 && bytes.starts_with(b"\x89PNG\r\n\x1a\n") && &bytes[12..16] == b"IHDR" {
+        let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+        let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+        return format!(
+            "PNG {width}x{height} depth {} color {}\n",
+            bytes[24], bytes[25]
+        )
+        .into_bytes();
+    }
+    if bytes.len() < 10 || !bytes.starts_with(&[0x1f, 0x8b, 8]) {
+        return common::mask_stamps(bytes);
+    }
+    let mut header = bytes[..10].to_vec();
+    header[4..8].fill(0);
+    let mut content = Vec::new();
+    if flate2::read::MultiGzDecoder::new(bytes)
+        .read_to_end(&mut content)
+        .is_err()
+    {
+        return common::mask_stamps(bytes);
+    }
+    header.extend(common::mask_stamps(&content));
+    header
+}
+
 /// Runs every case of `fixtures/<script>/cases.tsv` and returns the failures.
 pub fn run_cases(script: &str) -> Vec<String> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -111,7 +149,12 @@ pub fn run_cases(script: &str) -> Vec<String> {
         }
 
         let mut command = common::imod_cmd(script);
+        // `genhstplt` (run by `onegenplot`) draws without a window and logs
+        // its plot calls into the case directory, as the goldens were made
+        // (`make-pyscript-goldens.py`).
         command
+            .env("PLAX_HEADLESS", "1")
+            .env("PLAX_CALL_LOG", "genhstplt.calls")
             .current_dir(&work)
             .env("IMOD_DIR", root.join("IMOD"))
             .env("AUTODOC_DIR", root.join("IMOD/autodoc"))
@@ -182,7 +225,12 @@ pub fn run_cases(script: &str) -> Vec<String> {
             ));
         }
         let expected_out = common::golden::expect(&golden.join(format!("{name}.out")));
-        if !expected_out.matches(&output.stdout) {
+        // Wall-clock stamps a called program prints (an MRC label echoed by
+        // `tilt`, ...) are masked as in the output files.
+        if expected_out
+            .compare(&output.stdout, common::mask_stamps, false)
+            .is_err()
+        {
             failures.push(format!(
                 "{name}: stdout differs:\n{}\n--- native:\n{}",
                 String::from_utf8_lossy(&output.stdout),
@@ -206,7 +254,7 @@ pub fn run_cases(script: &str) -> Vec<String> {
         for file in &remaining {
             let actual = std::fs::read(work.join(file)).unwrap();
             if let Some(expected) = common::golden::load(&golden.join(name).join(file)) {
-                if let Err(why) = expected.compare(&actual, common::mask_stamps, false) {
+                if let Err(why) = expected.compare(&actual, mask_file, false) {
                     failures.push(format!("{name}: {file} differs from native: {why}"));
                 }
             } else if placed.get(file) != Some(&actual) {

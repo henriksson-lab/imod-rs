@@ -300,3 +300,180 @@ pub fn gfortran_tand_r4(x: f32) -> f32 {
     let r = t.mul_add(PIO180H, t * PIO180L);
     s * r.tan()
 }
+
+/// gfortran `NINT` of a `real*4` to a default integer (`__builtin_iroundf`):
+/// round half away from zero.  An out-of-range value or NaN gives the x86
+/// "integer indefinite", as `lroundf` truncated to 32 bits does.
+pub fn nint_r4(x: f32) -> i32 {
+    let r = x.round();
+    if r.is_nan() || r >= 2147483648.0 || r < -2147483648.0 {
+        i32::MIN
+    } else {
+        r as i32
+    }
+}
+
+/// gfortran `NINT` of a `real*8` to a default integer (`IDNINT`).
+pub fn nint_r8(x: f64) -> i32 {
+    let r = x.round();
+    if r.is_nan() || r >= 2147483648.0 || r < -2147483648.0 {
+        i32::MIN
+    } else {
+        r as i32
+    }
+}
+
+/// libgcc `__powisf2`, which gfortran calls for `real*4 ** integer` with a
+/// non-constant exponent: repeated squaring in single precision, and the
+/// reciprocal for a negative exponent.
+pub fn powi_r4(x: f32, m: i32) -> f32 {
+    let mut n = m.unsigned_abs();
+    let mut x = x;
+    let mut y = if n % 2 == 1 { x } else { 1.0 };
+    loop {
+        n >>= 1;
+        if n == 0 {
+            break;
+        }
+        x *= x;
+        if n % 2 == 1 {
+            y *= x;
+        }
+    }
+    if m < 0 { 1.0 / y } else { y }
+}
+
+/// libgfortran `write_i` for the `Iw` edit descriptor: right-justified in
+/// `w` columns, `w` asterisks when the value does not fit.
+pub fn format_i(value: i32, w: usize) -> String {
+    let text = value.to_string();
+    if text.len() > w {
+        return "*".repeat(w);
+    }
+    format!("{text:>w$}")
+}
+
+/// A list-directed (`print *`, `write(*,*)`) `integer*4` item: a blank
+/// separator (the record's leading blank when it is the first item) and
+/// `I11`.
+pub fn ld_int(value: i32) -> String {
+    format!("{value:>12}")
+}
+
+/// A list-directed `real*4` item (its blank separator included): `F` form
+/// with nine significant digits and four trailing blanks for magnitudes in
+/// [0.1, 1e9), `E` form with a two-digit exponent otherwise; `NaN` and
+/// `Infinity` right-justified in the 17 columns.
+pub fn ld_real(value: f32) -> String {
+    if value.is_nan() {
+        return format!("{:>17}", "NaN");
+    }
+    if value.is_infinite() {
+        return format!("{:>17}", if value < 0. { "-Infinity" } else { "Infinity" });
+    }
+    if value == 0. {
+        return format!("{:>13}    ", format!("{value:.8}"));
+    }
+    let scientific = format!("{:.8e}", value.abs());
+    let (mantissa, power) = scientific.split_once('e').unwrap();
+    let k = power.parse::<i32>().unwrap() + 1;
+    if (0..=9).contains(&k) {
+        let mut text = format!("{:.*}", (9 - k) as usize, value);
+        if k == 9 {
+            text.push('.');
+        }
+        format!("{text:>13}    ")
+    } else {
+        let e = k - 1;
+        format!(
+            "{:>17}",
+            format!(
+                "{}{}E{}{:02}",
+                if value < 0. { "-" } else { "" },
+                mantissa,
+                if e < 0 { '-' } else { '+' },
+                e.abs()
+            )
+        )
+    }
+}
+
+/// The libgfortran runtime error a failed `READ` with no `END=`/`ERR=`
+/// branch ends in: the message on standard error and exit status 2.
+pub fn read_runtime_error(error: crate::imod::flib::subrs::hvem::frefor::ListReadError) -> ! {
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    match error {
+        crate::imod::flib::subrs::hvem::frefor::ListReadError::End => {
+            eprintln!("Fortran runtime error: End of file")
+        }
+        crate::imod::flib::subrs::hvem::frefor::ListReadError::Error => {
+            eprintln!("Fortran runtime error: Bad value during list input")
+        }
+    }
+    crate::imod::libcfshr::b3dutil::exit(2)
+}
+
+/// `READ(5, *) items` with no `END=`/`ERR=`: a list-directed read from
+/// standard input, the runtime error on failure.  Pending output (a `$`
+/// prompt) is flushed first, as the runtime does before reading a
+/// preconnected terminal unit.
+pub(crate) fn read_list_stdin(items: &mut [crate::imod::flib::subrs::hvem::frefor::ListItem]) {
+    if let Err(error) = read_list_stdin_err(items) {
+        read_runtime_error(error);
+    }
+}
+
+/// `READ(5, *, ERR=...) items`: as [`read_list_stdin`], returning the
+/// failure for the statement's branch.
+pub(crate) fn read_list_stdin_err(
+    items: &mut [crate::imod::flib::subrs::hvem::frefor::ListItem],
+) -> Result<(), crate::imod::flib::subrs::hvem::frefor::ListReadError> {
+    use std::io::Write as _;
+    let _ = std::io::stdout().flush();
+    let stdin = std::io::stdin();
+    let mut lock = stdin.lock();
+    crate::imod::flib::subrs::hvem::frefor::list_read(&mut lock, items)
+}
+
+/// `READ(5, '(a)') var` into a `character*len`: one record, cut to `len`
+/// bytes and blank-padded to `len`, as the variable holds it.  End of file
+/// is the runtime error.
+pub fn read_line_stdin(len: usize) -> Vec<u8> {
+    use std::io::{BufRead as _, Write as _};
+    let _ = std::io::stdout().flush();
+    let mut line = Vec::new();
+    match std::io::stdin().lock().read_until(b'\n', &mut line) {
+        Ok(0) | Err(_) => {
+            read_runtime_error(crate::imod::flib::subrs::hvem::frefor::ListReadError::End)
+        }
+        Ok(_) => {}
+    }
+    if line.last() == Some(&b'\n') {
+        line.pop();
+    }
+    line.truncate(len);
+    line.resize(len, b' ');
+    line
+}
+
+/// Fortran `len_trim` of a blank-padded character variable.
+pub fn len_trim(text: &[u8]) -> usize {
+    text.iter().rposition(|&c| c != b' ').map_or(0, |p| p + 1)
+}
+
+/// Fortran `adjustl`: leading blanks moved to the end, same length.
+pub fn adjustl(text: &[u8]) -> Vec<u8> {
+    let start = text.iter().position(|&c| c != b' ').unwrap_or(text.len());
+    let mut out = text[start..].to_vec();
+    out.resize(text.len(), b' ');
+    out
+}
+
+/// A character assignment `var = value` into a `character*len`: cut or
+/// blank-padded to `len`.
+pub fn fortran_assign(value: &[u8], len: usize) -> Vec<u8> {
+    let mut out = value[..value.len().min(len)].to_vec();
+    out.resize(len, b' ');
+    out
+}

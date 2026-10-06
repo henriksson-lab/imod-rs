@@ -114,7 +114,14 @@ pub fn parselist2(
         *num_in_list = source_limit;
     }
     if *num_in_list > 0 {
-        list[..*num_in_list as usize].copy_from_slice(&values[..*num_in_list as usize]);
+        // Fixed in translation (BUGS.md, `remapmodel`): with LIMLIST 0 (the
+        // `rdlist`/`parselist` forms) the source stores every value whatever
+        // the caller's array holds, writing past its end, and callers such as
+        // `remapmodel.f90:183-185` test the count against their array size
+        // only afterwards.  Only the values that fit are stored; the count
+        // stays the full one, so the caller's own check reports the overflow.
+        let stored = (*num_in_list as usize).min(list.len());
+        list[..stored].copy_from_slice(&values[..stored]);
     }
     if source_limit <= 0 || values.len() as i32 <= source_limit {
         if *lim_list < 0 {

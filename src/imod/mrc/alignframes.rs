@@ -1,2465 +1,6505 @@
-//! Bottom-up owned portions of `alignframes.{h,cpp}`.
+//! Translation of `IMOD/mrc/alignframes.cpp` and `IMOD/mrc/alignframes.h` —
+//! align movie frames and stack multiple frame files.
 //!
-//! High-level image-unit, TIFF/EER, and GPU orchestration remains dependent on
-//! unfinished frame I/O/framealign layers.  This module intentionally contains
-//! only source methods whose inputs are already owned Rust values.
+//! One Rust function per source function: the file-level `main` is
+//! [`alignframes`], and every `AliFrame` method is a method on [`AliFrame`],
+//! whose fields mirror the class members in declaration order.
+//!
+//! Ownership notes, all forced by the C's pointers:
+//!
+//! * The file static `sFA` (`alignframes.cpp:39`) is the [`AliFrame::s_fa`]
+//!   field: one instance per run, which is what the static is.
+//! * `MrcHeader *mOutHeads[4]` points at one of the four member headers
+//!   `mMainHead`, `mUnwgtHead`, `mEvenHead`, `mOddHead`.  Those are
+//!   [`AliFrame::m_heads`] (in that order) and `mOutHeads` is
+//!   [`AliFrame::m_out_heads`], the index of the header each output uses.
+//! * `Islice *mGainSlice` is only ever read through `data.f`; it is the float
+//!   data itself, shared (`Rc`) with `FrameAlign`, which keeps the pointer
+//!   between frames exactly as `mGainRef` does in the C.
+//! * The `unsigned char *` frame buffers are `Vec<f32>` storage (for the
+//!   alignment a `short`/`float` view needs, as `malloc` guarantees) viewed as
+//!   bytes or as the typed array the mode selects.
+//! * `mPartialLinePtrs` (`makeLinePointers` over `mPartialScanBufs`) are the
+//!   line views built at the one point they are used.
+//! * The GPU calls go through `FrameAlign` to `nogpuframe.rs`, the no-CUDA
+//!   stub the reference build links, so they fail and the CPU path is taken,
+//!   as natively.  `TEST_SHRMEM` is not defined in the reference build, so its
+//!   `#ifdef` arms (the `ShrMemClient` calls and `defectFileToString`) are not
+//!   compiled there and are not here.
+//!
+//! Upstream defects fixed in the translation are listed in `BUGS.md`,
+//! section "`alignframes` (2026-10-05)", and marked in place.
 
-#[path = "alignframes_cpu.rs"]
-mod cpu;
-use crate::imod::libcfshr::autodoc::adoc_open_image_metadata;
-use crate::imod::libcfshr::b3dutil::ImodFile;
+use std::io::Write as _;
+use std::os::unix::ffi::OsStrExt as _;
+use std::rc::Rc;
+
+use crate::imod::clip::correct_defects::{
+    CameraDefects, cor_def_expand_gain_reference, cor_def_find_touching_pixels,
+    cor_def_flip_defects_in_y, cor_def_parse_defects, cor_def_process_fei_defects,
+    cor_def_read_super_gain, cor_def_refine_super_res_ref, cor_def_setup_to_correct,
+};
+use crate::imod::libcfshr::autodoc::{
+    ADOC_GLOBAL_NAME, ADOC_ZVALUE_NAME, adoc_change_section_name, adoc_delete_key_value,
+    adoc_get_float, adoc_get_integer, adoc_get_number_of_sections, adoc_get_section_name,
+    adoc_get_string, adoc_get_two_integers, adoc_lookup_by_name_value, adoc_open_image_metadata,
+    adoc_order_write_by_value, adoc_set_float, adoc_set_integer, adoc_set_key_value,
+    adoc_set_three_floats, adoc_set_two_integers, adoc_write,
+};
+use crate::imod::libcfshr::b3dutil::{
+    CArg, ImodFile, SEEK_SET, b3d_fread, b3d_fseek, b3d_fwrite, b3d_get_error,
+    b3d_output_file_type, b3d_physical_memory, balanced_group_limits, c_format_bytes,
+    data_size_for_mode, exit, extra_is_nbytes_and_flags, fgetline, imod_backup_file,
+    imod_prog_name, imod_usage_header, set_float_output_for_entered_mode, wall_time,
+};
+use crate::imod::libcfshr::extraheader::{
+    get_metadata_by_key, get_metadata_weighting_doses, prior_doses_from_image_doses,
+    set_zero_dose_thresh_and_accum,
+};
+use crate::imod::libcfshr::islice::{Islice, MrcData, slice_create, slice_mode_if_real};
+use crate::imod::libcfshr::mxmlwrap::{
+    ixml_clear, ixml_find_elements, ixml_get_string_attribute, ixml_get_string_value,
+    ixml_load_string,
+};
+use crate::imod::libcfshr::parse_params::{
+    PIP_FLOAT, PipValueArray, exit_error, pip_done, pip_get_boolean, pip_get_float,
+    pip_get_float_array, pip_get_integer, pip_get_integer_array, pip_get_line_of_values,
+    pip_get_non_option_arg, pip_get_string, pip_get_three_floats, pip_get_three_integers,
+    pip_get_two_floats, pip_get_two_integers, pip_number_of_entries, pip_read_or_parse_options,
+    strtod, strtol,
+};
+use crate::imod::libcfshr::reduce_by_binning::extract_with_binning;
+use crate::imod::libcfshr::robuststat::{rs_sort_floats, rs_sort_indexed_floats};
 use crate::imod::libcfshr::rotateflip::{RotateFlipData, rotate_flip_image};
 use crate::imod::libcfshr::samplemeansd::{sample_mean_only, type_for_sample_mean};
-use crate::imod::libiimod::iimage::OwnedImageStack;
-use crate::imod::libiimod::mrcfiles::{
-    MRC_MODE_FLOAT, MRC_MODE_SHORT, MRC_MODE_USHORT, MrcHeader, mrc_head_new, mrc_head_read,
-    mrc_head_write, mrc_write_slice,
+use crate::imod::libcfshr::simplestat::{array_min_max_mean, array_min_max_mean_sd};
+use crate::imod::libiimod::iilikemrc::ii_assume_dmfile_matches;
+use crate::imod::libiimod::iimage::{
+    IIFILE_MRC, IIFILE_TIFF, ImodImageFile, MRSA_NOPROC, get_dflt_eersumming_from_env, ii_delete,
+    ii_fclose, ii_fopen, ii_lookup_file_from_fp, ii_open_copies_for_threads,
 };
-use std::io::Write;
+use crate::imod::libiimod::iitif::{
+    IIFLAG_ANTIALIAS_EER, IIFLAG_EER_USE_LANCZOS, MAX_TIFF_THREADS,
+    tiff_gain_reference_for_eer_bytes, tiff_get_array, tiff_get_field, tiff_get_max_eer_super_res,
+    tiff_num_read_threads, tiff_parallel_read, tiff_set_eer_read_properties,
+};
+use crate::imod::libiimod::mrcfiles::{
+    IMOD_MRC_STAMP, LoadInfo, MRC_HEADER_SIZE, MRC_LABEL_SIZE, MRC_MODE_BYTE, MRC_MODE_FLOAT,
+    MRC_MODE_SHORT, MRC_MODE_USHORT, MRC_NLABELS, MrcHeader, fix_title_padding,
+    mrc_copy_extra_header, mrc_get_scale, mrc_head_label, mrc_head_read, mrc_head_write,
+    mrc_init_li, mrc_init_output_header, mrc_read_slice, mrc_set_scale,
+};
+use crate::imod::libiimod::mrcsec::mrc_write_z_float;
+use crate::imod::libiimod::mrcslice::{
+    SLICE_MODE_FLOAT, SLICE_MODE_SHORT, SLICE_MODE_USHORT, slice_read_mrc,
+};
+use crate::imod::mrc::framealign::{
+    FrameAlign, FrameData, GPU_AVG_SUPER_2X, GPU_AVG_SUPER_4X, GPU_CORRECT_DEFECTS, GPU_DO_BIN_PAD,
+    GPU_DO_EVEN_ODD, GPU_DO_GAIN_NORM, GPU_DO_NOISE_TAPER, GPU_DO_PREPROCESS, GPU_DO_UNWGT_SUM,
+    GPU_FOR_ALIGNING, GPU_FOR_SUMMING, GPU_STACK_LIM_MASK, GPU_STACK_LIM_SHIFT, GPU_STACK_LIMITED,
+    MAX_ALL_VS_ALL, MAX_FILTERS, STACK_FULL_ON_GPU,
+};
 
-#[derive(Clone, Debug, PartialEq)]
+/// `#define MAX_BINNINGS 6` (`alignframes.h:12`).
+pub const MAX_BINNINGS: usize = 6;
+/// `#define MAX_LINE 600` (`alignframes.h:13`).
+pub const MAX_LINE: usize = 600;
+/// `#define MAX_READ_THREADS 16` (`alignframes.h:14`).
+pub const MAX_READ_THREADS: usize = 16;
+
+/// `#define SIG2_ROUND_FAC 10000.` (`alignframes.cpp:32`).
+const SIG2_ROUND_FAC: f64 = 10000.;
+/// `#define FRAME_DOSE_KEY "FrameDosesAndNumber"` (`alignframes.cpp:33`).
+const FRAME_DOSE_KEY: &str = "FrameDosesAndNumber";
+/// `#define PRIOR_DOSE_KEY "PriorRecordDose"` (`alignframes.cpp:34`).
+const PRIOR_DOSE_KEY: &[u8] = b"PriorRecordDose";
+/// `#define SRF_NO_VAL -10` (`alignframes.cpp:35`).
+const SRF_NO_VAL: i32 = -10;
+
+/// `b3dutil.h:59`.
+const OUTPUT_TYPE_MRC: i32 = 2;
+/// `iimage.h:67`.
+const FEI_EER_METADATA_TAG: i32 = 65001;
+/// `tiff.h`: `TIFFTAG_ORIENTATION` and its values.
+const TIFFTAG_ORIENTATION: i32 = 274;
+const ORIENTATION_TOPLEFT: i16 = 1;
+const ORIENTATION_TOPRIGHT: i16 = 2;
+const ORIENTATION_BOTRIGHT: i16 = 3;
+const ORIENTATION_BOTLEFT: i16 = 4;
+const ORIENTATION_LEFTTOP: i16 = 5;
+const ORIENTATION_RIGHTTOP: i16 = 6;
+const ORIENTATION_RIGHTBOT: i16 = 7;
+const ORIENTATION_LEFTBOT: i16 = 8;
+
+/// Indexes of the four member headers in [`AliFrame::m_heads`].
+const MAIN_HEAD: usize = 0;
+const UNWGT_HEAD: usize = 1;
+const EVEN_HEAD: usize = 2;
+const ODD_HEAD: usize = 3;
+
+/// `exitError` with the source's variadic format.
+macro_rules! exit_error_fmt {
+    ($fmt:expr $(, $arg:expr)* $(,)?) => {
+        exit_error(&c_format_bytes($fmt, &[$($arg),*]))
+    };
+}
+
+/// `printf` with the source's format, to the C stdout stream.
+macro_rules! printf {
+    ($fmt:expr $(, $arg:expr)* $(,)?) => {{
+        let _ = ImodFile::Stdout.write_all(&c_format_bytes($fmt, &[$($arg),*]));
+    }};
+}
+
+/// `B3DNINT(a)`: `(int)floor((a) + 0.5)`.
+macro_rules! b3dnint {
+    ($a:expr) => {
+        (($a) as f64 + 0.5).floor() as i32
+    };
+}
+
+/// `B3DMIN(a,b)`: `((a) < (b) ? (a) : (b))`.
+macro_rules! b3dmin {
+    ($a:expr, $b:expr) => {{
+        let (a, b) = ($a, $b);
+        if a < b { a } else { b }
+    }};
+}
+
+/// `B3DMAX(a,b)`: `((a) > (b) ? (a) : (b))`.
+macro_rules! b3dmax {
+    ($a:expr, $b:expr) => {{
+        let (a, b) = ($a, $b);
+        if a > b { a } else { b }
+    }};
+}
+
+/// The bytes of a frame buffer: the C's `unsigned char *` view of the
+/// `malloc`ed storage.
+fn buf_bytes(storage: &[f32]) -> &[u8] {
+    unsafe {
+        std::slice::from_raw_parts(
+            storage.as_ptr().cast::<u8>(),
+            std::mem::size_of_val(storage),
+        )
+    }
+}
+
+/// Mutable form of [`buf_bytes`].
+fn buf_bytes_mut(storage: &mut [f32]) -> &mut [u8] {
+    let len = std::mem::size_of_val(storage);
+    unsafe { std::slice::from_raw_parts_mut(storage.as_mut_ptr().cast::<u8>(), len) }
+}
+
+/// The `void *` plus mode a frame buffer is handed to `FrameAlign` as.  The
+/// storage is `f32`-aligned, so every typed view is aligned.
+fn frame_data(storage: &[f32], mode: i32, nxy: usize) -> FrameData<'_> {
+    let ptr = storage.as_ptr();
+    unsafe {
+        match mode {
+            MRC_MODE_BYTE => FrameData::Byte(std::slice::from_raw_parts(ptr.cast::<u8>(), nxy)),
+            MRC_MODE_SHORT => FrameData::Short(std::slice::from_raw_parts(ptr.cast::<i16>(), nxy)),
+            MRC_MODE_USHORT => {
+                FrameData::UShort(std::slice::from_raw_parts(ptr.cast::<u16>(), nxy))
+            }
+            _ => FrameData::Float(std::slice::from_raw_parts(ptr, nxy)),
+        }
+    }
+}
+
+/// Storage for a `B3DMALLOC(unsigned char, nbytes)` frame buffer.
+fn frame_storage(nbytes: usize) -> Vec<f32> {
+    vec![0.; nbytes.div_ceil(4)]
+}
+
+/// A C string held in a fixed array: the bytes before the first NUL.
+fn c_str(bytes: &[u8]) -> &[u8] {
+    &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())]
+}
+
+/// `strstr(haystack, needle)` as an index.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.len() > haystack.len() {
+        return None;
+    }
+    (0..=haystack.len() - needle.len()).find(|&i| &haystack[i..i + needle.len()] == needle)
+}
+
+/// `std::string::find_last_of(chars)`.
+fn find_last_of(s: &[u8], chars: &[u8]) -> Option<usize> {
+    s.iter().rposition(|c| chars.contains(c))
+}
+
+/// A path from the bytes of a C file name.
+fn os_path(name: &[u8]) -> &std::path::Path {
+    std::path::Path::new(std::ffi::OsStr::from_bytes(name))
+}
+
+/// `strncpy(label, src, MRC_LABEL_SIZE)`: copy and zero-pad.
+fn strncpy_label(label: &mut [u8; MRC_LABEL_SIZE], src: &[u8]) {
+    let src = c_str(src);
+    let n = src.len().min(MRC_LABEL_SIZE);
+    label[..n].copy_from_slice(&src[..n]);
+    label[n..].fill(0);
+}
+
+/// `imodUsageHeader` in the shape `PipReadOrParseOptions` takes.
+fn imod_usage_header_for_pip(prog_name: &[u8]) {
+    imod_usage_header(Some(&String::from_utf8_lossy(prog_name)));
+    let _ = ImodFile::Stdout.flush();
+}
+
+/// Class `AliFrame` (`alignframes.h:16`).  Members in declaration order.
 pub struct AliFrame {
-    pub parallel_read: bool,
-    pub wall_read: f64,
-    pub partial_thresh: [f32; 2],
-    pub debug: i32,
-    pub use_gpu: i32,
-    pub gpu_flags: i32,
-    pub gpu_mem_limit: f32,
-    pub memory_limit: f32,
-    pub test_mode: i32,
-    pub trunc_limit: f32,
-    pub group_size: i32,
-    pub use_block_group: bool,
-    pub dose_file_type: i32,
-    pub max_frame_doses: i32,
-    pub total_dose: f32,
-    pub dose_accumulates: i32,
-    pub default_byte_scale: f32,
-    pub rotation_flip: i32,
-    pub sum_rotation_flip: i32,
-    pub num_out_files: i32,
-    pub initial_dose: f32,
-    pub dose_scaling: f32,
+    pub m_file_copies: [*mut ImodImageFile; MAX_READ_THREADS],
+    pub m_in_fp: Option<ImodFile>,
+    pub m_in_head: MrcHeader,
+    /// `mMainHead, mUnwgtHead, mEvenHead, mOddHead`.
+    pub m_heads: [MrcHeader; 4],
+    /// `MrcHeader *mOutHeads[4]`: index into `m_heads`.
+    pub m_out_heads: [usize; 4],
+    pub m_out_names: [Option<Vec<u8>>; 4],
+    pub m_parallel_read: bool,
+    pub m_names_from_mdoc: bool,
+    pub m_rel_frame_starts_found: bool,
+    pub m_doing_frame_ts: bool,
+    pub m_getting_frc: bool,
+    pub m_nx: i32,
+    pub m_ny: i32,
+    pub m_num_read_threads: i32,
+    pub m_in_data_size: i32,
+    pub m_debug: i32,
+    pub m_num_in_files: i32,
+    pub m_dose_accumulates: i32,
+    pub m_nx_gain: i32,
+    pub m_ny_gain: i32,
+    pub m_extra_has_gain_ref: i32,
+    pub m_rotation_flip: i32,
+    pub m_cor_def_binning: i32,
+    pub m_ignore_zvalue: i32,
+    pub m_sum_rotation_flip: i32,
+    pub m_frames_are_eer: bool,
+    pub m_antialias_eer: bool,
+    pub m_num_out_files: i32,
+    pub m_use_gpu: i32,
+    pub m_gpu_flags: i32,
+    pub m_test_mode: i32,
+    pub m_defer_sum: i32,
+    pub m_trunc_limit: f32,
+    pub m_gpu_mem_limit: f32,
+    pub m_memory_limit: f32,
+    pub m_max_data_size: i32,
+    pub m_refine_at_end: i32,
+    pub m_group_size: i32,
+    pub m_use_block_group: bool,
+    pub m_max_num_z: i32,
+    pub m_hybrid_shifts: i32,
+    pub m_start_assess: i32,
+    pub m_min_binning_to_test: i32,
+    pub m_num_filt_tests: [i32; MAX_BINNINGS],
+    pub m_do_spline: i32,
+    pub m_full_data_size: i32,
+    pub m_num_hold_full: i32,
+    pub m_num_bin_tests: i32,
+    pub m_num_all_vs_all: i32,
+    pub m_sum_pad_size: f32,
+    pub m_align_pad_size: f32,
+    pub m_full_pad_size: f32,
+    pub m_sum_in_one_pass: bool,
+    pub m_mdoc_xsize: i32,
+    pub m_mdoc_ysize: i32,
+    pub m_mdoc_pixel: f32,
+    pub m_are_feiframes: bool,
+
+    pub m_wall_read: f64,
+    pub m_in_files: Vec<Vec<u8>>,
+    /// `unsigned char *mPartialScanBufs[3]`; an empty `Vec` is `NULL`.
+    pub m_partial_scan_bufs: [Vec<f32>; 3],
+    pub m_zin_partial_bufs: [i32; 3],
+    pub m_partial_thresh: [f32; 2],
+    pub m_total_dose: f32,
+    pub m_gain_name: Option<Vec<u8>>,
+    pub m_defect_name: Option<Vec<u8>>,
+    pub m_default_byte_scale: f32,
+    pub m_initial_dose: f32,
+    pub m_dose_scaling: f32,
+    pub m_num_sect: i32,
+    pub m_adoc_ind: i32,
+    pub m_num_mdoc_sect: i32,
+    pub m_dose_file_type: i32,
+    pub m_max_frame_doses: i32,
+    pub m_num_bidir: i32,
+    pub m_cam_size_x: i32,
+    pub m_cam_size_y: i32,
+    pub m_dose_from_mdoc: Vec<f32>,
+    pub m_prior_from_mdoc: Vec<f32>,
+    pub m_total_dose_vec: Vec<f32>,
+    pub m_prior_dose_vec: Vec<f32>,
+    pub m_frame_doses: Vec<f32>,
+    pub m_zero_dose_thresh: f32,
+    pub m_zero_dose_accum: f32,
+    pub m_temp_val1: Vec<f32>,
+    pub m_reweight_ones: Vec<f32>,
+    /// `float *mReweightFilt`, which only ever points at `mReweightOnes`.
+    pub m_reweight_filt: bool,
+    pub m_iz_piece: Vec<i32>,
+    pub m_set_starts: Vec<i32>,
+    pub m_saved_frames: Vec<i32>,
+    pub m_num_in_sets: Vec<i32>,
+    pub m_frame_dose_lines: Vec<Vec<u8>>,
+    pub m_fixed_frame_doses: Vec<u8>,
+    /// `Islice *mGainSlice`: its float data.
+    pub m_gain_slice: Option<Rc<Vec<f32>>>,
+    pub m_dark_slice: Option<Islice>,
+    pub m_defects: Rc<CameraDefects>,
+    pub m_defect_string: String,
+    pub m_fei_defect_pad: i32,
+    pub m_super_fac_for_defects: i32,
+    pub m_in_line: [u8; MAX_LINE + 1],
+    pub m_tilt_angles: Vec<f32>,
+    pub m_tilt_rel_start_frame: Vec<i32>,
+    pub m_tilt_rel_end_frame: Vec<i32>,
+
+    /// `static FrameAlign sFA` (`alignframes.cpp:39`).
+    pub s_fa: FrameAlign,
 }
 
-/// Owned non-metadata result of `processDoseWeightingOptions`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct DoseWeightingOptions {
-    pub dose_scaling: f32,
-    pub reweight_ones: Option<Vec<f32>>,
-    pub fixed_frame_doses: Option<String>,
-    pub total_doses: Vec<f32>,
-    pub prior_doses: Vec<f32>,
-    pub frame_dose_lines: Vec<String>,
+/// C `main` (`alignframes.cpp:41`).
+pub fn alignframes(arguments: &[String]) -> i32 {
+    let mut ali = AliFrame::new();
+    ali.main(arguments);
+    exit(0);
 }
 
-/// Parsed fields consumed by `AliFrame::getAnglesAndTitlesFromMdoc`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MdocTiltTitleInput {
-    pub tilt_angles: Vec<f32>,
-    pub frame_ts_start_end: Vec<Option<(i32, i32)>>,
-    pub pixel_spacing: Option<f32>,
-    pub image_size: Option<(i32, i32)>,
-    pub titles: Vec<String>,
-    pub global_title: Option<String>,
-    pub first_rotation_angle: Option<f32>,
-    pub frame_set_rotation_angle: Option<f32>,
+/// Rust-only, for in-process runs (`commands::run_in_process`): the EER read
+/// properties `main` sets through `tiffSetEERreadProperties` are process-wide
+/// statics in `iitif`, and the gain reference registered for antialiased EER
+/// reading is this object's memory.  A process run ends with them; an in-process
+/// run returns them to their startup values when the object goes, so a later
+/// command in the same process does not read EER files with this run's
+/// settings or through a dangling gain reference.
+impl Drop for AliFrame {
+    fn drop(&mut self) {
+        tiff_set_eer_read_properties(-1, -999_999, 0);
+    }
 }
 
-/// Owned result of `getAnglesAndTitlesFromMdoc` after metadata I/O.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MdocTiltTitleResult {
-    pub tilt_records: TiltAngleRecords,
-    pub pixel_spacing: Option<f32>,
-    pub image_size: Option<(i32, i32)>,
-    pub titles: Vec<String>,
-    pub axis_angle: Option<f32>,
-    pub are_fei_frames: bool,
-}
-
-/// Parsed dose values returned by the metadata subsystem for each Mdoc section.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MdocDoseResult {
-    pub dose_from_mdoc: Vec<f32>,
-    pub prior_from_mdoc: Vec<f32>,
-    pub iz_piece: Vec<i32>,
-    pub frame_dose_lines: Vec<String>,
-}
-
-/// File names discovered by `checkTitlesForRefNames`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ReferenceNamesFromTitles {
-    pub gain_name: Option<std::path::PathBuf>,
-    pub defect_name: Option<std::path::PathBuf>,
-}
-
-/// Result retained by `AliFrame::openMdocFile` for subsequent autodoc access.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct OpenMdocFile {
-    pub autodoc_index: i32,
-    pub montage: i32,
-    pub number_of_sections: i32,
-    pub autodoc_type: i32,
-}
-
-/// Inputs to the source's post-parse dose reconciliation.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct UnifiedDoseInput {
-    pub number_of_files: usize,
-    pub dose_file_type: i32,
-    pub fixed_frame_doses: Option<String>,
-    pub fixed_total_dose: Option<f32>,
-    pub frame_dose_lines: Vec<String>,
-    pub mdoc_doses: Option<MdocDoseResult>,
-    pub dose_accumulates: i32,
-    pub maximum_frames: usize,
-}
-
-/// `unifyDoseInformation` output used by each downstream alignment set.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct UnifiedDoseInformation {
-    pub dose_file_type: i32,
-    pub total_doses: Vec<f32>,
-    pub prior_doses: Vec<f32>,
-    pub frame_dose_lines: Vec<String>,
-}
-
-/// Owned image references consumed by `getGainDarkDefects` after their file
-/// readers have completed.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct GainDarkDefectsInput {
-    pub image_dimensions: (usize, usize),
-    pub gain: Option<OwnedImageStack>,
-    pub dark: Option<OwnedImageStack>,
-    pub frames_are_eer: bool,
-    pub gain_is_tiff: bool,
-}
-
-/// Validated gain/dark images for the FrameAlign boundary.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct GainDarkDefects {
-    pub gain: Option<Vec<u8>>,
-    pub gain_dimensions: Option<(usize, usize)>,
-    pub dark: Option<Vec<u8>>,
-    pub super_resolution_factor: usize,
-}
-
-/// Backend-reported inputs to `assessGpuNeeds` after GPU discovery and
-/// FrameAlign allocation estimation.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct GpuNeedsInput {
-    pub gpu_requested: bool,
-    pub gpu_available_memory: f32,
-    pub gpu_memory_limit: f32,
-    pub sum_memory_need: f32,
-    pub alignment_memory_need: f32,
-    pub sum_pad_size: f32,
-    pub multiple_outputs: bool,
-    pub test_mode: bool,
-    pub getting_frc: bool,
-}
-
-/// Source GPU flags and whether FRC even/odd output remains feasible.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct GpuNeeds {
-    pub flags: u32,
-    pub usable_memory: f32,
-    pub getting_frc: bool,
-}
-
-/// `AliFrame()`: construct the native command state with its source defaults.
-pub fn ali_frame() -> AliFrame {
-    AliFrame::default()
-}
-
-/// Typed replacement for the input/output pointer pairs in
-/// `AliFrame::addToSumBuffer`.
-#[derive(Debug, PartialEq)]
-pub enum AliFrameSumBuffer {
-    Short(Vec<i16>),
-    UShort(Vec<u16>),
-    Float(Vec<f32>),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum AliFrameInputPixels<'a> {
-    Byte(&'a [u8]),
-    Short(&'a [i16]),
-    UShort(&'a [u16]),
-    Float(&'a [f32]),
-}
 impl Default for AliFrame {
     fn default() -> Self {
-        Self {
-            parallel_read: false,
-            wall_read: 0.,
-            partial_thresh: [0.; 2],
-            debug: 0,
-            use_gpu: -1,
-            gpu_flags: 0,
-            gpu_mem_limit: 0.,
-            memory_limit: 12.,
-            test_mode: 0,
-            trunc_limit: 0.,
-            group_size: 1,
-            use_block_group: false,
-            dose_file_type: -1,
-            max_frame_doses: 0,
-            total_dose: 0.,
-            dose_accumulates: -1,
-            default_byte_scale: 30.,
-            rotation_flip: 0,
-            sum_rotation_flip: -10,
-            num_out_files: 1,
-            initial_dose: 0.,
-            dose_scaling: 1.,
-        }
+        Self::new()
     }
 }
+
 impl AliFrame {
-    /// `AliFrame::assessGpuNeeds`: select GPU summing/alignment based on
-    /// translated FrameAlign byte estimates and backend-reported capacity.
-    pub fn assess_gpu_needs(input: GpuNeedsInput) -> GpuNeeds {
-        use super::framealign::{GPU_FOR_ALIGNING, GPU_FOR_SUMMING};
-        const GPU_DO_EVEN_ODD: u32 = 1 << 1;
-        if !input.gpu_requested || input.gpu_available_memory <= 0. {
-            return GpuNeeds::default();
+    /// `AliFrame::AliFrame()` (`alignframes.cpp:51`).
+    ///
+    /// The members the constructor does not set are uninitialised in the C;
+    /// they are zero here.
+    pub fn new() -> AliFrame {
+        AliFrame {
+            m_file_copies: [std::ptr::null_mut(); MAX_READ_THREADS],
+            m_in_fp: None,
+            m_in_head: MrcHeader::default(),
+            m_heads: [
+                MrcHeader::default(),
+                MrcHeader::default(),
+                MrcHeader::default(),
+                MrcHeader::default(),
+            ],
+            m_out_heads: [MAIN_HEAD, UNWGT_HEAD, MAIN_HEAD, MAIN_HEAD],
+            m_out_names: [None, None, None, None],
+            m_parallel_read: false,
+            m_names_from_mdoc: false,
+            m_rel_frame_starts_found: false,
+            m_doing_frame_ts: false,
+            m_getting_frc: false,
+            m_nx: 0,
+            m_ny: 0,
+            m_num_read_threads: 0,
+            m_in_data_size: 0,
+            m_debug: 0,
+            m_num_in_files: 0,
+            m_dose_accumulates: -1,
+            m_nx_gain: 0,
+            m_ny_gain: 0,
+            m_extra_has_gain_ref: 0,
+            m_rotation_flip: 0,
+            m_cor_def_binning: 1,
+            m_ignore_zvalue: 0,
+            m_sum_rotation_flip: SRF_NO_VAL,
+            m_frames_are_eer: false,
+            m_antialias_eer: false,
+            m_num_out_files: 1,
+            m_use_gpu: -1,
+            m_gpu_flags: 0,
+            m_test_mode: 0,
+            m_defer_sum: 0,
+            m_trunc_limit: 0.,
+            m_gpu_mem_limit: 0.,
+            m_memory_limit: 12.,
+            m_max_data_size: 0,
+            m_refine_at_end: 0,
+            m_group_size: 1,
+            m_use_block_group: false,
+            m_max_num_z: 0,
+            m_hybrid_shifts: 0,
+            m_start_assess: -1,
+            m_min_binning_to_test: 100,
+            m_num_filt_tests: [0; MAX_BINNINGS],
+            m_do_spline: 0,
+            m_full_data_size: 0,
+            m_num_hold_full: 0,
+            m_num_bin_tests: 0,
+            m_num_all_vs_all: 0,
+            m_sum_pad_size: 0.,
+            m_align_pad_size: 0.,
+            m_full_pad_size: 0.,
+            m_sum_in_one_pass: false,
+            m_mdoc_xsize: 0,
+            m_mdoc_ysize: 0,
+            m_mdoc_pixel: 0.,
+            m_are_feiframes: false,
+            m_wall_read: 0.,
+            m_in_files: Vec::new(),
+            m_partial_scan_bufs: [Vec::new(), Vec::new(), Vec::new()],
+            m_zin_partial_bufs: [-1, -1, -1],
+            m_partial_thresh: [0., 0.],
+            m_total_dose: 0.,
+            m_gain_name: None,
+            m_defect_name: None,
+            m_default_byte_scale: 30.,
+            m_initial_dose: 0.,
+            m_dose_scaling: 1.,
+            m_num_sect: 0,
+            m_adoc_ind: -1,
+            m_num_mdoc_sect: 0,
+            m_dose_file_type: -1,
+            m_max_frame_doses: 0,
+            m_num_bidir: 0,
+            m_cam_size_x: 0,
+            m_cam_size_y: 0,
+            m_dose_from_mdoc: Vec::new(),
+            m_prior_from_mdoc: Vec::new(),
+            m_total_dose_vec: Vec::new(),
+            m_prior_dose_vec: Vec::new(),
+            m_frame_doses: Vec::new(),
+            m_zero_dose_thresh: 0.,
+            m_zero_dose_accum: 0.,
+            m_temp_val1: Vec::new(),
+            m_reweight_ones: Vec::new(),
+            m_reweight_filt: false,
+            m_iz_piece: Vec::new(),
+            m_set_starts: Vec::new(),
+            m_saved_frames: Vec::new(),
+            m_num_in_sets: Vec::new(),
+            m_frame_dose_lines: Vec::new(),
+            m_fixed_frame_doses: Vec::new(),
+            m_gain_slice: None,
+            m_dark_slice: None,
+            m_defects: Rc::new(CameraDefects::new()),
+            m_defect_string: String::new(),
+            m_fei_defect_pad: -1,
+            m_super_fac_for_defects: 0,
+            m_in_line: [0; MAX_LINE + 1],
+            m_tilt_angles: Vec::new(),
+            m_tilt_rel_start_frame: Vec::new(),
+            m_tilt_rel_end_frame: Vec::new(),
+            s_fa: FrameAlign::new(),
         }
-        let usable = if input.gpu_memory_limit > 0. {
-            input.gpu_memory_limit * 1024. * 1024. * 1024.
-        } else if input.gpu_memory_limit < 0. {
-            -input.gpu_available_memory * input.gpu_memory_limit
-        } else {
-            input.gpu_available_memory * 0.85
-        };
-        let mut result = GpuNeeds {
-            usable_memory: usable,
-            getting_frc: input.getting_frc,
-            ..Default::default()
-        };
-        let mut used = 0.;
-        if !input.test_mode && input.sum_memory_need <= usable {
-            result.flags |= GPU_FOR_SUMMING as u32;
-            used = input.sum_memory_need
-                + if input.multiple_outputs {
-                    input.sum_pad_size
-                } else {
-                    0.
-                };
-        }
-        if input.alignment_memory_need + used <= usable {
-            result.flags |= GPU_FOR_ALIGNING as u32;
-        }
-        if result.flags & (GPU_FOR_SUMMING as u32) != 0 && result.getting_frc {
-            if used + input.sum_pad_size <= usable {
-                result.flags |= GPU_DO_EVEN_ODD;
-            } else {
-                result.getting_frc = false;
-            }
-        }
-        result
     }
 
-    /// `AliFrame::getGainDarkDefects`: validate and extract the first owned
-    /// gain/dark reference sections after MRC/TIFF reading and defect parsing.
-    pub fn get_gain_dark_defects(input: GainDarkDefectsInput) -> Result<GainDarkDefects, String> {
-        let (nx, ny) = input.image_dimensions;
-        let mut result = GainDarkDefects::default();
-        if let Some(gain) = input.gain {
-            if gain.mode != MRC_MODE_FLOAT {
-                return Err("gain reference must be floating point".into());
+    /// `AliFrame::main` (`alignframes.cpp:118`): "A BIG MAIN METHOD".
+    #[allow(clippy::cognitive_complexity)]
+    pub fn main(&mut self, arguments: &[String]) {
+        let progname_owned = imod_prog_name(arguments.first().map_or("", String::as_str));
+        let progname = progname_owned.as_bytes();
+        let mut filename: Vec<u8>;
+        let mut xf_ext: Option<Vec<u8>> = None;
+        let mut xf_name: Vec<u8>;
+        let mut sstr: Vec<u8> = Vec::new();
+        let mut ext_str: Vec<u8>;
+        let mut ordered_angles: Vec<f32> = Vec::new();
+        let mut bins_to_test = [0i32; MAX_BINNINGS];
+        let mut vary_radius2 = [[0f32; MAX_FILTERS]; MAX_BINNINGS];
+        let mut vary_sigma2 = [[0f32; MAX_FILTERS]; MAX_BINNINGS];
+        let mut num_times_best = [[0i32; MAX_FILTERS]; MAX_BINNINGS];
+        let mut title: [u8; MRC_LABEL_SIZE + 1];
+
+        let mut frame_path: Option<Vec<u8>> = None;
+        let mut extra_name: Vec<u8> = Vec::new();
+        let mut list_name: Option<Vec<u8>> = None;
+        let mut frc_name: Option<Vec<u8>> = None;
+        let mut stack_name: Option<Vec<u8>> = None;
+        let mut mdoc_name: Option<Vec<u8>> = None;
+        let mut tilt_name: Option<Vec<u8>> = None;
+        let mut open_ts_names: [Option<Vec<u8>>; 4] = [None, None, None, None];
+        let mut out_fps: [Option<ImodFile>; 4] = [None, None, None, None];
+        let mut title_descs: [Option<Vec<u8>>; 4] = [None, None, None, None];
+        let mut extra_fp: Option<ImodFile> = None;
+        let mut stack_fp: Option<ImodFile> = None;
+        let mut frc_fp: Option<ImodFile> = None;
+        let mut plot_fp: Option<ImodFile> = None;
+        let mut file_list_fp: Option<ImodFile> = None;
+        let mut read_buf: Vec<f32> = Vec::new();
+        let mut sum_buf: Vec<f32> = Vec::new();
+        let mut need_alloc: i32;
+        let mut buf_alloc_size = 0i32;
+        let mut stack_head = MrcHeader::default();
+        let mut ii_frames: Option<*mut ImodImageFile> = None;
+        let mut summed: Vec<f32>;
+        let mut rot_sum: Vec<f32> = Vec::new();
+        let mut unwgt_sum: Vec<f32> = Vec::new();
+        let mut even_sum: Vec<f32> = Vec::new();
+        let mut odd_sum: Vec<f32> = Vec::new();
+        let default_binnings: [i32; 5] = [2, 3, 4, 6, 8];
+        let mut target_ali_size = 1250i32;
+        let mut li = LoadInfo::default();
+        let mut do_robust: bool;
+        let mut copy_shifts: bool;
+        let mut was_good_enough = false;
+        let scale_to_mean_sd: bool;
+        let mut end_reached = false;
+        let mut taper_frac = 0.1f32;
+        let mut scale = 1.0f32;
+        let mut total_scale = 0.0f32;
+        let mut use_scale: f32;
+        let mut mean_scale = 0.0f32;
+        let mut sd_scale = 0.0f32;
+        let mut reorder_by_tilt = 1i32;
+        let mut num_summary_lines = 2i32;
+        let mut k_factor = 4.5f32;
+        let mut shift_limit = 20i32;
+        let mut anti_filt_type = 4i32;
+        let mut sum_bin = 1i32;
+        let size_diff_crit = 0.1f32;
+        let mut max_max_weight = 0.1f32;
+        let mut good_enough = 0.0f32;
+        let mut combine_files = 0i32;
+        let mut break_set_size = 0i32;
+        let mut ref_radius2 = 0.0f32;
+        let ref_sigma2: f32;
+        let mut skip_checks = 0i32;
+        let mut adjust_mdoc = 0i32;
+        let mut spline_smooth: i32;
+        let mut min_num_for_spline = 20i32;
+        let trim_crit = 10i32;
+        let mut iter_crit = 0.1f32;
+        let mut group_refine = 0i32;
+        let mut sum_rfentered = SRF_NO_VAL;
+        let mut drop_mean_crit = -1.0e9f32;
+
+        let mut nz = 0i32;
+        let mut align_bin = 0i32;
+        let mut ind: i32;
+        let mut nx_sum: i32;
+        let mut ny_sum: i32;
+        let mut ix: i32 = 0;
+        let mut iy: i32 = 0;
+        let mut itest: i32;
+        let mut fa_best_filt = 0i32;
+        let mut nx_stack = 0i32;
+        let mut ny_stack = 0i32;
+        let mut stack_mode = 0i32;
+        let mut rel_xbin: i32;
+        let mut rel_ybin: i32;
+        let mut num_avause: i32;
+        let mut tiff_orient: i16 = 0;
+        let mut num_single_files = 0i32;
+        // `startCombine` is read uninitialised natively in the drift report
+        // for an ordinary file (BUGS.md); it starts at 0 here.
+        let mut start_combine = 0i32;
+        let mut end_combine = 0i32;
+        let mut adoc_type = 0i32;
+        let mut align_bin_in: i32;
+        let mut data_size: i32;
+        let mut tind: usize;
+        let mut x_scale: f32 = 1.;
+        let mut y_scale: f32 = 1.;
+        let mut z_scale: f32 = 1.;
+        let mut rel_binning: f32 = 1.;
+        let mut error: f32;
+        let mut min_error: f32;
+        let mut min_mean = 0f32;
+        let mut half_cross = 0f32;
+        let mut trunc_use = 0f32;
+        let mut quart_cross = 0f32;
+        let mut eighth_cross = 0f32;
+        let mut half_nyq = 0f32;
+        let mut min_pred = 0f32;
+        let mut mem_limits = [0f32; 2];
+        let mut full_taper_frac = 0.02f32;
+
+        // framealign uses fullTaperFrac as the padding fraction so a default trimming by the
+        // same amount will keep the padded align within the original size, good if it is 4K
+        let mut trim_frac = full_taper_frac;
+        let mut diff: f64;
+        let mut min_diff: f64;
+        let mut num_avainput = 7i32;
+        let min_fractional_ava = 7i32;
+        let mut reverse = 0i32;
+        let mut start_frame = -1i32;
+        let mut end_frame = -1i32;
+        let mut warned_two_pass = false;
+        let mut frc_delta_r = 0.005f32;
+        let mut ring_corrs = [0f32; 510];
+        let mut radius1 = 0.0f32;
+        let mut radius2 = 0.06f32;
+        let mut sigma1 = 0.03f32;
+        let mut sigma2 = 0.0086f32;
+        let mut x_shifts: Vec<f32>;
+        let mut y_shifts: Vec<f32>;
+        let mut best_xshifts: Vec<f32>;
+        let mut best_yshifts: Vec<f32>;
+        let mut raw_xshifts: Vec<f32>;
+        let mut raw_yshifts: Vec<f32>;
+        let mut best_xraw: Vec<f32>;
+        let mut best_yraw: Vec<f32>;
+        let als_bin_entered: i32;
+        let target_entered: i32;
+        let mut ierr: i32;
+        let mut iz: i32 = 0;
+        let mut z_start = 0i32;
+        let mut z_end = 0i32;
+        let mut z_dir = 1i32;
+        let mut num_opt_args = 0i32;
+        let mut num_non_opt_args = 0i32;
+        let mut out_mode = 0i32;
+        let mut nx_out: i32;
+        let mut ny_out: i32;
+        let mut num_in_by_opt = 0i32;
+        let mut ifile: i32;
+        let mut out_sec_num = 0i32;
+        let mut num_varies: i32;
+        let mut ind_best_bin = 0i32;
+        let mut ind_best_filt = 0i32;
+        let mut slide_grp_size: i32;
+        let mut use_ind: i32;
+        let mut summing_mode = 0i32;
+        let mut num_test_loops: i32;
+        let mut use_start: i32;
+        let mut use_end: i32;
+        let mut ind_bin_use: i32;
+        let mut ind_filt_use: i32;
+        let mut num_filt_use: i32;
+        let mut num_done = 0i32;
+        let mut num_fetch = 0i32;
+        let mut filt: i32;
+        let mut stack_bin: i32;
+        let mut out_num: i32;
+        let mut num_vals = 0i32;
+        let mut num_found = 0i32;
+        let mut pix_temp = 0f32;
+        let phys_mem: f32;
+        let mut nz_align = 0i32;
+        let mut group_end = 0i32;
+        let mut group_start = 0i32;
+        let mut iz_low = 0i32;
+        let mut iz_high = 0i32;
+        let mut use_mode: i32;
+        let mut group: i32;
+        let mut block_grp_size: i32;
+        let mut end_assess = -1i32;
+        let mut num_frame_use: i32;
+        let mut num_sets = 0i32;
+        let mut min_set = 0i32;
+        let mut max_set = 0i32;
+        let mut file_has_tilts: i32;
+        let mut max_read_threads = 1i32;
+        let mut extra_has_tilts = 0i32;
+        let mut extra_has_axis_pix = 0i32;
+        let mut num_all_sets: i32;
+        let mut min_set_size: i32;
+        let mut max_set_size = 0i32;
+        let mut super_file: i32;
+        let mut set_in_file: i32;
+        let mut iz_read: i32;
+        let mut num_undropped_sets: i32;
+        let mut skipped_frame = [-1i32; 2];
+        let mut original_zval: i32;
+        let mut kernel_scale = 1i32;
+        let mut starting_file: i32;
+        let mut ending_file: i32;
+        let mut num_files_to_do: i32;
+        let mut max_exclude: i32;
+        let mut drift_loop: i32;
+        let mut num_drift_loop: i32;
+        let mut file_axis = 0f32;
+        let mut extra_axis = 0f32;
+        let mut file_pix = 0f32;
+        let mut extra_pix_size = 0f32;
+        let mut option_pix_size = 0.0f32;
+        let mut axis_angle = -999.0f32;
+        let mut has_extra: bool;
+        let entered_scale: bool;
+        let entered_mode: bool;
+        let mut all_pos: bool;
+        let mut all_neg: bool;
+        let mut get_need_rf: bool;
+        let mut do_abbrev: bool;
+        let suppress_initial_shifts: bool;
+        let mut excluding_initial = false;
+        let mut tilts_vary = true;
+        let dropping_by_mean: bool;
+        let mut changed_set_order = false;
+        let mut rot_flip_entered = false;
+        let mut non_imod_mrcframes = false;
+        let mut ref_names_from_titles = 0i32;
+        let mut even_odd_ouput = 0i32;
+        let mut do_unweight = 0i32;
+        let use_shr_mem = 0i32;
+        let mut eer_zbinning = 10i32;
+        let mut eer_super_res = 1i32;
+        let mut eer_antialias = 1i32;
+        let mut eer_flags: i32;
+        let mut stack_bin_x: f32;
+        let mut stack_bin_y: f32;
+        let mut drift_max_frac_num = 0.2f32;
+        let mut drift_max_dist = 0.0f32;
+        let mut extra_tilts: Vec<f32> = Vec::new();
+        let mut mean_from_mdoc: Vec<f32> = Vec::new();
+        let mut temp_min: Vec<f32>;
+        let mut temp_max: Vec<f32>;
+        let mut set_order_index: Vec<i32> = Vec::new();
+        let mut extra_buf: Vec<f32> = Vec::new();
+        let mut extra_buf_size = 0i32;
+        let mut res_mean = [0f32; MAX_FILTERS + 1];
+        let mut pred_mean = [0f32; MAX_FILTERS + 1];
+        let mut mean_res_max = [0f32; MAX_FILTERS + 1];
+        let mut max_res_max = [0f32; MAX_FILTERS + 1];
+        let mut mean_raw_max = [0f32; MAX_FILTERS + 1];
+        let mut max_raw_max = [0f32; MAX_FILTERS + 1];
+        let mut smooth_dist = [0f32; MAX_FILTERS + 1];
+        let mut raw_dist = [0f32; MAX_FILTERS + 1];
+        let mut tmin = 0f32;
+        let mut tmax = 0f32;
+        let mut tmean: f32;
+        let mut already_scaled_by: f32;
+        let mut tsd = 0f32;
+        let mut scale_fac: f32;
+        let mut add_fac: f32;
+
+        // Dose weighting variables
+        let mut dose_afac = 0.0f32;
+        let mut dose_bfac = 0.0f32;
+        let mut dose_cfac = 0.0f32;
+        let mut prior_temp: f32;
+        let mut sum_of_doses = 0f32;
+        let mut sum_of_frames: i32;
+
+        // The xf file of a frame set run: open across sets (BUGS.md).
+        let mut xf_open = false;
+
+        // Fallbacks from    ../manpages/autodoc2man 2 1 alignframes
+        let num_options = 88;
+        let options: [&[u8]; 88] = [
+            b"input:InputFile:FNM:",
+            b"output:OutputImageFile:FN:",
+            b"list:ListOfInputFiles:FN:",
+            b"break:BreakFramesIntoSets:I:",
+            b"saved:SavedFrameListFile:FN:",
+            b"gap:MaxGapWithinFrameSet:I:",
+            b"skip:SkipFileChecks:B:",
+            b"stack:CorrespondingStack:FN:",
+            b"mdoc:MetadataFile:FN:",
+            b"path:PathToFramesInMdoc:CH:",
+            b"ignore:IgnoreZvaluesInMdoc:B:",
+            b"adjust:AdjustAndWriteMdoc:B:",
+            b"reorder:ReorderByTiltAngle:I:",
+            b"pixel:PixelSize:F:",
+            b"eer:EERSuperResZSumPadding:IT:",
+            b"aaeer:ReadEERWithAntialiasing:I:",
+            b"super:SuperGainFactorFile:FN:",
+            b"binning:AlignAndSumBinning:IP:",
+            b"target:TargetAlignSize:I:",
+            b"frames:StartingEndingFrames:IP:",
+            b"partial:PartialFrameThresholds:FP:",
+            b"drift:DriftLimitDistAndNumber:FP:",
+            b"sets:RangeOfSetsToDo:IP:",
+            b"ddrop:DropAndReplacementDoses:FP:",
+            b"mdrop:DropSetIfMeanBelow:F:",
+            b"mode:ModeToOutput:I:",
+            b"scale:ScalingOfSum:F:",
+            b"total:TotalScalingOfData:F:",
+            b"meansd:MeanAndSDtoScaleTo:FP:",
+            b"rfsum:SumRotationAndFlip:I:",
+            b"tilt:TiltAngleFile:FN:",
+            b"axis:AxisRotationAngle:F:",
+            b"xfext:TransformExtension:CH:",
+            b"frc:FRCOutputFile:FN:",
+            b"ring:RingSpacingForFRC:F:",
+            b"evenodd:EvenAndOddSumOutput:I:",
+            b"lines:LinesOfAlignSummary:I:",
+            b"plottable:PlottableShiftFile:FN:",
+            b"nosum:NoSumsOutput:B:",
+            b"titles:RefAndDefectFromTitles:B:",
+            b"gain:GainReferenceFile:FN:",
+            b"rotation:RotationAndFlip:I:",
+            b"dark:DarkReferenceFile:FN:",
+            b"defect:CameraDefectFile:FN:",
+            b"double:DoubleDefectCoords:B:",
+            b"imagebinned:ImagesAreBinned:F:",
+            b"truncate:TruncateAbove:F:",
+            b"pair:PairwiseFrames:I:",
+            b"reverse:ReverseOrder:B:",
+            b"shift:ShiftLimit:I:",
+            b"group:GroupSize:I:",
+            b"radius2:FilterRadius2:F:",
+            b"vary:VaryFilter:FAM:",
+            b"hybrid:UseHybridShifts:B:",
+            b"refine:RefineAlignment:I:",
+            b"rgroup:RefineWithGroupSums:B:",
+            b"stop:StopIterationsAtShift:F:",
+            b"rrad2:RefineRadius2:F:",
+            b"smooth:MinForSplineSmoothing:I:",
+            b"gpu:UseGPU:I:",
+            b"memory:MemoryLimitGB:FA:",
+            b"dtype:TypeOfDoseFile:I:",
+            b"dfile:DoseWeightingFile:FN:",
+            b"dtotal:FixedTotalDose:F:",
+            b"dframe:FixedFrameDoses:F:",
+            b"dprior:InitialPriorDose:F:",
+            b"bidir:BidirectionalNumViews:I:",
+            b"accum:DoseAccumulates:I:",
+            b"normalize:NormalizeDoseWeighting:B:",
+            b"volt:Voltage:I:",
+            b"optimal:OptimalDoseScaling:F:",
+            b"critical:CriticalDoseFactors:FT:",
+            b"unweight:UnweightedOutputFile:FN:",
+            b"test:TestBinnings:IA:",
+            b"assess:AssessWithFrames:IP:",
+            b"good:GoodEnoughError:F:",
+            b"weight:MaxResidualWeight:F:",
+            b"trim:TrimFraction:F:",
+            b"taper:TaperFraction:F:",
+            b"antialias:AntialiasFilter:I:",
+            b"radius1:FilterRadius1:F:",
+            b"sigma1:FilterSigma1:F:",
+            b"sigma2:FilterSigma2:F:",
+            b"kfactor:KFactorForFits:F:",
+            b"debug:DebugOutput:I:",
+            b"flags:FlagsForGPU:I:",
+            b"shrmem:ShrMemTest:B:",
+            b"help:usage:B:",
+        ];
+
+        // Startup with fallback
+        let argv = arguments
+            .iter()
+            .map(|value| value.as_bytes().to_vec())
+            .collect::<Vec<_>>();
+        pip_read_or_parse_options(
+            argv.len() as i32,
+            &argv,
+            &options,
+            num_options,
+            progname,
+            2,
+            1,
+            1,
+            &mut num_opt_args,
+            &mut num_non_opt_args,
+            Some(imod_usage_header_for_pip),
+        );
+
+        // Get output file and number of input files
+        pip_get_boolean(b"NoSumsOutput", &mut self.m_test_mode);
+        pip_number_of_entries(b"InputFile", &mut num_in_by_opt);
+        self.m_num_in_files = num_in_by_opt + num_non_opt_args;
+        let mut out_name0 = Vec::new();
+        if pip_get_string(b"OutputImageFile", &mut out_name0) != 0 {
+            if self.m_test_mode == 0 {
+                if num_non_opt_args == 0 {
+                    exit_error(b"No output file specified");
+                }
+                self.m_num_in_files -= 1;
+                self.m_out_names[0] = pip_get_non_option_arg(num_non_opt_args - 1).ok();
             }
-            let x_factor = nx
-                .checked_div(gain.nx)
-                .ok_or("gain reference width is zero")?;
-            let y_factor = ny
-                .checked_div(gain.ny)
-                .ok_or("gain reference height is zero")?;
-            let exact =
-                x_factor == y_factor && gain.nx * x_factor == nx && gain.ny * y_factor == ny;
-            if (input.frames_are_eer || input.gain_is_tiff)
-                && (!exact || !matches!(x_factor, 1 | 2 | 4))
-            {
-                return Err(
-                    "image size must match the gain reference or be 2x/4x super-resolution".into(),
+        } else {
+            self.m_out_names[0] = Some(out_name0);
+            if self.m_test_mode != 0 {
+                exit_error(b"No output file should be specified when not making sums");
+            }
+        }
+
+        get_dflt_eersumming_from_env(&mut eer_super_res, &mut eer_zbinning);
+        pip_get_three_integers(
+            b"EERSuperResZSumPadding",
+            &mut eer_super_res,
+            &mut eer_zbinning,
+            &mut self.m_fei_defect_pad,
+        );
+        ierr = tiff_get_max_eer_super_res();
+        if eer_super_res < 0 || eer_super_res > ierr {
+            exit_error_fmt!(
+                "Super-resolution for EER files must be between 0 and %d",
+                CArg::Int(ierr as i64)
+            );
+        }
+        if eer_zbinning == 0 {
+            exit_error(b"Summing of frames for EER files must be non-zero");
+        }
+        pip_get_integer(b"ReadEERWithAntialiasing", &mut eer_antialias);
+        eer_flags = 0;
+        if eer_antialias > 0 {
+            eer_flags |= IIFLAG_ANTIALIAS_EER;
+        }
+        if eer_antialias == 1 {
+            eer_flags |= IIFLAG_EER_USE_LANCZOS;
+        }
+        if self.m_fei_defect_pad < 0 {
+            self.m_fei_defect_pad = 1;
+            if eer_antialias > 0 && eer_super_res < 2 {
+                self.m_fei_defect_pad = if eer_super_res < -2 { 40 } else { 20 };
+            }
+        }
+
+        tiff_set_eer_read_properties(eer_super_res, eer_zbinning, eer_flags);
+
+        let mut list_temp = Vec::new();
+        if pip_get_string(b"ListOfInputFiles", &mut list_temp) == 0 {
+            if self.m_num_in_files != 0 {
+                exit_error(b"You cannot enter input files as arguments with the -list option");
+            }
+            file_list_fp = ImodFile::open(os_path(&list_temp), "r");
+            if file_list_fp.is_none() {
+                exit_error_fmt!(
+                    "Could not open list of input files, %s",
+                    CArg::Bytes(&list_temp)
                 );
             }
-            if (gain.nx < nx || gain.ny < ny) && !(input.frames_are_eer || input.gain_is_tiff) {
-                return Err("gain reference is smaller than input image".into());
-            }
-            result.super_resolution_factor = x_factor;
-            result.gain_dimensions = Some((gain.nx, gain.ny));
-            result.gain = Some(
-                gain.frames
-                    .into_iter()
-                    .next()
-                    .ok_or("gain reference has no sections")?,
-            );
+            list_name = Some(list_temp);
+            self.m_num_in_files = 2000000000;
         }
-        if let Some(dark) = input.dark {
-            if !matches!(dark.mode, MRC_MODE_SHORT | MRC_MODE_USHORT) {
-                return Err("dark reference must be signed or unsigned short".into());
-            }
-            if (dark.nx, dark.ny) != (nx, ny) {
-                return Err("dark reference is not the same size as the image".into());
-            }
-            result.dark = Some(
-                dark.frames
-                    .into_iter()
-                    .next()
-                    .ok_or("dark reference has no sections")?,
-            );
+        pip_get_integer(b"BreakFramesIntoSets", &mut break_set_size);
+        if break_set_size != 0 && break_set_size < 2 {
+            exit_error(b"The entry for -break must be at least 2");
         }
-        Ok(result)
-    }
+        pip_get_boolean(b"SkipFileChecks", &mut skip_checks);
+        if skip_checks != 0 {
+            ii_assume_dmfile_matches(1);
+        }
 
-    /// `AliFrame::unifyDoseInformation`, reconciled after file/Mdoc parsing.
-    pub fn unify_dose_information(
-        input: &UnifiedDoseInput,
-    ) -> Result<UnifiedDoseInformation, String> {
-        let mut result = UnifiedDoseInformation {
-            dose_file_type: input.dose_file_type,
-            ..Default::default()
-        };
-        if let Some(total) = input.fixed_total_dose.filter(|total| *total > 0.) {
-            result.total_doses = vec![total; input.number_of_files];
-            result.prior_doses = vec![0.; input.number_of_files];
-        } else if let Some(line) = &input.fixed_frame_doses {
-            let (_, total) = Self::expand_frame_doses_numbers(line, input.maximum_frames)?;
-            result.dose_file_type = 5;
-            result.frame_dose_lines = vec![line.clone(); input.number_of_files];
-            result.total_doses = vec![total; input.number_of_files];
-            result.prior_doses = vec![0.; input.number_of_files];
-        } else if input.dose_file_type == 4 {
-            let mdoc = input
-                .mdoc_doses
-                .as_ref()
-                .ok_or("mdoc dose file requires parsed metadata doses")?;
-            if mdoc.dose_from_mdoc.len() < input.number_of_files {
-                return Err("mdoc has fewer dose entries than aligned files".into());
+        self.m_doing_frame_ts = self.read_analyze_saved_frame_list(break_set_size);
+
+        // See if further trimming of frames is desired
+        {
+            let (t0, t1) = self.m_partial_thresh.split_at_mut(1);
+            if pip_get_two_floats(b"PartialFrameThreshold", &mut t0[0], &mut t1[0]) == 0
+                && !self.m_doing_frame_ts
+            {
+                exit_error(b"You can enter -partial only with a frame list file");
             }
-            result.total_doses = mdoc.dose_from_mdoc[..input.number_of_files].to_vec();
-            result.prior_doses = if input.dose_accumulates > 0 {
-                mdoc.prior_from_mdoc[..input.number_of_files].to_vec()
-            } else {
-                vec![0.; input.number_of_files]
-            };
-            result.frame_dose_lines = mdoc.frame_dose_lines.clone();
-        } else if input.dose_file_type > 0 {
-            if input.frame_dose_lines.len() < input.number_of_files {
-                return Err("dose file has fewer lines than aligned files".into());
+        }
+        for ind in 0..2 {
+            if self.m_partial_thresh[ind] >= 1. {
+                exit_error(
+                    b"The threshold for dropping partial frames is relative and must be less than 1",
+                );
             }
-            result.frame_dose_lines = input.frame_dose_lines[..input.number_of_files].to_vec();
-            for line in &result.frame_dose_lines {
-                if input.dose_file_type > 4 {
-                    let (_, total) = Self::expand_frame_doses_numbers(line, input.maximum_frames)?;
-                    result.total_doses.push(total);
-                    result.prior_doses.push(0.);
+        }
+
+        // Find out what auxiliary files are being used
+        let mut temp = Vec::new();
+        if pip_get_string(b"MetadataFile", &mut temp) == 0 {
+            mdoc_name = Some(temp);
+        }
+        let mut temp = Vec::new();
+        if pip_get_string(b"CorrespondingStack", &mut temp) == 0 {
+            stack_name = Some(temp);
+        }
+        if self.m_num_in_files > 0 && mdoc_name.is_some() && stack_name.is_some() {
+            exit_error(b"You cannot enter -mdoc with -stack; the mdoc would not be used");
+        }
+        if self.m_num_in_files == 0 && mdoc_name.is_none() {
+            exit_error(
+                b"Input file(s) must be specified with arguments, an mdoc file, or a list file",
+            );
+        }
+
+        // Open the mdoc now and set flag to get names from it if necessary
+        let dropping_ierr;
+        if let Some(mdoc) = mdoc_name.as_deref() {
+            let mut num_sect = 0;
+            self.open_mdoc_file(mdoc, &mut num_sect, &mut adoc_type);
+            self.m_num_sect = num_sect;
+            if !self.m_doing_frame_ts
+                && (adoc_get_integer(ADOC_GLOBAL_NAME, 0, b"DataMode", &mut stack_mode) != 0
+                    || adoc_get_two_integers(
+                        ADOC_GLOBAL_NAME,
+                        0,
+                        b"ImageSize",
+                        &mut nx_stack,
+                        &mut ny_stack,
+                    ) != 0)
+            {
+                exit_error(b"Getting data mode or image size from mdoc file");
+            }
+
+            self.m_names_from_mdoc = self.m_num_in_files == 0;
+            if self.m_names_from_mdoc {
+                self.m_num_in_files = self.m_num_sect;
+                let mut temp = Vec::new();
+                if pip_get_string(b"PathToFramesInMdoc", &mut temp) == 0 {
+                    frame_path = Some(temp);
                 }
             }
+            pip_get_boolean(b"IgnoreZvaluesInMdoc", &mut self.m_ignore_zvalue);
+            dropping_ierr = pip_get_two_floats(
+                b"DropAndReplacementDoses",
+                &mut self.m_zero_dose_thresh,
+                &mut self.m_zero_dose_accum,
+            );
+            if pip_get_float(b"DropSetIfMeanBelow", &mut drop_mean_crit) == 0 && dropping_ierr == 0
+            {
+                exit_error(b"You cannot enter both -ddrop and -mdrop");
+            }
+            dropping_by_mean = drop_mean_crit > -1.0e8;
+
+            if (self.m_zero_dose_thresh > 0. || dropping_by_mean) && !self.m_names_from_mdoc {
+                exit_error(
+                    b"You cannot use the -ddrop or -mdrop option unless filenames come from the mdoc file",
+                );
+            }
+
+            if self.m_test_mode == 0 {
+                pip_get_boolean(b"AdjustAndWriteMdoc", &mut adjust_mdoc);
+            }
+            if self.m_ignore_zvalue != 0 {
+                reorder_by_tilt = 0;
+            }
+        } else {
+            dropping_by_mean = drop_mean_crit > -1.0e8;
         }
-        if result.total_doses.len() == input.number_of_files
-            && input.dose_accumulates > 0
-            && result.prior_doses.iter().all(|dose| *dose == 0.)
-        {
-            let mut prior = 0.;
-            for (index, dose) in result.total_doses.iter().enumerate() {
-                result.prior_doses[index] = prior;
-                prior += dose;
+
+        // Process mdoc now if doing zero dose or mean dropping
+        num_undropped_sets = self.m_num_in_files;
+        if self.m_zero_dose_thresh > 0. || dropping_by_mean {
+            if self.m_adoc_ind < 0 {
+                exit_error(b"Program error, mdoc was supposed to be open");
+            }
+            self.m_num_mdoc_sect = self.m_num_sect;
+            num_undropped_sets = 0;
+            if self.m_zero_dose_thresh > 0. {
+                // Dropping by dose; get the doses the first of possible several times, count sets
+                ierr = self.get_doses_from_mdoc(adoc_type);
+                if ierr != 0 {
+                    exit_error_fmt!(
+                        "Problems occurred accessing data in the mdoc file: %s",
+                        CArg::Str(&b3d_get_error())
+                    );
+                }
+                for ind in 0..self.m_num_sect as usize {
+                    if self.m_dose_from_mdoc[ind] >= self.m_zero_dose_thresh {
+                        num_undropped_sets += 1;
+                    }
+                }
+            } else {
+                // Dropping by mean: get the means from MinMaxmean entry and count sets
+                let n = self.m_num_sect as usize;
+                mean_from_mdoc.resize(n, 0.);
+                temp_min = vec![0.; n];
+                temp_max = vec![0.; n];
+                self.m_iz_piece.resize(n, 0);
+                for iz in 0..n {
+                    self.m_iz_piece[iz] = iz as i32;
+                }
+                if get_metadata_by_key(
+                    self.m_adoc_ind,
+                    adoc_type,
+                    self.m_num_sect,
+                    "MinMaxMean",
+                    4,
+                    &mut temp_min,
+                    &mut temp_max,
+                    &mut mean_from_mdoc,
+                    None,
+                    &mut num_vals,
+                    &mut num_found,
+                    self.m_num_sect,
+                    &self.m_iz_piece,
+                ) != 0
+                {
+                    exit_error_fmt!(
+                        "Getting mean values from .mdoc file: %s",
+                        CArg::Str(&b3d_get_error())
+                    );
+                }
+                if num_found < self.m_num_sect {
+                    exit_error(b"Some sections in the .mdoc file have no MinMaxMean entry");
+                }
+                for ind in 0..n {
+                    if mean_from_mdoc[ind] >= drop_mean_crit {
+                        num_undropped_sets += 1;
+                    }
+                }
+            }
+            let kind: &str = if self.m_zero_dose_thresh > 0. {
+                "dose"
+            } else {
+                "mean"
+            };
+            if num_undropped_sets == 0 {
+                exit_error_fmt!(
+                    "The %s is below the threshold for all sections in the .mdoc file",
+                    CArg::Str(kind)
+                );
+            }
+            if num_undropped_sets < self.m_num_in_files {
+                printf!(
+                    "Dropping %d frame sets with %ss below the threshold\n",
+                    CArg::Int((self.m_num_in_files - num_undropped_sets) as i64),
+                    CArg::Str(kind)
+                );
             }
         }
-        Ok(result)
-    }
 
-    /// `AliFrame::openMdocFile`, using the translated image-metadata autodoc
-    /// reader and retaining its index and image-stack description.
-    pub fn open_mdoc_file(path: impl AsRef<std::path::Path>) -> Result<OpenMdocFile, String> {
-        let path = path.as_ref();
-        let mut montage = 0;
-        let mut number_of_sections = 0;
-        let mut autodoc_type = 0;
-        let index = adoc_open_image_metadata(
-            path.to_string_lossy().as_bytes(),
-            0,
-            &mut montage,
-            &mut number_of_sections,
-            &mut autodoc_type,
-        );
-        match index {
-            -2 => Err(format!("metadata file {} does not exist", path.display())),
-            -3 => Err(format!(
-                "metadata file {} has no image-stack information",
-                path.display()
-            )),
-            value if value < 0 => Err(format!("cannot open or read mdoc file {}", path.display())),
-            autodoc_index => Ok(OpenMdocFile {
-                autodoc_index,
-                montage,
-                number_of_sections,
-                autodoc_type,
-            }),
+        // Frame subset entries
+        if pip_get_two_integers(b"StartingEndingFrames", &mut start_frame, &mut end_frame) == 0 {
+            if start_frame <= 0 || end_frame < start_frame {
+                exit_error(b"Values for starting and ending frames are out of range");
+            }
+            if self.m_doing_frame_ts {
+                exit_error(b"You cannot use -frame with a saved frame list file");
+            }
         }
-    }
-
-    /// `AliFrame::readOneFrame`: return the requested complete section after
-    /// its MRC/TIFF reader boundary has produced an owned image stack.
-    pub fn read_one_frame(stack: &OwnedImageStack, section: usize) -> Result<Vec<u8>, String> {
-        stack
-            .frames
-            .get(section)
-            .cloned()
-            .ok_or_else(|| format!("frame section {section} is out of range"))
-    }
-
-    /// `AliFrame::checkTitlesForRefNames`: locate gain and defect references
-    /// declared in frame labels, after the image reader supplies EER metadata.
-    pub fn check_titles_for_ref_names(
-        frame_file: impl AsRef<std::path::Path>,
-        titles: &[String],
-        eer_gain_reference: Option<&str>,
-    ) -> Result<ReferenceNamesFromTitles, String> {
-        let frame_file = frame_file.as_ref();
-        if let Some(gain) = eer_gain_reference {
-            let name = gain
-                .rsplit(['/', '\\'])
-                .next()
-                .filter(|name| !name.is_empty())
-                .ok_or("EER metadata gain reference has no file name")?;
-            return Ok(ReferenceNamesFromTitles {
-                gain_name: Some(std::path::PathBuf::from(name)),
-                ..Default::default()
-            });
+        if pip_get_two_integers(
+            b"AssessWithFrames",
+            &mut self.m_start_assess,
+            &mut end_assess,
+        ) == 0
+            && (self.m_start_assess <= 0 || end_assess < self.m_start_assess)
+        {
+            exit_error(
+                b"Values for starting and ending frames to use for assessment are out of range",
+            );
         }
-        let directory = frame_file
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new(""));
-        let mut result = ReferenceNamesFromTitles::default();
-        for title in titles {
-            let title = title.trim();
-            let lower = title.to_ascii_lowercase();
-            let gain = (lower.contains("ref"))
-                && [".mrc", ".dm4", ".tif"]
-                    .iter()
-                    .any(|extension| lower.ends_with(extension));
-            let defect = lower.contains("defect") && lower.ends_with(".txt");
-            if (gain && result.gain_name.is_none()) || (defect && result.defect_name.is_none()) {
-                let candidate = directory.join(title);
-                if candidate.is_file() {
-                    if gain {
-                        result.gain_name = Some(candidate);
+        if (break_set_size > 0 || self.m_doing_frame_ts) && self.m_start_assess >= 0 {
+            exit_error(b"You cannot enter -assess when breaking frames into sets to sum");
+        }
+        if break_set_size > 0 && self.m_names_from_mdoc {
+            exit_error(
+                b"You cannot break frames into sets when input filenames come from an mdoc file",
+            );
+        }
+
+        // Scaling and mode entries
+        pip_get_float(b"TotalScalingOfData", &mut total_scale);
+        entered_scale = pip_get_float(b"ScalingOfSum", &mut scale) == 0;
+        if entered_scale && total_scale > 0. {
+            exit_error(b"You cannot enter both -scale and -total");
+        }
+        scale_to_mean_sd =
+            pip_get_two_floats(b"MeanAndSDtoScaleTo", &mut mean_scale, &mut sd_scale) == 0;
+        if scale_to_mean_sd && (entered_scale || total_scale > 0.) {
+            exit_error(b"You cannot enter -meansd with -scale or -total");
+        }
+        already_scaled_by = 1.;
+        entered_mode = pip_get_integer(b"ModeToOutput", &mut out_mode) == 0;
+        if entered_mode && slice_mode_if_real(out_mode) < 0 {
+            exit_error_fmt!(
+                "Output mode of %d is not allowed",
+                CArg::Int(out_mode as i64)
+            );
+        }
+        if entered_mode {
+            out_mode = set_float_output_for_entered_mode(out_mode);
+        }
+
+        // Get flag to get reference and defects from frame file title, but also bring in
+        // the names if any since they override
+        pip_get_integer(b"RefAndDefectFromTitles", &mut ref_names_from_titles);
+        if ref_names_from_titles != 0 {
+            self.m_rotation_flip = -1;
+        }
+        let mut temp = Vec::new();
+        if pip_get_string(b"GainReferenceFile", &mut temp) == 0 {
+            self.m_gain_name = Some(temp);
+        }
+        let mut temp = Vec::new();
+        if pip_get_string(b"CameraDefectFile", &mut temp) == 0 {
+            self.m_defect_name = Some(temp);
+        }
+        rot_flip_entered = pip_get_integer(b"RotationAndFlip", &mut self.m_rotation_flip) == 0;
+        let mut temp = Vec::new();
+        if pip_get_string(b"TiltAngleFile", &mut temp) == 0 {
+            tilt_name = Some(temp);
+        }
+        pip_get_float(b"AxisRotationAngle", &mut axis_angle);
+        let mut temp = Vec::new();
+        if pip_get_string(b"CorrespondingStack", &mut temp) == 0 {
+            stack_name = Some(temp);
+        }
+        if pip_get_integer(b"SumRotationAndFlip", &mut self.m_sum_rotation_flip) == 0 {
+            sum_rfentered = self.m_sum_rotation_flip;
+        }
+        if pip_get_integer(b"ReorderByTiltAngle", &mut reorder_by_tilt) == 0
+            && self.m_ignore_zvalue != 0
+        {
+            exit_error(b"You cannot enter both -reorder and -ignore");
+        }
+        target_entered = 1 - pip_get_integer(b"TargetAlignSize", &mut target_ali_size);
+        if target_ali_size < 64 {
+            exit_error(b"Target size for align reduction is too small");
+        }
+        pip_get_integer(b"LinesOfAlignSummary", &mut num_summary_lines);
+        suppress_initial_shifts = num_summary_lines < 0;
+        num_summary_lines = num_summary_lines.abs();
+        num_summary_lines = b3dmax!(1, b3dmin!(3, num_summary_lines));
+        let mut temp = Vec::new();
+        if pip_get_string(b"FRCOutputFile", &mut temp) == 0 {
+            frc_name = Some(temp);
+        }
+        if frc_name.is_some() && self.m_test_mode != 0 {
+            exit_error(b"There is no FRC output available when not making sums");
+        }
+        pip_get_integer(b"EvenAndOddSumOutput", &mut even_odd_ouput);
+        even_odd_ouput = b3dmax!(0, b3dmin!(2, even_odd_ouput));
+        if even_odd_ouput != 0 && self.m_test_mode != 0 {
+            exit_error(b"There is no even and odd output available when not making sums");
+        }
+        self.m_getting_frc = self.m_test_mode == 0
+            && (frc_name.is_some() || num_summary_lines > 2 || even_odd_ouput != 0);
+
+        // Have to find out if the mdoc has varying tilt angles now
+        if mdoc_name.is_some() && stack_name.is_none() && tilt_name.is_none() {
+            self.get_angles_and_titles_from_mdoc(tilt_name.as_deref(), axis_angle, true);
+
+            // `*std::max_element` of an empty vector dereferences its end
+            // natively (BUGS.md); no angles do not vary.
+            if self.m_tilt_angles.is_empty() {
+                tilts_vary = false;
+            } else {
+                let mut tmax_angle = self.m_tilt_angles[0];
+                let mut tmin_angle = self.m_tilt_angles[0];
+                for &angle in &self.m_tilt_angles[1..] {
+                    if tmax_angle < angle {
+                        tmax_angle = angle;
+                    }
+                    if angle < tmin_angle {
+                        tmin_angle = angle;
+                    }
+                }
+                tilts_vary = tmax_angle - tmin_angle > 1.;
+            }
+        }
+
+        // Get dose-weighting related options
+        let mut frame_doses_opt: Option<Vec<u8>> = None;
+        {
+            let mut temp = Vec::new();
+            let e3 = pip_get_string(b"FixedFrameDoses", &mut temp);
+            let e1 = pip_get_float(b"FixedTotalDose", &mut self.m_total_dose);
+            let e2 = pip_get_integer(b"TypeOfDoseFile", &mut self.m_dose_file_type);
+            if e3 == 0 {
+                frame_doses_opt = Some(temp);
+            }
+            if e1 + e2 + e3 < 2 {
+                exit_error(
+                    b"You can enter only one of the dose weighting options -dtype, -dtotal, or -dframe",
+                );
+            }
+        }
+
+        title_descs[0] = Some(b"summed frames".to_vec());
+        if self.m_dose_file_type > 0 || self.m_total_dose > 0. || frame_doses_opt.is_some() {
+            if self.m_test_mode != 0 {
+                exit_error(b"You cannot enter dose weighting options with no summing");
+            }
+            pip_get_three_floats(
+                b"CriticalDoseFactors",
+                &mut dose_afac,
+                &mut dose_bfac,
+                &mut dose_cfac,
+            );
+            pip_get_integer(b"DoseAccumulates", &mut self.m_dose_accumulates);
+            if self.m_dose_accumulates < 0 {
+                self.m_dose_accumulates = if stack_name.is_some()
+                    || (mdoc_name.is_some() && tilts_vary)
+                    || tilt_name.is_some()
+                    || self.m_doing_frame_ts
+                {
+                    1
+                } else {
+                    0
+                };
+                printf!(
+                    "Assuming that dose %s accumulate between frame sets\n",
+                    CArg::Str(if self.m_dose_accumulates != 0 {
+                        "DOES"
                     } else {
-                        result.defect_name = Some(candidate);
+                        "does NOT"
+                    })
+                );
+            }
+            self.process_dose_weighting_options(frame_doses_opt.take(), &mut adoc_type);
+
+            // Get option for unweighted output also
+            let mut temp = Vec::new();
+            do_unweight = 1 - pip_get_string(b"UnweightedOutputFile", &mut temp);
+            if do_unweight != 0 {
+                self.m_out_names[self.m_num_out_files as usize] = Some(temp);
+                self.m_num_out_files += 1;
+            }
+            title_descs[1] = Some(b"non-DW sum".to_vec());
+        }
+
+        // Set up even and odd files
+        if even_odd_ouput != 0 {
+            xf_name = self.m_out_names[0].clone().unwrap_or_default();
+            ext_str = Vec::new();
+            if let Some(found) = find_last_of(&xf_name, b".") {
+                let mut t = found;
+                if t + 5 >= xf_name.len() && t > 1 {
+                    ext_str = xf_name[t..].to_vec();
+                    xf_name.truncate(t);
+                    t -= 1;
+                    if even_odd_ouput > 1 && t > 0 && (xf_name[t] == b'a' || xf_name[t] == b'b') {
+                        ext_str.insert(0, xf_name[t]);
+                        xf_name.truncate(t);
+                    }
+                }
+            }
+            let mut name = xf_name.clone();
+            name.extend_from_slice(b"_even");
+            name.extend_from_slice(&ext_str);
+            let n = self.m_num_out_files as usize;
+            self.m_out_names[n] = Some(name);
+            title_descs[n] = Some(b"even sum".to_vec());
+            self.m_out_heads[n] = EVEN_HEAD;
+            self.m_num_out_files += 1;
+            let mut name = xf_name.clone();
+            name.extend_from_slice(b"_odd");
+            name.extend_from_slice(&ext_str);
+            let n = self.m_num_out_files as usize;
+            self.m_out_names[n] = Some(name);
+            title_descs[n] = Some(b"odd sum".to_vec());
+            self.m_out_heads[n] = ODD_HEAD;
+            self.m_num_out_files += 1;
+        }
+
+        // Open and read header of every input file before starting
+        num_all_sets = 0;
+        min_set_size = 0;
+        ind = 0;
+        while ind < self.m_num_in_files {
+            let Some(next) = self.get_next_filename(
+                ind,
+                num_in_by_opt,
+                file_list_fp.as_mut(),
+                frame_path.as_deref(),
+                list_name.as_deref().unwrap_or(b""),
+                &mut end_reached,
+            ) else {
+                break;
+            };
+            filename = next;
+
+            // Save filename and check file
+            self.m_in_files.push(filename.clone());
+            if (self.m_zero_dose_thresh > 0.
+                && self.m_dose_from_mdoc[ind as usize] < self.m_zero_dose_thresh)
+                || (dropping_by_mean && mean_from_mdoc[ind as usize] < drop_mean_crit)
+            {
+                ind += 1;
+                continue;
+            }
+
+            if ind == 0 || skip_checks == 0 {
+                let mut head = MrcHeader::default();
+                self.m_in_fp = Some(self.open_and_read_header(
+                    &filename,
+                    &mut head,
+                    b"input image",
+                    self.m_test_mode != 0 && ind == self.m_num_in_files - 1,
+                ));
+                self.m_in_head = head;
+                self.check_input_file(
+                    &filename,
+                    &self.m_in_head,
+                    if ind != 0 { self.m_nx } else { 0 },
+                    self.m_ny,
+                    combine_files,
+                );
+                data_size = data_size_for_mode(self.m_in_head.mode).map_or(0, |(d, _)| d);
+                self.m_max_data_size = b3dmax!(self.m_max_data_size, data_size);
+
+                // Determine EER status now from the first file (first???)
+                ii_frames = ii_lookup_file_from_fp(self.m_in_fp.as_ref().unwrap());
+                if ind == 0 {
+                    if let Some(frames) = ii_frames {
+                        let frames = unsafe { &*frames };
+                        if frames.file == IIFILE_TIFF && frames.num_frames_in_eerfile > 0 {
+                            self.m_frames_are_eer = true;
+                            if !rot_flip_entered || self.m_rotation_flip < 0 {
+                                self.m_rotation_flip = 0;
+                            }
+                            self.m_antialias_eer = frames.antialias_eerfilter != 0;
+                            if self.m_antialias_eer {
+                                kernel_scale = frames.eerkernel_scale;
+                            }
+                        }
+                    }
+                }
+
+                // If all these conditions are satisfied, it is possibly and FEI file and if it
+                // turns out to be so, we can apply rfsum = -1 properly
+                if ind == 0
+                    && ii_frames.is_some()
+                    && sum_rfentered == -1
+                    && unsafe { (*ii_frames.unwrap()).file } == IIFILE_MRC
+                    && self.m_in_head.y_inverted == 0
+                    && self.m_in_head.imod_stamp != IMOD_MRC_STAMP
+                {
+                    non_imod_mrcframes = true;
+
+                    // But if there is no mdoc file, look for further signatures of an FEI file
+                    if mdoc_name.is_none()
+                        && self.m_in_head.nlabl == 0
+                        && self.m_in_head.mx * self.m_in_head.my * self.m_in_head.mz == 1
+                        && self.m_in_head.amin == 0.
+                        && self.m_in_head.amax == 0.
+                    {
+                        self.m_are_feiframes = true;
+                    }
+                }
+            }
+
+            if ind == 0 && ref_names_from_titles != 0 {
+                self.check_titles_for_ref_names(&filename, ii_frames);
+            }
+
+            // Set size and mode from first file.  Default to not do bytes as output
+            if ind == 0 {
+                if !entered_mode {
+                    out_mode = if self.m_in_head.mode == MRC_MODE_BYTE {
+                        MRC_MODE_SHORT
+                    } else {
+                        self.m_in_head.mode
+                    };
+                }
+                self.m_nx = self.m_in_head.nx;
+                self.m_ny = self.m_in_head.ny;
+                if self.m_doing_frame_ts {
+                    if self.m_in_head.nz as usize != self.m_saved_frames.len() {
+                        exit_error_fmt!(
+                            "The number of frames (%d) does not match the number of entries in the saved frame list (%d)",
+                            CArg::Int(self.m_in_head.nz as i64),
+                            CArg::Int(self.m_saved_frames.len() as i64)
+                        );
+                    }
+                    nx_stack = self.m_nx;
+                    ny_stack = self.m_ny;
+                }
+
+                for tind in 0..self.m_num_out_files as usize {
+                    self.m_heads[self.m_out_heads[tind]] = self.m_in_head.clone();
+                }
+                (x_scale, y_scale, z_scale) = mrc_get_scale(&self.m_in_head);
+
+                // Also get the rotation/flip if needed
+                get_need_rf = (self.m_rotation_flip < -1 && self.m_sum_rotation_flip == SRF_NO_VAL)
+                    || (self.m_sum_rotation_flip < 0 && self.m_sum_rotation_flip != SRF_NO_VAL);
+                if self.m_frames_are_eer
+                    && self.m_sum_rotation_flip < 0
+                    && self.m_sum_rotation_flip != SRF_NO_VAL
+                {
+                    // Getting orientation from a TIFF file and converting to r/f value
+                    if unsafe {
+                        tiff_get_field(
+                            ii_frames.unwrap_or(std::ptr::null_mut()),
+                            TIFFTAG_ORIENTATION,
+                            (&mut tiff_orient as *mut i16).cast(),
+                        )
+                    } <= 0
+                    {
+                        exit_error(
+                            b"Cannot find orientation tag in TIFF header of first input file",
+                        );
+                    }
+                    match tiff_orient {
+                        ORIENTATION_TOPLEFT => self.m_sum_rotation_flip = 0,
+                        ORIENTATION_TOPRIGHT => self.m_sum_rotation_flip = 4,
+                        ORIENTATION_BOTRIGHT => self.m_sum_rotation_flip = 2,
+                        ORIENTATION_BOTLEFT => self.m_sum_rotation_flip = 6,
+                        ORIENTATION_LEFTTOP => self.m_sum_rotation_flip = 5,
+                        ORIENTATION_RIGHTTOP => self.m_sum_rotation_flip = 3,
+                        ORIENTATION_RIGHTBOT => self.m_sum_rotation_flip = 7,
+                        ORIENTATION_LEFTBOT => self.m_sum_rotation_flip = 1,
+                        _ => exit_error_fmt!(
+                            "Unknown value %d for orientation tag in TIFF header",
+                            CArg::Int(tiff_orient as i64)
+                        ),
+                    }
+                } else if self.m_rotation_flip < 0 || get_need_rf || total_scale > 0. {
+                    for ix in 0..self.m_in_head.nlabl.clamp(0, MRC_NLABELS as i32) as usize {
+                        let label = c_str(&self.m_in_head.labels[ix]).to_vec();
+                        if self.m_rotation_flip < 0 || get_need_rf {
+                            if let Some(pos) = find_bytes(&label, b" r/f ") {
+                                let mut end = 0;
+                                self.m_rotation_flip =
+                                    strtol(&label[pos + 4..], &mut end, 10) as i32;
+                                if get_need_rf {
+                                    if let Some(pos) = find_bytes(&label, b" need ") {
+                                        let mut end = 0;
+                                        self.m_sum_rotation_flip =
+                                            strtol(&label[pos + 5..], &mut end, 10) as i32;
+                                    } else {
+                                        self.m_sum_rotation_flip = 0;
+                                    }
+                                }
+                            }
+                        }
+                        if let Some(pos) = find_bytes(&label, b", scaled by") {
+                            let mut end = 0;
+                            already_scaled_by = strtod(&label[pos + 11..], &mut end) as f32;
+                        }
+                    }
+                    if self.m_rotation_flip < 0 {
+                        exit_error(b"Cannot find r/f entry in header of first input file");
+                    }
+                }
+
+                if self.m_sum_rotation_flip == SRF_NO_VAL {
+                    self.m_sum_rotation_flip = 0;
+                }
+
+                // And commit to combining files if one frame and breaking into sets, and disallow
+                // frame subsets
+                if break_set_size > 0 && self.m_in_head.nz == 1 {
+                    combine_files = break_set_size;
+                }
+                if combine_files > 0 && (start_frame >= 0 || self.m_start_assess >= 0) {
+                    exit_error(b"You cannot enter -frames when combining single-frame files");
+                }
+                if combine_files == 0 && skip_checks != 0 {
+                    exit_error(b"You cannot skip file checks unless combining single-frame files");
+                }
+
+                // Determine if reading TIFF and if so, get number of threads to use
+                if combine_files == 0 {
+                    self.m_file_copies[0] = ii_lookup_file_from_fp(self.m_in_fp.as_ref().unwrap())
+                        .unwrap_or(std::ptr::null_mut());
+                    if self.m_file_copies[0].is_null() {
+                        printf!(
+                            "WARNING: %s - Could not find iiFile from file pointer to assess whether to read a TIFF file in parallel\n",
+                            CArg::Bytes(progname)
+                        );
+                    }
+                    if !self.m_file_copies[0].is_null()
+                        && unsafe { (*self.m_file_copies[0]).file } == IIFILE_TIFF
+                    {
+                        max_read_threads = tiff_num_read_threads(
+                            self.m_nx,
+                            self.m_ny,
+                            unsafe { (*self.m_file_copies[0]).tiff_compression },
+                            MAX_READ_THREADS as i32,
+                        );
+                    }
+                }
+            }
+
+            // Get frames to use from file and make sure it is legal
+            num_frame_use = self.m_in_head.nz;
+            if start_frame > 0 {
+                num_frame_use = b3dmin!(self.m_in_head.nz, end_frame) + 1 - start_frame;
+            }
+            if num_frame_use < 1 {
+                exit_error_fmt!(
+                    "No frames would be included for file %s which has only %d frames",
+                    CArg::Bytes(&self.m_in_files[ind as usize]),
+                    CArg::Int(self.m_in_head.nz as i64)
+                );
+            }
+            if combine_files == 0 && num_frame_use < break_set_size {
+                exit_error_fmt!(
+                    "The available frames for file %s is %d, less than the set size of %d",
+                    CArg::Bytes(&self.m_in_files[ind as usize]),
+                    CArg::Int(num_frame_use as i64),
+                    CArg::Int(break_set_size as i64)
+                );
+            }
+
+            // Check for gain reference if one not entered
+            has_extra = self.m_in_head.next != 0
+                && extra_is_nbytes_and_flags(
+                    self.m_in_head.nint as i32,
+                    self.m_in_head.nreal as i32,
+                ) == 0;
+            iz = 0;
+            if has_extra
+                && self.m_gain_name.is_none()
+                && self.m_in_head.next
+                    >= self.m_in_head.nz
+                        * 4
+                        * (self.m_in_head.nint as i32 + self.m_in_head.nreal as i32)
+                        + 4 * self.m_nx * self.m_ny
+            {
+                iz = 1;
+            }
+            if ind == 0 {
+                self.m_extra_has_gain_ref = iz;
+            } else if self.m_extra_has_gain_ref != iz {
+                exit_error_fmt!(
+                    "All files must have gain references in their extended header if any do; it is missing in %s",
+                    CArg::Bytes(&self.m_in_files[ind as usize])
+                );
+            }
+
+            // Get the min and max set sizes if breaking, or if extra header has tilt angles,
+            // or for a frame list file
+            min_set = 0;
+            if break_set_size > 0 && combine_files == 0 {
+                self.min_max_set_size(break_set_size, num_frame_use, &mut min_set, &mut max_set);
+                num_sets = num_frame_use / break_set_size;
+            } else if self.m_doing_frame_ts {
+                num_sets = self.m_num_in_sets.len() as i32;
+                min_set = self.m_in_head.nz;
+                max_set = 0;
+
+                // The source reuses the file loop's `ind` here; with a frame
+                // list there is exactly one input file, so the loop still ends.
+                ind = 0;
+                while ind < num_sets {
+                    min_set = b3dmin!(min_set, self.m_num_in_sets[ind as usize]);
+                    max_set = b3dmax!(max_set, self.m_num_in_sets[ind as usize]);
+                    ind += 1;
+                }
+            } else if combine_files == 0 && has_extra {
+                let mut fp = self.m_in_fp.take().unwrap();
+                let mut head = std::mem::take(&mut self.m_in_head);
+                ierr = self.analyze_extra_header(
+                    &mut fp,
+                    &mut head,
+                    start_frame,
+                    end_frame,
+                    break_set_size > 0,
+                    &mut extra_buf,
+                    &mut extra_buf_size,
+                    &mut extra_tilts,
+                    &mut min_set,
+                    &mut max_set,
+                    &mut file_axis,
+                    &mut file_pix,
+                );
+                self.m_in_head = head;
+                self.m_in_fp = Some(fp);
+
+                // Save the axis rotation and pixel size if any, and make sure all files are
+                // consistent
+                file_has_tilts = if self.m_names_from_mdoc || break_set_size > 0 {
+                    0
+                } else {
+                    ierr / 2
+                };
+                if ind == 0 {
+                    extra_has_axis_pix = ierr % 2;
+                    if ierr % 2 != 0 {
+                        extra_axis = file_axis;
+                        extra_pix_size = file_pix;
+                    }
+                    extra_has_tilts = file_has_tilts;
+                }
+
+                if extra_has_axis_pix != ierr % 2
+                    || (extra_has_axis_pix != 0
+                        && ((extra_axis - file_axis).abs() as f64 > 0.01
+                            || (extra_pix_size - file_pix).abs() as f64 > 0.01))
+                {
+                    exit_error_fmt!(
+                        "All files must have the same axis rotation angles and pixel sizes in the extended header if any do; they differ in %s",
+                        CArg::Bytes(&self.m_in_files[ind as usize])
+                    );
+                }
+                if extra_has_tilts != file_has_tilts {
+                    exit_error_fmt!(
+                        "All files must have valid tilt angles in extended header if any do and if -break is not entered; they are invalid in %s",
+                        CArg::Bytes(&self.m_in_files[ind as usize])
+                    );
+                }
+                if extra_has_tilts != 0 {
+                    num_sets = extra_tilts.len() as i32;
+                    if tilt_name.is_none() && stack_name.is_none() {
+                        self.m_tilt_angles.extend_from_slice(&extra_tilts);
+                    }
+                }
+
+                // Assign the axis angle to be output if not set already
+                if extra_has_axis_pix != 0 && axis_angle < -990. {
+                    axis_angle = file_axis;
+                }
+            }
+
+            // Keep track of minimum and maximum set size if sets came out either way
+            if min_set != 0 {
+                if min_set_size == 0 {
+                    min_set_size = min_set;
+                    max_set_size = max_set;
+                } else {
+                    min_set_size = b3dmin!(min_set_size, min_set);
+                    max_set_size = b3dmax!(max_set_size, max_set);
+                }
+                num_all_sets += num_sets;
+            }
+            if ind == 0 || skip_checks == 0 {
+                if let Some(mut fp) = self.m_in_fp.take() {
+                    ii_fclose(&mut fp);
+                }
+            }
+
+            self.m_max_num_z = b3dmax!(self.m_max_num_z, num_frame_use);
+            self.m_max_frame_doses = b3dmax!(self.m_max_frame_doses, self.m_in_head.nz);
+            ind += 1;
+        }
+
+        // Finish up with processing a list of input files: just fix the # of files
+        if file_list_fp.is_some() {
+            file_list_fp = None;
+            self.m_num_in_files = self.m_in_files.len() as i32;
+            if self.m_num_in_files == 0 {
+                exit_error_fmt!(
+                    "There were no input files in the list file %s",
+                    CArg::Bytes(list_name.as_deref().unwrap_or(b""))
+                );
+            }
+            printf!(
+                "%d files in input file list\n",
+                CArg::Int(self.m_num_in_files as i64)
+            );
+        }
+        drop(file_list_fp);
+
+        if ref_names_from_titles != 0
+            && self.m_gain_name.is_none()
+            && self.m_extra_has_gain_ref == 0
+        {
+            exit_error(b"No gain reference name was found in the frame file titles");
+        }
+
+        // Handle combination of single-frame files or breaking frames into sets
+        if combine_files != 0 {
+            if self.m_num_in_files < combine_files {
+                exit_error_fmt!(
+                    "The break entry, %d, is bigger than the number of single-frame input files, %d",
+                    CArg::Int(combine_files as i64),
+                    CArg::Int(self.m_num_in_files as i64)
+                );
+            }
+            num_single_files = self.m_num_in_files;
+            let mut max_num_z = 0;
+            self.min_max_set_size(
+                combine_files,
+                self.m_num_in_files,
+                &mut ierr,
+                &mut max_num_z,
+            );
+            self.m_max_num_z = max_num_z;
+            self.m_max_frame_doses = self.m_max_num_z;
+            self.m_num_in_files /= combine_files;
+            printf!(
+                "%d files will be combined into %d summed images\n",
+                CArg::Int(num_single_files as i64),
+                CArg::Int(self.m_num_in_files as i64)
+            );
+        } else if break_set_size > 0 || extra_has_tilts != 0 || self.m_doing_frame_ts {
+            num_single_files = self.m_num_in_files;
+            self.m_num_in_files = num_all_sets;
+            self.m_max_num_z = max_set_size;
+            self.m_max_frame_doses = max_set_size;
+            if extra_has_tilts != 0 {
+                printf!(
+                    "Tilt angles from extended header will be used to break frames into sets\n"
+                );
+            }
+            printf!(
+                "Frames from %d files will be broken into %d summed images\n",
+                CArg::Int(num_single_files as i64),
+                CArg::Int(self.m_num_in_files as i64)
+            );
+        }
+        if self.m_extra_has_gain_ref != 0 {
+            printf!("Gain reference from extended header will be applied to frames\n");
+        }
+
+        starting_file = 1;
+        ending_file = self.m_num_in_files;
+        if pip_get_two_integers(b"RangeOfSetsToDo", &mut starting_file, &mut ending_file) == 0
+            && (self.m_zero_dose_thresh > 0. || dropping_by_mean)
+        {
+            exit_error(b"You cannot enter the -ddrop or -mdrop option with a range of sets to do");
+        }
+        if starting_file > ending_file || starting_file < 1 || ending_file > self.m_num_in_files {
+            exit_error(b"Starting or ending set number to process is out of range");
+        }
+
+        num_files_to_do = ending_file + 1 - starting_file;
+        if self.m_zero_dose_thresh > 0. || dropping_by_mean {
+            num_files_to_do = num_undropped_sets;
+        }
+
+        // Now that number of "files" is known, and maximum number of sections, return to
+        // dealing with dose-weighting
+        self.unify_dose_information(break_set_size, combine_files, adoc_type);
+
+        // Adjust default memory if physical memory is available, and get
+        phys_mem = (b3d_physical_memory() / (1024. * 1024. * 1024.)) as f32;
+        if phys_mem > 0. {
+            if phys_mem < 16. {
+                self.m_memory_limit = (0.75 * phys_mem as f64) as f32;
+            }
+            if phys_mem > 24. {
+                self.m_memory_limit = (0.5 * phys_mem as f64) as f32;
+            }
+        }
+        ind = 0;
+        if pip_get_float_array(b"MemoryLimitGB", &mut mem_limits, &mut ind, 2) == 0 {
+            self.m_memory_limit = mem_limits[0];
+            if (mem_limits[0] as f64) < -0.95
+                || (ind > 1 && (mem_limits[1] as f64) < -0.95)
+                || (mem_limits[0].abs() as f64) < 0.05
+                || (ind > 1 && (mem_limits[1].abs() as f64) < 0.05)
+            {
+                exit_error(
+                    b"You cannot enter a memory limit below -0.95 or between -0.05 and 0.05",
+                );
+            }
+            if mem_limits[0] < 0. {
+                if phys_mem == 0. {
+                    exit_error(
+                        b"You cannot enter a negative CPU memory limit: system memory not available",
+                    );
+                }
+                self.m_memory_limit *= -phys_mem;
+            }
+            if ind > 1 {
+                self.m_gpu_mem_limit = mem_limits[1];
+            }
+        }
+
+        // Allocate arrays for shifts
+        let max_num_z = self.m_max_num_z.max(0) as usize;
+        x_shifts = vec![0.; max_num_z];
+        y_shifts = vec![0.; max_num_z];
+        best_xshifts = vec![0.; max_num_z];
+        best_yshifts = vec![0.; max_num_z];
+        raw_xshifts = vec![0.; max_num_z];
+        raw_yshifts = vec![0.; max_num_z];
+        best_xraw = vec![0.; max_num_z];
+        best_yraw = vec![0.; max_num_z];
+
+        // Get lots more options
+        pip_get_integer(b"PairwiseFrames", &mut num_avainput);
+        pip_get_float(b"TaperFraction", &mut taper_frac);
+        if taper_frac == 0. {
+            full_taper_frac = 0.05;
+        }
+        pip_get_float(b"TrimFraction", &mut trim_frac);
+        pip_get_boolean(b"ReverseOrder", &mut reverse);
+        pip_get_integer(b"ShiftLimit", &mut shift_limit);
+        pip_get_float(b"TruncateAbove", &mut self.m_trunc_limit);
+        if self.m_trunc_limit > 0. {
+            self.m_trunc_limit *= kernel_scale as f32;
+        }
+        let mut temp = Vec::new();
+        if pip_get_string(b"TransformExtension", &mut temp) == 0 {
+            xf_ext = Some(temp);
+        }
+        pip_get_integer(b"DebugOutput", &mut self.m_debug);
+        pip_get_float(b"KFactorForFits", &mut k_factor);
+        pip_get_float(b"MaxResidualWeight", &mut max_max_weight);
+        pip_get_float(b"GoodEnoughError", &mut good_enough);
+        pip_get_boolean(b"UseHybridShifts", &mut self.m_hybrid_shifts);
+        pip_get_float(b"FilterSigma1", &mut sigma1);
+        pip_get_float(b"FilterSigma2", &mut sigma2);
+        pip_get_float(b"FilterRadius1", &mut radius1);
+        pip_get_float(b"FilterRadius2", &mut radius2);
+        pip_get_integer(b"RefineAlignment", &mut self.m_refine_at_end);
+        pip_get_float(b"RefineRadius2", &mut ref_radius2);
+        pip_get_integer(b"AntialiasFilter", &mut anti_filt_type);
+        pip_get_float(b"RingSpacingForFRC", &mut frc_delta_r);
+        pip_get_integer(b"UseGPU", &mut self.m_use_gpu);
+        pip_get_integer(b"GroupSize", &mut self.m_group_size);
+        pip_get_boolean(b"RefineWithGroupSums", &mut group_refine);
+        pip_get_float(b"StopIterationsAtShift", &mut iter_crit);
+        pip_get_float(b"PixelSize", &mut option_pix_size);
+        spline_smooth = pip_get_integer(b"MinForSplineSmoothing", &mut min_num_for_spline);
+        if min_num_for_spline < 8 {
+            spline_smooth = 0;
+        }
+        anti_filt_type = b3dmax!(1, b3dmin!(6, anti_filt_type));
+        if self.m_refine_at_end < 0 {
+            exit_error(b"Entry for -refine cannot be negative");
+        }
+        self.m_num_all_vs_all = num_avainput;
+        if self.m_num_all_vs_all < 0 {
+            if num_avainput < -4 {
+                exit_error(b"The value for the -pair option cannot be more negative than -4");
+            }
+            if num_avainput == -1 {
+                self.m_num_all_vs_all = b3dmin!(MAX_ALL_VS_ALL as i32, self.m_max_num_z + 4);
+            } else {
+                self.m_num_all_vs_all = b3dmax!(
+                    min_fractional_ava,
+                    (self.m_max_num_z - 1 - num_avainput) / (-num_avainput)
+                );
+            }
+        }
+        self.m_num_all_vs_all = b3dmin!(MAX_ALL_VS_ALL as i32, self.m_num_all_vs_all);
+        if self.m_start_assess > 0 && self.m_num_all_vs_all == 0 {
+            exit_error(b"You cannot set frames for assessing fits with cumulative correlations");
+        }
+        if reverse != 0 && (break_set_size > 0 || extra_has_tilts != 0) {
+            exit_error(b"You cannot process in reverse when breaking frames into sets");
+        }
+
+        // Get default binning for size: set the target size bigger for K3
+        min_diff = 1.0e20;
+        ierr = ((self.m_nx as f64) * self.m_ny as f64).sqrt() as i32;
+        if target_entered == 0 && ((ierr < 6000 && ierr > 4500) || (ierr < 12000 && ierr > 9000)) {
+            target_ali_size = (target_ali_size as f64 * 1.25) as i32;
+        }
+        for ind in 0..default_binnings.len() {
+            diff = (target_ali_size as f64
+                - ((self.m_nx as f64) * self.m_ny as f64).sqrt() / default_binnings[ind] as f64)
+                .abs();
+            if diff < min_diff {
+                min_diff = diff;
+                align_bin = default_binnings[ind];
+            }
+        }
+
+        // Set output size based on this binning of frames
+        align_bin_in = align_bin;
+        als_bin_entered =
+            1 - pip_get_two_integers(b"AlignAndSumBinning", &mut align_bin_in, &mut sum_bin);
+        if align_bin_in == 0 || sum_bin < 1 || align_bin_in > 16 || sum_bin > 16 {
+            exit_error(b"Binning value is out of allowed range");
+        }
+        if align_bin_in > 0 {
+            align_bin = align_bin_in;
+        }
+
+        // Get tilt angles from file
+        self.read_tilt_angle_file(tilt_name.as_deref());
+
+        // Collect information from stack or mdoc file
+        if let Some(stack) = stack_name.as_deref() {
+            stack_fp = Some(self.open_and_read_header(stack, &mut stack_head, b"stack", false));
+            stack_mode = stack_head.mode;
+            nx_stack = stack_head.nx;
+            ny_stack = stack_head.ny;
+            self.m_heads[MAIN_HEAD] = stack_head.clone();
+            self.m_heads[UNWGT_HEAD] = stack_head.clone();
+            self.m_num_sect = stack_head.nz;
+        }
+
+        // Get tilt angles from mdoc if not gotten yet, transfer titles
+        if mdoc_name.is_some() {
+            if stack_name.is_some() {
+                exit_error(b"You cannot enter both a corresponding stack and an mdoc file");
+            }
+            self.get_angles_and_titles_from_mdoc(tilt_name.as_deref(), axis_angle, false);
+        } else if axis_angle > -990. {
+            for out_num in 0..self.m_num_out_files {
+                self.add_axis_angle_title(out_num, axis_angle);
+            }
+        }
+
+        // Now we know if it is from FEI, so if it is original MRC, we can set sumRF
+        if sum_rfentered == -1
+            && self.m_are_feiframes
+            && !self.m_frames_are_eer
+            && non_imod_mrcframes
+        {
+            self.m_sum_rotation_flip = 6;
+            printf!(
+                "Assuming frames are from Thermo/FEI software: setting sum rotation/flip to %d to flip around X\n",
+                CArg::Int(self.m_sum_rotation_flip as i64)
+            );
+        }
+
+        if self.m_sum_rotation_flip < 0 || self.m_sum_rotation_flip > 7 {
+            exit_error(b"Inappropriate value of rotation and flip for sum entered");
+        }
+        nx_sum = (if self.m_sum_rotation_flip % 2 != 0 {
+            self.m_ny
+        } else {
+            self.m_nx
+        }) / sum_bin;
+        nx_out = nx_sum;
+        ny_sum = (if self.m_sum_rotation_flip % 2 != 0 {
+            self.m_nx
+        } else {
+            self.m_ny
+        }) / sum_bin;
+        ny_out = ny_sum;
+
+        // Now for tilt angles from either a tilt file or an mdoc, deal with a mismatch between
+        // angles and frame sets
+        if tilt_name.is_some() || mdoc_name.is_some() {
+            self.handle_too_many_tilt_angles(progname);
+        }
+
+        // Set default index to sets then see if need to reorder: test for monotonic already
+        for ind in 0..self.m_num_in_files {
+            set_order_index.push(ind);
+        }
+        if !self.m_tilt_angles.is_empty() && tilts_vary && reorder_by_tilt != 0 {
+            all_neg = true;
+            all_pos = true;
+            for ind in 1..self.m_tilt_angles.len() {
+                if self.m_tilt_angles[ind] as f64 > self.m_tilt_angles[ind - 1] as f64 + 0.01 {
+                    all_neg = false;
+                }
+                if (self.m_tilt_angles[ind] as f64) < self.m_tilt_angles[ind - 1] as f64 - 0.01 {
+                    all_pos = false;
+                }
+            }
+
+            // Do not reorder if already all negative and it is not forced by a 2, or already
+            // all positive and it is not forced by -2
+            if !(all_neg && reorder_by_tilt < 2) && !(all_pos && reorder_by_tilt > -2) {
+                rs_sort_indexed_floats(
+                    &self.m_tilt_angles,
+                    &mut set_order_index,
+                    self.m_num_in_files,
+                );
+                changed_set_order = true;
+                if reorder_by_tilt < 0 {
+                    let n = self.m_num_in_files as usize;
+                    for ind in 0..n / 2 {
+                        iz = set_order_index[ind];
+                        set_order_index[ind] = set_order_index[n - 1 - ind];
+                        set_order_index[n - 1 - ind] = iz;
                     }
                 }
             }
         }
-        Ok(result)
-    }
-
-    /// `AliFrame::getDosesFromMdoc`: allocate the source result vectors and
-    /// receive already-parsed metadata doses from the autodoc boundary.
-    pub fn get_doses_from_mdoc(
-        number_of_sections: usize,
-        number_of_input_files: usize,
-        doses: &[f32],
-        priors: &[f32],
-        iz_piece: &[i32],
-        frame_dose_lines: &[String],
-    ) -> Result<MdocDoseResult, String> {
-        if doses.len() != number_of_sections
-            || priors.len() != number_of_sections
-            || iz_piece.len() != number_of_sections
-        {
-            return Err("mdoc dose metadata does not match its section count".into());
-        }
-        if frame_dose_lines.len() > number_of_input_files {
-            return Err("mdoc frame-dose lines exceed input files".into());
-        }
-        Ok(MdocDoseResult {
-            dose_from_mdoc: doses.to_vec(),
-            prior_from_mdoc: priors.to_vec(),
-            iz_piece: iz_piece.to_vec(),
-            frame_dose_lines: frame_dose_lines.to_vec(),
-        })
-    }
-
-    /// `AliFrame::getAnglesAndTitlesFromMdoc`, with autodoc lookup replaced by
-    /// the parsed fields supplied in `MdocTiltTitleInput`.
-    pub fn get_angles_and_titles_from_mdoc(
-        input: &MdocTiltTitleInput,
-        read_angles: bool,
-        doing_frame_ts: bool,
-        axis_angle: Option<f32>,
-        angles_only: bool,
-    ) -> Result<MdocTiltTitleResult, String> {
-        let mut result = MdocTiltTitleResult {
-            pixel_spacing: input.pixel_spacing,
-            image_size: input.image_size,
-            ..Default::default()
-        };
-        if read_angles {
-            if doing_frame_ts && input.frame_ts_start_end.len() > input.tilt_angles.len() {
-                return Err("mdoc saved-frame fields exceed tilt-angle sections".into());
+        if !self.m_tilt_angles.is_empty() {
+            for ind in 0..self.m_num_in_files as usize {
+                ordered_angles.push(self.m_tilt_angles[set_order_index[ind] as usize]);
             }
-            result.tilt_records.angles = input.tilt_angles.clone();
-            if doing_frame_ts {
-                for item in input.tilt_angles.iter().enumerate() {
-                    let pair = input.frame_ts_start_end.get(item.0).copied().flatten();
-                    result
-                        .tilt_records
-                        .relative_starts
-                        .push(pair.map_or(-1, |v| v.0));
-                    result
-                        .tilt_records
-                        .relative_ends
-                        .push(pair.map_or(-1, |v| v.1));
-                    result.tilt_records.relative_frame_starts_found |= pair.is_some();
+        }
+
+        // Make sure things work out
+        if stack_name.is_some() || (mdoc_name.is_some() && !self.m_doing_frame_ts) {
+            let what: &str = if stack_name.is_some() {
+                "stack"
+            } else {
+                "mdoc file"
+            };
+            if stack_mode != MRC_MODE_BYTE && !entered_mode {
+                out_mode = stack_mode;
+            }
+            if self.m_num_sect < self.m_num_in_files && tilt_name.is_none() {
+                exit_error_fmt!(
+                    "There are fewer sections in the %s (%d) than frame files or sets (%d)",
+                    CArg::Str(what),
+                    CArg::Int(self.m_num_sect as i64),
+                    CArg::Int(self.m_num_in_files as i64)
+                );
+            }
+            if self.m_num_sect > self.m_num_in_files && tilt_name.is_none() {
+                printf!(
+                    "WARNING: %s - There are fewer frame sets or files (%d) than sections in the %s (%d)\n",
+                    CArg::Bytes(progname),
+                    CArg::Int(self.m_num_in_files as i64),
+                    CArg::Str(what),
+                    CArg::Int(self.m_num_sect as i64)
+                );
+            }
+
+            // Figure out if size works, requires trimming, or implies a binning relative to stack
+            if (nx_stack <= nx_out && ny_stack > ny_out)
+                || (nx_stack > nx_out && ny_stack <= ny_out)
+            {
+                exit_error_fmt!(
+                    "The image size from the %s is bigger in one dimension than the frame size",
+                    CArg::Str(what)
+                );
+            }
+            ierr = 0;
+
+            // Look for integer binning difference that matches in each direction
+            // And make sure each size is close enough after scaling
+            if nx_stack <= nx_out {
+                rel_xbin = b3dnint!(nx_out as f64 / nx_stack as f64);
+                rel_ybin = b3dnint!(ny_out as f64 / ny_stack as f64);
+                if (rel_xbin as f64 * nx_stack as f64 - nx_out as f64).abs()
+                    > size_diff_crit as f64 * nx_out as f64
+                    || (rel_ybin as f64 * ny_stack as f64 - ny_out as f64).abs()
+                        > size_diff_crit as f64 * ny_out as f64
+                    || rel_xbin != rel_ybin
+                {
+                    ierr = 1;
+                }
+                rel_binning = (1. / rel_xbin as f64) as f32;
+            } else {
+                rel_xbin = b3dnint!(nx_stack as f64 / nx_out as f64);
+                rel_ybin = b3dnint!(ny_stack as f64 / ny_out as f64);
+                if (rel_xbin as f64 * nx_out as f64 - nx_stack as f64).abs()
+                    > size_diff_crit as f64 * nx_stack as f64
+                    || (rel_ybin as f64 * ny_out as f64 - ny_stack as f64).abs()
+                        > size_diff_crit as f64 * ny_stack as f64
+                    || rel_xbin != rel_ybin
+                {
+                    ierr = 1;
+                }
+                rel_binning = rel_xbin as f32;
+            }
+            if ierr != 0 {
+                exit_error_fmt!(
+                    "The image size does not correspond well enough between the %s and the frames to deduce their relationship",
+                    CArg::Str(what)
+                );
+            }
+
+            // For same binning, trim if there is a small difference
+            if rel_xbin == 1 {
+                if nx_out - nx_stack > trim_crit || ny_out - ny_stack > trim_crit {
+                    printf!(
+                        "The image size from the %s is significantly smaller and frames will not be trimmed to that size\n",
+                        CArg::Str(what)
+                    );
+                } else if nx_stack < nx_out || ny_stack < ny_out {
+                    printf!(
+                        "The image size from the %s is slightly smaller and frames will be trimmed to that size\n",
+                        CArg::Str(what)
+                    );
+                    nx_out = nx_stack;
+                    ny_out = ny_stack;
+                }
+            } else {
+                // Different binnings: look at labels to try to adjust it there
+                printf!(
+                    "The %s is at a different binning from the frames; frame sizes will not be adjusted\n",
+                    CArg::Str(what)
+                );
+                for out_num in 0..self.m_num_out_files as usize {
+                    let head = self.m_out_heads[out_num];
+                    for ind in 0..self.m_heads[head].nlabl.clamp(0, MRC_NLABELS as i32) as usize {
+                        title = [0; MRC_LABEL_SIZE + 1];
+                        title[..MRC_LABEL_SIZE].copy_from_slice(&self.m_heads[head].labels[ind]);
+                        title[MRC_LABEL_SIZE] = 0x00;
+                        if self.adjust_title_binning(&title, &mut sstr, rel_binning, out_num == 0)
+                            != 0
+                        {
+                            strncpy_label(&mut self.m_heads[head].labels[ind], &sstr);
+                            fix_title_padding(&mut self.m_heads[head].labels[ind]);
+                            break;
+                        }
+                    }
+                }
+
+                // Find and fix title in mdoc too
+                if adjust_mdoc != 0 {
+                    nz = adoc_get_number_of_sections(b"T").unwrap_or(-1);
+                    for ind in 0..nz {
+                        if let Ok(name) = adoc_get_section_name(b"T", ind) {
+                            if self.adjust_title_binning(&name, &mut sstr, rel_binning, false) != 0
+                            {
+                                if adoc_change_section_name(b"T", ind, &sstr).is_err() {
+                                    exit_error(b"Adjusting title with binning in mdoc file");
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        self.m_group_size = b3dmax!(1, self.m_group_size);
+        if self.m_group_size > 1 {
+            ierr = b3dmin!(
+                self.m_max_num_z,
+                self.m_num_all_vs_all + self.m_group_size - 1
+            ) + 1
+                - self.m_group_size;
+            self.m_use_block_group =
+                ((ierr + 1 - self.m_group_size) * (ierr - self.m_group_size)) / 2 < ierr;
+            if self.m_use_block_group {
+                printf!("Using block grouping; too few frames being fit for slide grouping\n");
+            } else if self.m_num_all_vs_all <= MAX_ALL_VS_ALL as i32 + 1 - self.m_group_size {
+                self.m_num_all_vs_all += self.m_group_size - 1;
+            }
+        } else {
+            group_refine = 0;
+        }
+
+        // Set up the binnings to test
+        self.m_num_bin_tests = 1;
+        self.m_num_filt_tests[0] = 1;
+        num_varies = 0;
+        vary_radius2[0][0] = radius2;
+        vary_sigma2[0][0] = sigma2;
+        ierr = 0;
+        if pip_get_integer_array(
+            b"TestBinnings",
+            &mut bins_to_test,
+            &mut ierr,
+            MAX_BINNINGS as i32,
+        ) == 0
+        {
+            self.m_num_bin_tests = ierr;
+            for ind in 0..self.m_num_bin_tests as usize {
+                if bins_to_test[ind] < 1 || bins_to_test[ind] > 16 {
+                    exit_error_fmt!(
+                        "Binning value %d not allowed",
+                        CArg::Int(bins_to_test[ind] as i64)
+                    );
+                }
+                self.m_min_binning_to_test = b3dmin!(self.m_min_binning_to_test, bins_to_test[ind]);
+            }
+        } else {
+            if als_bin_entered == 0 || align_bin_in < 0 {
+                printf!(
+                    "Selected the default binning of %d for this image size\n",
+                    CArg::Int(align_bin as i64)
+                );
+            }
+            bins_to_test[0] = align_bin;
+            self.m_min_binning_to_test = align_bin;
+        }
+
+        // Get the filters to test
+        pip_number_of_entries(b"VaryFilter", &mut num_varies);
+
+        for ind in 0..self.m_num_bin_tests as usize {
+            if (ind as i32) < num_varies {
+                self.m_num_filt_tests[ind] = 0;
+                pip_get_float_array(
+                    b"VaryFilter",
+                    &mut vary_radius2[ind],
+                    &mut self.m_num_filt_tests[ind],
+                    MAX_FILTERS as i32,
+                );
+                if num_avainput == 0 && self.m_num_filt_tests[ind] > 1 {
+                    exit_error(b"You cannot vary filter values when doing cumulative alignment");
+                }
+                rs_sort_floats(&mut vary_radius2[ind], self.m_num_filt_tests[ind]);
+                use_ind = ind as i32;
+            } else {
+                use_ind = b3dmax!(0, num_varies - 1);
+                self.m_num_filt_tests[ind] = self.m_num_filt_tests[use_ind as usize];
+            }
+            for iz in 0..self.m_num_filt_tests[ind] as usize {
+                vary_radius2[ind][iz] = vary_radius2[use_ind as usize][iz];
+                vary_sigma2[ind][iz] = (b3dnint!(
+                    SIG2_ROUND_FAC * sigma2 as f64 * vary_radius2[ind][iz] as f64 / radius2 as f64
+                ) as f64
+                    / SIG2_ROUND_FAC) as f32;
+                num_times_best[ind][iz] = 0;
+            }
+        }
+
+        if ref_radius2 == 0. {
+            ref_radius2 = vary_radius2[0][0];
+        }
+        ref_sigma2 = (b3dnint!(SIG2_ROUND_FAC * sigma2 as f64 * ref_radius2 as f64 / radius2 as f64)
+            as f64
+            / SIG2_ROUND_FAC) as f32;
+
+        //
+        num_drift_loop = 1;
+        pip_get_two_floats(
+            b"DriftLimitDistAndNumber",
+            &mut drift_max_dist,
+            &mut drift_max_frac_num,
+        );
+        if drift_max_dist > 0. {
+            if self.m_num_bin_tests > 1 {
+                exit_error(b"You cannot enter -drift with test binnings");
+            }
+            num_drift_loop = 2;
+            if drift_max_frac_num <= 0. {
+                exit_error(
+                    b"The maximum fraction or number of initial frames to drop must be positive",
+                );
+            }
+            if drift_max_frac_num < 1. && drift_max_frac_num >= 0.5 {
+                exit_error(b"Maximum fraction of initial frames to drop must be less than 0.5");
+            }
+        }
+
+        // Get the gain reference, dark referemce, and camera defects
+        self.get_gain_dark_defects(use_shr_mem);
+
+        // Handle scaling
+        if (self.m_gain_name.is_some() || self.m_extra_has_gain_ref != 0)
+            && (self.m_in_head.mode == MRC_MODE_BYTE || self.m_frames_are_eer)
+            && !entered_scale
+            && total_scale == 0.
+            && !scale_to_mean_sd
+            && out_mode != MRC_MODE_FLOAT
+        {
+            printf!(
+                "Applying default total scaling of %g because %s are being gain-normalized\n",
+                CArg::Dbl(self.m_default_byte_scale as f64),
+                CArg::Str(if self.m_frames_are_eer {
+                    "electron events"
+                } else {
+                    "byte values"
+                })
+            );
+            total_scale = self.m_default_byte_scale;
+        }
+        if total_scale > 0. {
+            scale = total_scale / already_scaled_by;
+        }
+
+        // Get sizes
+        FrameAlign::get_pad_sizes_bytes(
+            self.m_nx,
+            self.m_ny,
+            full_taper_frac,
+            sum_bin,
+            self.m_min_binning_to_test,
+            &mut self.m_full_pad_size,
+            &mut self.m_sum_pad_size,
+            &mut self.m_align_pad_size,
+        );
+
+        // See about GPU
+        self.m_full_data_size = std::mem::size_of::<f32>() as i32;
+        if self.m_use_gpu != 0 && taper_frac <= 0. && trim_frac <= 0. {
+            printf!("The GPU cannot be used when the taper fraction is set to 0\n");
+            self.m_use_gpu = -1;
+        }
+
+        self.m_do_spline = if spline_smooth != 0 && self.m_max_num_z >= min_num_for_spline {
+            1
+        } else {
+            0
+        };
+        self.assess_gpu_needs(use_shr_mem, frc_name.as_deref());
+        if self.m_gpu_flags != 0 && self.m_super_fac_for_defects > 0 {
+            self.m_gpu_flags |= if self.m_super_fac_for_defects > 2 {
+                GPU_AVG_SUPER_4X
+            } else {
+                GPU_AVG_SUPER_2X
+            };
+        }
+
+        // FRC output file
+        if let Some(name) = frc_name.as_deref() {
+            imod_backup_file(&String::from_utf8_lossy(name));
+            frc_fp = ImodFile::open(os_path(name), "w");
+            if frc_fp.is_none() {
+                exit_error_fmt!("Opening file for FRC curves, %s", CArg::Bytes(name));
+            }
+        }
+
+        // Shift output file
+        if pip_get_string(b"PlottableShiftFile", &mut extra_name) == 0 {
+            imod_backup_file(&String::from_utf8_lossy(&extra_name));
+            plot_fp = ImodFile::open(os_path(&extra_name), "w");
+            if plot_fp.is_none() {
+                exit_error_fmt!(
+                    "Opening file for shift curves, %s",
+                    CArg::Bytes(&extra_name)
+                );
+            }
+        }
+        pip_done();
+
+        let mut stack_copied = false;
+        if self.m_test_mode == 0 {
+            // Set up output header(s)
+            for out_num in 0..self.m_num_out_files as usize {
+                let hp = self.m_out_heads[out_num];
+                {
+                    let head_ptr = &mut self.m_heads[hp];
+                    head_ptr.nz = num_files_to_do;
+                    head_ptr.mz = num_files_to_do;
+                    head_ptr.nx = nx_out;
+                    head_ptr.ny = ny_out;
+                    head_ptr.mx = head_ptr.nx;
+                    head_ptr.my = head_ptr.ny;
+                    head_ptr.mode = out_mode;
+                    head_ptr.amax = -1.0e30;
+                    head_ptr.amin = 1.0e30;
+                    head_ptr.amean = 0.;
+                }
+                if x_scale == 1.0 && extra_has_axis_pix != 0 {
+                    x_scale = extra_pix_size;
+                    y_scale = extra_pix_size;
+                    z_scale = extra_pix_size;
+                } else if x_scale == 1.0 && stack_name.is_some() {
+                    // Get pixel size from stack if needed, scale by binning difference
+                    stack_bin_x = (nx_out * sum_bin / stack_head.nx) as f32;
+                    stack_bin_y = (ny_out * sum_bin / stack_head.ny) as f32;
+                    stack_bin = b3dnint!(stack_bin_x);
+                    if stack_bin > 0
+                        && ((b3dnint!(stack_bin_x) as f32 - stack_bin_x).abs() as f64) < 0.05
+                        && ((b3dnint!(stack_bin_y) as f32 - stack_bin_y).abs() as f64) < 0.05
+                        && stack_bin == b3dnint!(stack_bin_y)
+                    {
+                        (x_scale, y_scale, z_scale) = mrc_get_scale(&stack_head);
+                        x_scale /= stack_bin as f32;
+                        y_scale /= stack_bin as f32;
+                        z_scale /= stack_bin as f32;
+                    }
+                } else if x_scale == 1.0
+                    && mdoc_name.is_some()
+                    && self.m_mdoc_xsize != 0
+                    && self.m_mdoc_pixel != 0.
+                {
+                    // Or get pixel size from mdoc and scale it by size change if any
+                    stack_bin_x = (nx_out * sum_bin / self.m_mdoc_xsize) as f32;
+                    stack_bin_y = (ny_out * sum_bin / self.m_mdoc_ysize) as f32;
+                    stack_bin = b3dnint!(stack_bin_x);
+                    if ((b3dnint!(stack_bin_x) as f32 - stack_bin_x).abs() as f64) < 0.05
+                        && ((b3dnint!(stack_bin_y) as f32 - stack_bin_y).abs() as f64) < 0.05
+                        && stack_bin == b3dnint!(stack_bin_y)
+                        && stack_bin > 0
+                    {
+                        x_scale = self.m_mdoc_pixel / stack_bin as f32;
+                        y_scale = x_scale;
+                        z_scale = x_scale;
+                    }
+                }
+                if option_pix_size > 0. {
+                    x_scale = (10. * option_pix_size as f64) as f32;
+                    y_scale = x_scale;
+                    z_scale = x_scale;
+                }
+                mrc_set_scale(
+                    &mut self.m_heads[hp],
+                    (sum_bin as f32 * x_scale) as f64,
+                    (sum_bin as f32 * y_scale) as f64,
+                    (sum_bin as f32 * z_scale) as f64,
+                );
+
+                // 11/4/20: Axis rotation was already output, no need to do here if fileHasAxisPix
+
+                let desc = title_descs[out_num].as_deref().unwrap_or(b"");
+                let label = if sum_bin > 1 {
+                    c_format_bytes(
+                        "alignframes: %s scaled by %g, reduced %d",
+                        &[
+                            CArg::Bytes(desc),
+                            CArg::Dbl(scale as f64),
+                            CArg::Int(sum_bin as i64),
+                        ],
+                    )
+                } else {
+                    c_format_bytes(
+                        "alignframes: %s scaled by %g",
+                        &[CArg::Bytes(desc), CArg::Dbl(scale as f64)],
+                    )
+                };
+                mrc_head_label(&mut self.m_heads[hp], &label);
+                mrc_init_output_header(&mut self.m_heads[hp]);
+
+                // Set up output file(s) and li for writing
+                let out_name = self.m_out_names[out_num].clone().unwrap_or_default();
+                imod_backup_file(&String::from_utf8_lossy(&out_name));
+                out_fps[out_num] = ii_fopen(&out_name, "wb");
+                if out_fps[out_num].is_none() {
+                    exit_error_fmt!("Opening output file %s", CArg::Bytes(&out_name));
+                }
+
+                // Also create an .openTS file if it seems to be a tilt series
+                if !self.m_tilt_angles.is_empty() || stack_name.is_some() || self.m_doing_frame_ts {
+                    let mut name = out_name.clone();
+                    name.extend_from_slice(b".openTS");
+                    let _ = ImodFile::open(os_path(&name), "w");
+                    open_ts_names[out_num] = Some(name);
+                }
+
+                mrc_init_li(Some(&mut li), None);
+                mrc_init_li(Some(&mut li), Some(&self.m_heads[hp]));
+                self.m_heads[hp].fp = out_fps[out_num].clone();
+
+                // Need to test for output file type
+                if b3d_output_file_type() == OUTPUT_TYPE_MRC {
+                    if stack_name.is_some() && stack_head.next != 0 && self.m_tilt_angles.is_empty()
+                    {
+                        let head_ptr = &mut self.m_heads[hp];
+                        head_ptr.next = stack_head.next;
+                        head_ptr.nint = stack_head.nint;
+                        head_ptr.nreal = stack_head.nreal;
+                        head_ptr.header_size = stack_head.header_size;
+                        if mrc_copy_extra_header(&mut stack_head, head_ptr) != 0 {
+                            exit_error(b"Copying extended header from stack to output file");
+                        }
+
+                        // The source closes the stack here, inside the output
+                        // loop, and then copies from the closed stream for the
+                        // next output (BUGS.md); it is closed after the loop.
+                        stack_copied = true;
+                    } else if !self.m_tilt_angles.is_empty() {
+                        self.m_num_sect = self.m_tilt_angles.len() as i32;
+                        let head_ptr = &mut self.m_heads[hp];
+                        head_ptr.next = 4 * b3dmin!(self.m_num_sect, num_files_to_do);
+                        head_ptr.nint = 0;
+                        head_ptr.nreal = 1;
+                        head_ptr.header_size += head_ptr.next;
+                        let next = head_ptr.next as usize;
+                        let start = (starting_file - 1) as usize;
+                        let angles = &ordered_angles[start..start + next / 4];
+                        let bytes = unsafe {
+                            std::slice::from_raw_parts(angles.as_ptr().cast::<u8>(), next)
+                        };
+                        let fp = out_fps[out_num].as_mut().unwrap();
+                        if b3d_fseek(fp, 1024, SEEK_SET) != 0
+                            || b3d_fwrite(bytes, 1, next, fp) as i32 != next as i32
+                        {
+                            exit_error(b"Writing tilt angles to extended header of output file");
+                        }
+                    }
+                }
+
+                // Do modifications to the mdoc
+                if out_num == 0 && adjust_mdoc != 0 && !self.m_doing_frame_ts {
+                    let name0 = self.m_out_names[0].clone().unwrap_or_default();
+                    if adoc_set_key_value(ADOC_GLOBAL_NAME, 0, b"ImageFile", Some(&name0)) != 0
+                        || adoc_set_two_integers(ADOC_GLOBAL_NAME, 0, b"ImageSize", nx_out, ny_out)
+                            != 0
+                        || adoc_set_integer(ADOC_GLOBAL_NAME, 0, b"DataMode", out_mode) != 0
+                        || adoc_get_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", &mut pix_temp) != 0
+                        || adoc_set_float(
+                            ADOC_GLOBAL_NAME,
+                            0,
+                            b"PixelSpacing",
+                            pix_temp * rel_binning,
+                        ) != 0
+                    {
+                        exit_error(b"Adjusting global values in mdoc");
+                    }
+                }
+            }
+        }
+        if stack_copied {
+            if let Some(mut fp) = stack_fp.take() {
+                ii_fclose(&mut fp);
+            }
+        }
+
+        // Get data
+        let sum_size = ((self.m_nx / sum_bin) * (self.m_ny / sum_bin)) as usize;
+        summed = vec![0.; sum_size];
+        if do_unweight != 0 {
+            unwgt_sum = vec![0.; sum_size];
+        }
+
+        if self.m_sum_rotation_flip != 0 {
+            rot_sum = vec![0.; sum_size];
+        }
+
+        printf!(
+            "Number of sets of frames to align = %d                           [ALF1]\n",
+            CArg::Int(num_files_to_do as i64)
+        );
+
+        // Loop on frame files or frame sets
+        super_file = 0;
+        set_in_file = 0;
+        num_sets = 0;
+        ifile = starting_file - 1;
+        while ifile < ending_file {
+            min_error = 1.0e30;
+            original_zval = ifile;
+
+            // `alignframes.cpp:1374` reads `} if (`: the missing `else` sent
+            // combined files to the frame-set branch and named every combined
+            // image after the first input file (BUGS.md).
+            if combine_files != 0 {
+                balanced_group_limits(
+                    num_single_files,
+                    self.m_num_in_files,
+                    ifile,
+                    &mut start_combine,
+                    &mut end_combine,
+                );
+                filename = self.m_in_files[start_combine as usize].clone();
+            } else if break_set_size > 0 || extra_has_tilts != 0 || self.m_doing_frame_ts {
+                filename = self.m_in_files[super_file as usize].clone();
+            } else {
+                filename = self.m_in_files[set_order_index[ifile as usize] as usize].clone();
+                original_zval = set_order_index[ifile as usize];
+            }
+            if (self.m_zero_dose_thresh > 0.
+                && self.m_dose_from_mdoc[original_zval as usize] < self.m_zero_dose_thresh)
+                || (dropping_by_mean && mean_from_mdoc[original_zval as usize] < drop_mean_crit)
+            {
+                ifile += 1;
+                continue;
+            }
+
+            // Open file if it is time to do so
+            if set_in_file == 0 {
+                let mut head = MrcHeader::default();
+                self.m_in_fp =
+                    Some(self.open_and_read_header(&filename, &mut head, b"input image", false));
+                self.m_in_head = head;
+                self.check_input_file(
+                    &filename,
+                    &self.m_in_head,
+                    self.m_nx,
+                    self.m_ny,
+                    combine_files,
+                );
+                nz = self.m_in_head.nz;
+                self.m_parallel_read = false;
+
+                // If not combining files, see if the file is a TIFF for parallel reading
+                if combine_files == 0 && max_read_threads > 1 {
+                    self.m_file_copies[0] = ii_lookup_file_from_fp(self.m_in_fp.as_ref().unwrap())
+                        .unwrap_or(std::ptr::null_mut());
+                    if !self.m_file_copies[0].is_null()
+                        && unsafe { (*self.m_file_copies[0]).file } == IIFILE_TIFF
+                    {
+                        let mut copies = [std::ptr::null_mut(); MAX_TIFF_THREADS];
+                        copies.copy_from_slice(&self.m_file_copies[..MAX_TIFF_THREADS]);
+                        self.m_num_read_threads =
+                            ii_open_copies_for_threads(&mut copies, max_read_threads);
+                        self.m_file_copies[..MAX_TIFF_THREADS].copy_from_slice(&copies);
+                        self.m_parallel_read = self.m_num_read_threads > 1;
+                    }
+                }
+
+                // Get gain reference if it is in there
+                if self.m_extra_has_gain_ref != 0 {
+                    let nxy = (self.m_nx * self.m_ny) as usize;
+                    let gain = Rc::make_mut(self.m_gain_slice.as_mut().unwrap());
+                    let gain_bytes = buf_bytes_mut(&mut gain[..nxy]);
+                    let fp = self.m_in_fp.as_mut().unwrap();
+                    if b3d_fseek(
+                        fp,
+                        MRC_HEADER_SIZE as i32
+                            + 4 * (self.m_in_head.nint as i32 + self.m_in_head.nreal as i32) * nz,
+                        SEEK_SET,
+                    ) != 0
+                        || b3d_fread(gain_bytes, 4, nxy, fp) as i32 != self.m_nx * self.m_ny
+                    {
+                        exit_error(b"Reading gain reference from extended header");
+                    }
+                    self.m_nx_gain = self.m_nx;
+                    self.m_ny_gain = self.m_ny;
+                    if self.m_rotation_flip > 0 {
+                        let mut gain = self.m_gain_slice.take().unwrap();
+                        self.rotate_flip_gain_reference(Rc::make_mut(&mut gain).as_mut_slice());
+                        self.m_gain_slice = Some(gain);
+                    }
+                }
+
+                // Set or get group limits
+                if break_set_size > 0 && combine_files == 0 {
+                    num_frame_use = nz;
+                    if start_frame > 0 {
+                        num_frame_use = b3dmin!(nz, end_frame) + 1 - start_frame;
+                    }
+                    num_sets = num_frame_use / break_set_size;
+
+                    // Get the set limits and then adjust by the start frame
+                    self.m_set_starts.clear();
+                    self.m_num_in_sets.clear();
+                    for ind in 0..num_sets {
+                        balanced_group_limits(
+                            num_frame_use,
+                            num_sets,
+                            ind,
+                            &mut start_combine,
+                            &mut end_combine,
+                        );
+                        self.m_set_starts.push(start_combine);
+                    }
+                    self.m_set_starts.push(end_combine + 1);
+                    for ind in 0..num_sets as usize {
+                        self.m_num_in_sets
+                            .push(self.m_set_starts[ind + 1] - self.m_set_starts[ind]);
+                    }
+                    if start_frame > 1 {
+                        for ind in 0..=num_sets as usize {
+                            self.m_set_starts[ind] += start_frame - 1;
+                        }
+                    }
+                } else if self.m_doing_frame_ts {
+                    num_sets = self.m_set_starts.len() as i32;
+                    set_in_file = ifile;
+                } else if extra_has_tilts != 0 {
+                    let mut fp = self.m_in_fp.take().unwrap();
+                    let mut head = std::mem::take(&mut self.m_in_head);
+                    self.analyze_extra_header(
+                        &mut fp,
+                        &mut head,
+                        start_frame,
+                        end_frame,
+                        false,
+                        &mut extra_buf,
+                        &mut extra_buf_size,
+                        &mut extra_tilts,
+                        &mut min_set,
+                        &mut max_set,
+                        &mut file_axis,
+                        &mut file_pix,
+                    );
+                    self.m_in_head = head;
+                    self.m_in_fp = Some(fp);
+                    num_sets = extra_tilts.len() as i32;
+                    set_in_file = ifile;
+                }
+            }
+
+            // Now proceed with the current file/set of frames
+            if combine_files != 0 {
+                nz = end_combine + 1 - start_combine;
+
+                // `fclose` in the source leaves the image file's entry behind
+                // in the opened-file list (BUGS.md); it is released here.
+                if let Some(mut fp) = self.m_in_fp.take() {
+                    ii_fclose(&mut fp);
+                }
+            } else if num_sets != 0 {
+                ind = set_in_file;
+                if (break_set_size > 0 || extra_has_tilts != 0 || self.m_doing_frame_ts)
+                    && num_single_files == 1
+                {
+                    ind = set_order_index[set_in_file as usize];
+                    original_zval = set_order_index[ifile as usize];
+                }
+                start_combine = self.m_set_starts[ind as usize];
+                nz = self.m_num_in_sets[ind as usize];
+                end_combine = start_combine + nz - 1;
+            }
+            self.extract_file_tail(&filename, &mut sstr);
+
+            self.analyze_for_partial_frames(
+                &mut nz,
+                &mut start_combine,
+                &mut end_combine,
+                ifile,
+                &mut skipped_frame,
+            );
+
+            drift_loop = 0;
+            while drift_loop < num_drift_loop {
+                nz_align = nz;
+                if start_frame > 0 && num_sets == 0 {
+                    nz_align = b3dmin!(nz, end_frame) + 1 - start_frame;
+                }
+                num_avause = num_avainput;
+                if num_avause == -1 || num_avause > nz_align {
+                    num_avause = nz_align;
+                } else if num_avause < 0 {
+                    num_avause = b3dmax!(
+                        min_fractional_ava,
+                        (nz_align - 1 - num_avainput) / (-num_avainput)
+                    );
+                }
+                num_avause = b3dmin!(MAX_ALL_VS_ALL as i32, num_avause);
+
+                // Make per-file decision on grouping
+                block_grp_size = 1;
+                slide_grp_size = 1;
+                if self.m_group_size > 1 {
+                    ierr = nz_align + 1 - self.m_group_size;
+                    if self.m_use_block_group
+                        || ((ierr + 1 - self.m_group_size) * (ierr - self.m_group_size)) / 2 < ierr
+                    {
+                        block_grp_size = self.m_group_size;
+                        if !self.m_use_block_group {
+                            printf!(
+                                "Using block grouping instead of sliding grouping for file # %d\n",
+                                CArg::Int((ifile + 1) as i64)
+                            );
+                        }
+                    } else {
+                        slide_grp_size = self.m_group_size;
+                        if num_avause <= MAX_ALL_VS_ALL as i32 + 1 - self.m_group_size {
+                            num_avause += self.m_group_size - 1;
+                        }
+                    }
+                }
+
+                self.m_in_data_size = data_size_for_mode(self.m_in_head.mode).map_or(0, |(d, _)| d);
+                need_alloc = self.m_in_data_size * self.m_nx * self.m_ny;
+                if need_alloc > buf_alloc_size {
+                    read_buf = frame_storage(need_alloc as usize);
+                    buf_alloc_size = need_alloc;
+                }
+
+                // The group sum of byte frames is accumulated as shorts, twice the
+                // `needAlloc` bytes the source allocates, and a later file can need
+                // the sum buffer after the read buffer was sized without it
+                // (BUGS.md): it is sized for shorts and allocated when first needed.
+                if block_grp_size > 1 {
+                    let sum_bytes = b3dmax!(need_alloc, 2 * self.m_nx * self.m_ny) as usize;
+                    if sum_buf.len() * 4 < sum_bytes {
+                        sum_buf = frame_storage(sum_bytes);
+                    }
+                }
+
+                nz_align = b3dmax!(1, nz_align / block_grp_size);
+
+                // Set up for spline scaling if criteria met
+                self.m_do_spline = 0;
+                if spline_smooth > 0 && nz_align >= min_num_for_spline {
+                    self.m_do_spline = 1;
+                }
+
+                // Estimate memory usage
+                // Does summing in two passes work with cumulative alignment?
+                tmean = FrameAlign::total_memory_needs(
+                    self.m_full_pad_size,
+                    self.m_full_data_size,
+                    self.m_sum_pad_size,
+                    self.m_align_pad_size,
+                    num_avause,
+                    nz_align,
+                    self.m_refine_at_end,
+                    self.m_num_bin_tests,
+                    self.m_num_filt_tests[0],
+                    self.m_hybrid_shifts,
+                    self.m_group_size,
+                    self.m_do_spline,
+                    self.m_gpu_flags,
+                    self.m_defer_sum,
+                    self.m_test_mode,
+                    self.m_start_assess,
+                    &mut self.m_sum_in_one_pass,
+                    &mut self.m_num_hold_full,
+                );
+                if tmean > self.m_memory_limit {
+                    if self.m_start_assess >= 0 {
+                        exit_error_fmt!(
+                            "The memory limit is too low to allow initial assessment and summing of %d frames in one pass %s",
+                            CArg::Int(nz_align as i64),
+                            CArg::Str(if self.m_refine_at_end != 0 || self.m_do_spline != 0 {
+                                "with refinement or smoothing at the end"
+                            } else {
+                                "with this many pairwise comparisons"
+                            })
+                        );
+                    }
+                    if self.m_sum_in_one_pass {
+                        self.m_sum_in_one_pass = false;
+                        if !warned_two_pass {
+                            printf!(
+                                "Using two passes: a single pass with %d frames requires %.1f GB, above the limit of %.1f GB\n",
+                                CArg::Int(nz_align as i64),
+                                CArg::Dbl(tmean as f64),
+                                CArg::Dbl(self.m_memory_limit as f64)
+                            );
+                        }
+                        warned_two_pass = true;
+                        let _ = ImodFile::Stdout.flush();
+                    }
+                }
+                num_test_loops = self.m_num_bin_tests
+                    + if self.m_sum_in_one_pass || self.m_test_mode != 0 {
+                        0
+                    } else {
+                        1
+                    };
+
+                // Loop on conditions
+                was_good_enough = false;
+                itest = 0;
+                while itest < num_test_loops {
+                    // Set summing flag for summing with alignment if it can be done, otherwise set
+                    // for sum only on final loop unless assessing from subset, otherwise skip the sum
+                    if self.m_sum_in_one_pass {
+                        summing_mode = 0;
+                    } else if itest == self.m_num_bin_tests {
+                        summing_mode = if self.m_start_assess >= 0 { 0 } else { -1 };
+                    } else {
+                        summing_mode = 1;
+                    }
+
+                    // Set limits and indices for the extra loop; if it has to compute alignment
+                    // because it was assessed on a subset, then it needs either best filter or the
+                    // whole set to do hybrid
+                    use_start = if num_sets != 0 { 0 } else { start_frame };
+                    use_end = end_frame;
+                    if itest == self.m_num_bin_tests {
+                        ind_bin_use = ind_best_bin;
+                        if self.m_hybrid_shifts != 0 {
+                            ind_filt_use = 0;
+                            num_filt_use = self.m_num_filt_tests[ind_best_bin as usize];
+                        } else {
+                            ind_filt_use = ind_best_filt;
+                            num_filt_use = 1;
+                        }
+                    } else {
+                        // Otherwise set up for this round
+                        ind_bin_use = itest;
+                        ind_filt_use = 0;
+                        num_filt_use = self.m_num_filt_tests[itest as usize];
+                        if self.m_start_assess >= 0 {
+                            use_start = self.m_start_assess;
+                            use_end = end_assess;
+                        }
+                    }
+                    if self.m_debug % 10 != 0 {
+                        printf!(
+                            "itest = %d,  summingMode = %d,  indBinUse = %d,  indFiltUse = %d\n",
+                            CArg::Int(itest as i64),
+                            CArg::Int(summing_mode as i64),
+                            CArg::Int(ind_bin_use as i64),
+                            CArg::Int(ind_filt_use as i64)
+                        );
+                    }
+
+                    // Set up actual frame limits for this file
+                    z_dir = if reverse != 0 { -1 } else { 1 };
+                    if use_start > 0 {
+                        z_start = if reverse != 0 {
+                            b3dmin!(use_end, nz) - 1
+                        } else {
+                            use_start - 1
+                        };
+                        z_end = if reverse != 0 {
+                            use_start - 1
+                        } else {
+                            b3dmin!(use_end, nz) - 1
+                        };
+                    } else {
+                        z_start = if reverse != 0 { nz - 1 } else { 0 };
+                        z_end = if reverse != 0 { 0 } else { nz - 1 };
+                    }
+                    num_fetch = z_dir * (z_end - z_start) + 1;
+                    nz_align = b3dmax!(1, num_fetch / block_grp_size);
+                    if num_avause < 2 + slide_grp_size {
+                        num_filt_use = 1;
+                    }
+
+                    // Get file, initialize
+                    let bin_use = ind_bin_use as usize;
+                    let filt_use = ind_filt_use as usize;
+                    ierr = self.s_fa.initialize(
+                        sum_bin,
+                        bins_to_test[bin_use],
+                        trim_frac,
+                        num_avause,
+                        self.m_refine_at_end,
+                        self.m_hybrid_shifts,
+                        if summing_mode == 0 && (self.m_defer_sum != 0 || self.m_do_spline != 0) {
+                            1
+                        } else {
+                            0
+                        },
+                        slide_grp_size,
+                        self.m_nx,
+                        self.m_ny,
+                        full_taper_frac,
+                        taper_frac,
+                        anti_filt_type - 1,
+                        radius1,
+                        &vary_radius2[bin_use][filt_use..],
+                        sigma1,
+                        &vary_sigma2[bin_use][filt_use..],
+                        num_filt_use,
+                        shift_limit,
+                        k_factor,
+                        max_max_weight,
+                        summing_mode,
+                        nz_align,
+                        (do_unweight > 0) as i32,
+                        self.m_gpu_flags,
+                        self.m_debug,
+                    );
+                    if ierr != 0 {
+                        exit_error_fmt!(
+                            "Error %d initializing frame summing for file # %d",
+                            CArg::Int(ierr as i64),
+                            CArg::Int((ifile + 1) as i64)
+                        );
+                    }
+
+                    // First time, get buffers for even and odd sums.  The even buffer might need to
+                    // have the FFT copied to, so need to ask framealign what size it needs to be
+                    if even_odd_ouput != 0 && even_sum.is_empty() {
+                        if use_shr_mem != 0 {
+                            exit_error(b"You cannot test shrmemframe with even/odd output");
+                        }
+                        even_sum = vec![0.; self.s_fa.get_padded_sum_size() as usize];
+                        odd_sum = vec![0.; sum_size];
+                    }
+
+                    // Initialize dose weighting: start by getting doses for all underlying frames
+                    if (self.m_total_dose > 0. || self.m_dose_file_type > 0)
+                        && self.m_test_mode == 0
+                    {
+                        sum_of_frames = 0;
+                        if self.m_dose_file_type > 3 && !self.m_doing_frame_ts {
+                            let line = self.m_frame_dose_lines[original_zval as usize].clone();
+                            let mut temp_arr = std::mem::take(&mut self.m_temp_val1);
+                            let mut frame_doses = std::mem::take(&mut self.m_frame_doses);
+                            self.expand_frame_doses_numbers(
+                                &line,
+                                &mut temp_arr,
+                                nz,
+                                &mut sum_of_frames,
+                                &mut sum_of_doses,
+                                Some(&mut frame_doses),
+                            );
+                            self.m_temp_val1 = temp_arr;
+                            self.m_frame_doses = frame_doses;
+                            if self.m_frames_are_eer && sum_of_frames == 1 {
+                                for iz in (0..nz as usize).rev() {
+                                    self.m_frame_doses[iz] = self.m_frame_doses[0] / nz as f32;
+                                }
+                            } else if sum_of_frames > 0 && sum_of_frames < nz {
+                                printf!(
+                                    "WARNING: %s - The frame doses and numbers for file # %d include too few frames (%d vs %d)\n",
+                                    CArg::Bytes(progname),
+                                    CArg::Int((ifile + 1) as i64),
+                                    CArg::Int(sum_of_frames as i64),
+                                    CArg::Int(nz as i64)
+                                );
+                            }
+                        }
+
+                        // Fall back to equal division
+                        if sum_of_frames < nz {
+                            for iz in 0..nz as usize {
+                                self.m_frame_doses[iz] =
+                                    self.m_total_dose_vec[original_zval as usize] / nz as f32;
+                            }
+                        }
+
+                        // Combine doses for grouped frames and frames actually being used
+                        self.m_temp_val1.resize(nz_align as usize, 0.);
+                        prior_temp =
+                            self.m_initial_dose + self.m_prior_dose_vec[original_zval as usize];
+                        if use_start > 0 {
+                            for iz in 0..use_start as usize {
+                                prior_temp += self.m_frame_doses[iz];
+                            }
+                        }
+                        for group in 0..nz_align {
+                            self.frame_group_limits(
+                                num_fetch,
+                                nz_align,
+                                group,
+                                &mut group_start,
+                                &mut group_end,
+                                z_start,
+                                z_dir,
+                                &mut iz_low,
+                                &mut iz_high,
+                            );
+                            self.m_temp_val1[group as usize] = 0.;
+                            iz = iz_low;
+                            while z_dir * (iz - iz_high) <= 0 {
+                                self.m_temp_val1[group as usize] += self.m_frame_doses[iz as usize];
+                                iz += z_dir;
+                            }
+                        }
+                        if self.m_debug % 10 != 0 {
+                            printf!(
+                                "Prior dose %.3f   total dose %.3f  frame doses:\n",
+                                CArg::Dbl(prior_temp as f64),
+                                CArg::Dbl(self.m_total_dose_vec[original_zval as usize] as f64)
+                            );
+                            for iz in 0..nz_align {
+                                printf!(" %.3f", CArg::Dbl(self.m_temp_val1[iz as usize] as f64));
+                                if (iz + 1) % 12 == 0 || iz == nz_align - 1 {
+                                    printf!("\n");
+                                }
+                            }
+                        }
+                        let mut filt_size = 0;
+                        ierr = self.s_fa.setup_dose_weighting(
+                            prior_temp,
+                            &self.m_temp_val1,
+                            x_scale,
+                            self.m_dose_scaling,
+                            dose_afac,
+                            dose_bfac,
+                            dose_cfac,
+                            if self.m_reweight_filt {
+                                Some(&self.m_reweight_ones)
+                            } else {
+                                None
+                            },
+                            &mut filt_size,
+                        );
+                        if ierr != 0 {
+                            exit_error_fmt!(
+                                "Error %d setting up dose weighting for file # %d",
+                                CArg::Int(ierr as i64),
+                                CArg::Int((ifile + 1) as i64)
+                            );
+                        }
+                    }
+
+                    // Loop on frames in selected order, but do groups backwards to put largest at end
+                    let nxy = (self.m_nx * self.m_ny) as usize;
+                    group = 0;
+                    while group < nz_align {
+                        self.frame_group_limits(
+                            num_fetch,
+                            nz_align,
+                            group,
+                            &mut group_start,
+                            &mut group_end,
+                            z_start,
+                            z_dir,
+                            &mut iz_low,
+                            &mut iz_high,
+                        );
+
+                        // Which buffer `useBuf` points at: 0-2 a partial scan
+                        // buffer, 3 `readBuf`, 4 `sumBuf`.
+                        let mut use_buf: usize = 3;
+                        use_mode = self.m_in_head.mode;
+                        iz = iz_low;
+                        while z_dir * (iz - iz_high) <= 0 {
+                            // `useBuf` returns to `readBuf` for every frame: the
+                            // source sets it once per group, so from the second
+                            // frame of a group on it added the sum buffer to
+                            // itself (BUGS.md).
+                            use_buf = 3;
+                            if combine_files != 0 {
+                                let name = self.m_in_files[(start_combine + iz) as usize].clone();
+                                let mut head = MrcHeader::default();
+                                let mut fp = self.open_and_read_header(
+                                    &name,
+                                    &mut head,
+                                    b"input image",
+                                    false,
+                                );
+                                self.check_input_file(
+                                    &name,
+                                    &head,
+                                    self.m_nx,
+                                    self.m_ny,
+                                    combine_files,
+                                );
+                                if mrc_read_slice(
+                                    buf_bytes_mut(&mut read_buf),
+                                    &mut fp,
+                                    &mut head,
+                                    0,
+                                    b'Z',
+                                ) != 0
+                                {
+                                    exit_error_fmt!(
+                                        "Reading from file # %d: %s",
+                                        CArg::Int((start_combine + iz) as i64),
+                                        CArg::Bytes(&name)
+                                    );
+                                }
+                                head.fp = None;
+                                self.m_in_head = head;
+
+                                // `fclose` in the source (BUGS.md).
+                                ii_fclose(&mut fp);
+                            } else {
+                                iz_read = iz;
+                                if num_sets != 0 {
+                                    iz_read += start_combine;
+                                }
+
+                                for ind in 0..3 {
+                                    if iz_read == self.m_zin_partial_bufs[ind] {
+                                        use_buf = ind;
+                                    }
+                                }
+
+                                // The source's `if (ind > 2)` after that loop is
+                                // always true, so the frame is always read.
+                                self.read_one_frame(buf_bytes_mut(&mut read_buf), iz_read, ifile);
+                            }
+                            if iz_low != iz_high {
+                                if iz == iz_low {
+                                    sum_buf.fill(0.);
+                                }
+                                let source: &[f32] = match use_buf {
+                                    0..=2 => &self.m_partial_scan_bufs[use_buf],
+                                    _ => &read_buf,
+                                };
+                                self.add_to_sum_buffer(
+                                    buf_bytes(source),
+                                    self.m_in_head.mode,
+                                    buf_bytes_mut(&mut sum_buf),
+                                    &mut use_mode,
+                                    nxy as i32,
+                                );
+                                use_buf = 4;
+                            }
+                            iz += z_dir;
+                        }
+                        let storage: &[f32] = match use_buf {
+                            0..=2 => &self.m_partial_scan_bufs[use_buf],
+                            3 => &read_buf,
+                            _ => &sum_buf,
+                        };
+
+                        // Get the truncation limit set on first, and on second one also if frame sets
+                        if group == 0 || (group == 1 && self.m_doing_frame_ts) {
+                            ierr = self.s_fa.set_truncation_limit(
+                                buf_bytes(storage),
+                                self.m_nx,
+                                self.m_ny,
+                                use_mode,
+                                self.m_trunc_limit,
+                                &mut trunc_use,
+                            );
+                            if ierr != 0 {
+                                exit_error(if ierr == 1 {
+                                    b"Allocating line pointers for analyzing truncation limit"
+                                        as &[u8]
+                                } else {
+                                    b"Error computing mean and SD with sampling for setting truncation limit"
+                                });
+                            }
+                        }
+
+                        // Pass the frame
+                        let dark: Option<&[i16]> = match self.m_dark_slice.as_ref() {
+                            Some(slice) => match &slice.data {
+                                MrcData::S(v) => Some(v.as_slice()),
+                                MrcData::Us(v) => Some(unsafe {
+                                    std::slice::from_raw_parts(v.as_ptr().cast::<i16>(), v.len())
+                                }),
+                                _ => None,
+                            },
+                            None => None,
+                        };
+                        let gain = if self.m_gain_slice.is_some() && !self.m_antialias_eer {
+                            self.m_gain_slice.clone()
+                        } else {
+                            None
+                        };
+                        ierr = self.s_fa.next_frame(
+                            frame_data(storage, use_mode, nxy),
+                            use_mode,
+                            gain,
+                            if self.m_antialias_eer {
+                                0
+                            } else {
+                                self.m_nx_gain
+                            },
+                            if self.m_antialias_eer {
+                                0
+                            } else {
+                                self.m_ny_gain
+                            },
+                            dark,
+                            trunc_use,
+                            Some(self.m_defects.clone()),
+                            self.m_cam_size_x,
+                            self.m_cam_size_y,
+                            self.m_cor_def_binning,
+                            best_xshifts[group as usize],
+                            best_yshifts[group as usize],
+                        );
+                        if ierr != 0 {
+                            exit_error_fmt!(
+                                "Error %d processing frame/group %d from %s %d",
+                                CArg::Int(ierr as i64),
+                                CArg::Int(group as i64),
+                                CArg::Str(if num_sets != 0 { "set" } else { "file" }),
+                                CArg::Int((ifile + 1) as i64)
+                            );
+                        }
+                        group += 1;
+                    }
+                    num_done = nz_align;
+                    ierr = b3dmin!(num_avause, num_done) + 1 - self.m_group_size;
+                    do_robust = ((ierr + 1 - self.m_group_size) * (ierr - self.m_group_size)) / 2
+                        >= 2 * ierr
+                        && k_factor > 0.;
+
+                    // Finish up and get results;
+                    ierr = self.s_fa.finish_align_and_sum(
+                        ref_radius2,
+                        ref_sigma2,
+                        iter_crit,
+                        group_refine,
+                        self.m_do_spline,
+                        &mut summed,
+                        &mut x_shifts,
+                        &mut y_shifts,
+                        &mut raw_xshifts,
+                        &mut raw_yshifts,
+                        Some(&mut ring_corrs),
+                        frc_delta_r,
+                        &mut fa_best_filt,
+                        &mut smooth_dist,
+                        &mut raw_dist,
+                        &mut res_mean,
+                        &mut pred_mean,
+                        &mut mean_res_max,
+                        &mut max_res_max,
+                        &mut mean_raw_max,
+                        &mut max_raw_max,
+                        if even_sum.is_empty() {
+                            None
+                        } else {
+                            Some(&mut even_sum)
+                        },
+                        if odd_sum.is_empty() {
+                            None
+                        } else {
+                            Some(&mut odd_sum)
+                        },
+                    );
+                    if ierr == 3 {
+                        exit_error_fmt!(
+                            "An unrecoverable error in GPU processing occurred for %s # %d",
+                            CArg::Str(if num_sets != 0 { "set" } else { "file" }),
+                            CArg::Int(ifile as i64)
+                        );
+                    } else if ierr != 0 {
+                        exit_error_fmt!(
+                            "No frames were aligned for file # %d",
+                            CArg::Int(ifile as i64)
+                        );
+                    }
+
+                    // Evaluate whether to drop initial frames due to excessive shift
+                    excluding_initial = false;
+                    if drift_loop == 0 && num_drift_loop == 2 {
+                        max_exclude = b3dnint!(if drift_max_frac_num >= 1. {
+                            drift_max_frac_num
+                        } else {
+                            drift_max_frac_num * num_done as f32
+                        });
+                        max_exclude = b3dmin!(max_exclude, b3dnint!(0.5 * num_done as f64));
+                        ix = 1;
+                        while ix <= max_exclude {
+                            let i = ix as usize;
+                            prior_temp = ((raw_xshifts[i] - raw_xshifts[i - 1]).powf(2.)
+                                + (raw_yshifts[i] - raw_yshifts[i - 1]).powf(2.))
+                            .sqrt();
+                            if prior_temp < drift_max_dist {
+                                break;
+                            }
+                            if !excluding_initial {
+                                printf!(
+                                    "%s %d: drop frame (drift):",
+                                    CArg::Str(if num_sets != 0 { "Set" } else { "File" }),
+                                    CArg::Int((ifile + 1) as i64)
+                                );
+                            }
+                            printf!(
+                                " %d (%.1f) ",
+                                CArg::Int((start_combine + 1) as i64),
+                                CArg::Dbl(prior_temp as f64)
+                            );
+                            nz_align -= 1;
+                            start_combine += 1;
+                            excluding_initial = true;
+                            ix += 1;
+                        }
+                        nz = nz_align;
+                        if excluding_initial {
+                            printf!("\n");
+                            break;
+                        }
+                    }
+
+                    // Do the basic summary report starting with the header line
+                    if itest < self.m_num_bin_tests {
+                        num_fetch = 1;
+                        if num_avause != 0 && num_filt_use > 1 {
+                            num_fetch = num_filt_use + 1;
+                        }
+                        if itest == 0 {
+                            printf!(
+                                "%s %d (%s): %d frames",
+                                CArg::Str(if num_sets != 0 { "Set" } else { "File" }),
+                                CArg::Int((ifile + 1) as i64),
+                                CArg::Bytes(&sstr),
+                                CArg::Int((z_dir * (z_end - z_start) + 1) as i64)
+                            );
+                            if num_sets != 0 {
+                                printf!(
+                                    " from %d to %d",
+                                    CArg::Int((start_combine + 1) as i64),
+                                    CArg::Int((end_combine + 1) as i64)
+                                );
+                                if skipped_frame[0] >= 0 {
+                                    printf!(" (skip %d", CArg::Int((skipped_frame[0] + 1) as i64));
+                                    if skipped_frame[1] >= 0 {
+                                        printf!(" %d", CArg::Int((skipped_frame[1] + 1) as i64));
+                                    }
+                                    printf!(")");
+                                }
+                            }
+                            if !ordered_angles.is_empty() {
+                                printf!(
+                                    "   (%.1f deg)",
+                                    CArg::Dbl(ordered_angles[ifile as usize] as f64)
+                                );
+                            }
+                            printf!("\n");
+                        }
+
+                        // Report residuals and total distance
+                        for filt in 0..num_fetch as usize {
+                            let it = itest as usize;
+                            do_abbrev = false;
+                            if b3dmin!(num_avause, num_done) >= 3 {
+                                if self.m_num_bin_tests * self.m_num_filt_tests[0] > 1 {
+                                    if (filt as i32) < self.m_num_filt_tests[it]
+                                        || self.m_num_filt_tests[it] == 1
+                                    {
+                                        printf!(
+                                            "Results with bin = %d  rad2 = %.3f  sig2 = %.4f\n",
+                                            CArg::Int(bins_to_test[it] as i64),
+                                            CArg::Dbl(
+                                                vary_radius2[it][filt.min(MAX_FILTERS - 1)] as f64
+                                            ),
+                                            CArg::Dbl(
+                                                vary_sigma2[it][filt.min(MAX_FILTERS - 1)] as f64
+                                            )
+                                        );
+                                    } else {
+                                        printf!(
+                                            "Hybrid results,  bin = %d\n",
+                                            CArg::Int(bins_to_test[it] as i64)
+                                        );
+                                    }
+                                }
+                                if self.m_num_bin_tests * self.m_num_filt_tests[0] > 1
+                                    || num_summary_lines > 1
+                                {
+                                    printf!(
+                                        "  %sesid mean = %.3f, mean max = %.2f, max max = %.2f  l-o err = %.3f\n",
+                                        CArg::Str(if do_robust { "Wgtd r" } else { "R" }),
+                                        CArg::Dbl(res_mean[filt] as f64),
+                                        CArg::Dbl(mean_res_max[filt] as f64),
+                                        CArg::Dbl(max_res_max[filt] as f64),
+                                        CArg::Dbl(pred_mean[filt] as f64)
+                                    );
+                                } else {
+                                    printf!(
+                                        " %sesid mean = %.3f, max max = %.2f  l-o= %.3f",
+                                        CArg::Str(if do_robust { "Wgtd r" } else { "R" }),
+                                        CArg::Dbl(res_mean[filt] as f64),
+                                        CArg::Dbl(max_res_max[filt] as f64),
+                                        CArg::Dbl(pred_mean[filt] as f64)
+                                    );
+                                    do_abbrev = true;
+                                }
+                            }
+                            if self.m_num_bin_tests * self.m_num_filt_tests[0] > 1
+                                || num_summary_lines > 1
+                            {
+                                if do_robust && num_avause != 0 {
+                                    printf!(
+                                        "  Max unweighted resid mean = %.2f, max = %.2f ",
+                                        CArg::Dbl(mean_raw_max[filt] as f64),
+                                        CArg::Dbl(max_raw_max[filt] as f64)
+                                    );
+                                } else {
+                                    printf!("                                               ");
+                                }
+                                do_abbrev = false;
+                            }
+                            printf!(
+                                "  Dist = %.2f, %s = %.2f\n",
+                                CArg::Dbl(raw_dist[filt] as f64),
+                                CArg::Str(if do_abbrev { "smth" } else { "smoothed" }),
+                                CArg::Dbl(smooth_dist[filt] as f64)
+                            );
+
+                            // Report shifts for frame tilt series
+                            if filt as i32 == num_fetch - 1
+                                && self.m_doing_frame_ts
+                                && !suppress_initial_shifts
+                            {
+                                printf!("  Initial raw inter-frame shifts:");
+                                for ix in 1..b3dmin!(num_done, 5) as usize {
+                                    printf!(
+                                        "   %.1f",
+                                        CArg::Dbl(
+                                            ((raw_xshifts[ix] - raw_xshifts[ix - 1]).powf(2.)
+                                                + (raw_yshifts[ix] - raw_yshifts[ix - 1]).powf(2.))
+                                            .sqrt()
+                                                as f64
+                                        )
+                                    );
+                                }
+                                printf!("\n");
+                            }
+                            let _ = ImodFile::Stdout.flush();
+                        }
+                    }
+
+                    // Keep track of best binning, copy shifts from it
+                    copy_shifts = itest == self.m_num_bin_tests && summing_mode == 0;
+                    let best = fa_best_filt as usize;
+                    error = (pred_mean[best] as f64 * (1. - max_max_weight as f64)
+                        + max_res_max[best] as f64 * max_max_weight as f64)
+                        as f32;
+                    if error < min_error && itest < self.m_num_bin_tests {
+                        ind_best_bin = itest;
+                        ind_best_filt = fa_best_filt;
+                        min_error = error;
+                        min_mean = res_mean[best];
+                        min_pred = pred_mean[best];
+                        copy_shifts = true;
+                    }
+                    if copy_shifts {
+                        if self.m_debug % 10 != 0 {
+                            printf!("Copy shifts test %d\n", CArg::Int(itest as i64));
+                        }
+                        for ix in 0..num_done as usize {
+                            best_xshifts[ix] = x_shifts[ix];
+                            best_yshifts[ix] = y_shifts[ix];
+                            best_xraw[ix] = raw_xshifts[ix];
+                            best_yraw[ix] = raw_yshifts[ix];
+                            if self.m_debug % 10 != 0 {
+                                printf!(
+                                    "%.2f  %.2f\n",
+                                    CArg::Dbl(x_shifts[ix] as f64),
+                                    CArg::Dbl(y_shifts[ix] as f64)
+                                );
+                            }
+                        }
+                    }
+
+                    // If the error is now good enough, advance to the end of the test runs
+                    if min_error <= good_enough && itest < self.m_num_bin_tests - 1 {
+                        itest = self.m_num_bin_tests - 1;
+                        was_good_enough = true;
+                    }
+                    itest += 1;
+                } // End of test loop
+                if num_drift_loop > 1 && !excluding_initial {
+                    break;
+                }
+                drift_loop += 1;
+            } // End of drift loop
+
+            // Pick up the unweighted sum
+            if do_unweight != 0 && self.s_fa.get_unweighted_sum(&mut unwgt_sum) != 0 {
+                exit_error(b"getting non-dose-weighted sum");
+            }
+
+            // Advance set number and wrap it back to 0 after last file; close file when needed
+            if num_sets != 0 {
+                set_in_file += 1;
+                if set_in_file == num_sets {
+                    super_file += 1;
+                    set_in_file = 0;
+                }
+            }
+            if combine_files == 0 && set_in_file == 0 {
+                if self.m_parallel_read {
+                    for ind in 1..self.m_num_read_threads as usize {
+                        unsafe { ii_delete(self.m_file_copies[ind]) };
+                    }
+                }
+                if let Some(mut fp) = self.m_in_fp.take() {
+                    ii_fclose(&mut fp);
+                }
+                if self.m_debug != 0 && self.m_parallel_read {
+                    printf!(
+                        "mNumReadThreads = %d,  mWallRead = %g\n",
+                        CArg::Int(self.m_num_read_threads as i64),
+                        CArg::Dbl(self.m_wall_read)
+                    );
+                }
+            }
+
+            // Write out data at end of loop
+            if summing_mode <= 0 {
+                if (self.m_debug % 10) > 1 && self.m_getting_frc {
+                    for ix in 0..(0.5 / frc_delta_r as f64).floor() as i32 {
+                        printf!(
+                            "%.4f  %.5f\n",
+                            CArg::Dbl((ix as f64 + 0.5) * frc_delta_r as f64),
+                            CArg::Dbl(ring_corrs[ix as usize] as f64)
+                        );
+                    }
+                }
+
+                for out_num in 0..self.m_num_out_files as usize {
+                    let hp = self.m_out_heads[out_num];
+                    let use_sum: &mut Vec<f32> = match out_num {
+                        0 => &mut summed,
+                        _ if do_unweight != 0 && out_num == 1 => &mut unwgt_sum,
+                        _ if out_num as i32 == self.m_num_out_files - 2 => &mut even_sum,
+                        _ => &mut odd_sum,
+                    };
+                    let use_rot = self.m_sum_rotation_flip != 0;
+                    if use_rot {
+                        rotate_flip_image(
+                            RotateFlipData::Float {
+                                array: &use_sum[..sum_size],
+                                brray: &mut rot_sum[..sum_size],
+                            },
+                            self.m_nx / sum_bin,
+                            self.m_ny / sum_bin,
+                            self.m_sum_rotation_flip,
+                            0,
+                            0,
+                            0,
+                            &mut ix,
+                            &mut iy,
+                            0,
+                        );
+                    }
+                    let use_sum: &mut [f32] = if use_rot { &mut rot_sum } else { use_sum };
+
+                    // Trim if size is over
+                    ix = (nx_sum - nx_out) / 2;
+                    iy = (ny_sum - ny_out) / 2;
+                    if ix != 0 || iy != 0 {
+                        // In place in the source: the extraction reads ahead of
+                        // what it writes, so a copy of the input is the same.
+                        let input = use_sum[..sum_size].to_vec();
+                        extract_with_binning(
+                            buf_bytes(&input),
+                            SLICE_MODE_FLOAT,
+                            nx_sum,
+                            ix,
+                            ix + nx_out - 1,
+                            iy,
+                            iy + ny_out - 1,
+                            1,
+                            buf_bytes_mut(use_sum),
+                            0,
+                            &mut iz,
+                            &mut ierr,
+                        );
+                    }
+
+                    // Scale the data and/or apply scale for binning
+                    let head_nx = self.m_heads[hp].nx;
+                    let head_ny = self.m_heads[hp].ny;
+                    use_scale = scale / kernel_scale as f32;
+                    if use_scale != 1. || sum_bin > 1 {
+                        for iz in 0..(head_nx * head_ny) as usize {
+                            use_sum[iz] *= use_scale * sum_bin as f32 * sum_bin as f32;
+                        }
+                    }
+
+                    // Manage header mmm and write the data
+                    tmean = 0.;
+                    if scale_to_mean_sd && sd_scale > 0. {
+                        let mut sum_dbl = 0f64;
+                        let mut sum_sq_dbl = 0f64;
+                        array_min_max_mean_sd(
+                            use_sum,
+                            head_nx,
+                            head_ny,
+                            0,
+                            head_nx - 1,
+                            0,
+                            head_ny - 1,
+                            &mut tmin,
+                            &mut tmax,
+                            &mut sum_dbl,
+                            &mut sum_sq_dbl,
+                            &mut tmean,
+                            &mut tsd,
+                        );
+                        diff = sum_dbl;
+                        min_diff = sum_sq_dbl;
+                        let _ = (diff, min_diff);
+                    } else {
+                        array_min_max_mean(
+                            use_sum,
+                            head_nx,
+                            head_ny,
+                            0,
+                            head_nx - 1,
+                            0,
+                            head_ny - 1,
+                            &mut tmin,
+                            &mut tmax,
+                            &mut tmean,
+                        );
+                    }
+
+                    // If scaling to mean/sd, set scaling by either the mean or the SD and added
+                    // factor as appropriate to match means, scale data and adjust min/max/mean
+                    if scale_to_mean_sd {
+                        if sd_scale > 0. {
+                            scale_fac = sd_scale / tsd;
+                            add_fac = mean_scale - scale_fac * tmean;
+                        } else {
+                            scale_fac = mean_scale / tmean;
+                            add_fac = 0.;
+                        }
+                        for iz in 0..(head_nx * head_ny) as usize {
+                            use_sum[iz] = scale_fac * use_sum[iz] + add_fac;
+                        }
+                        tmean = tmean * scale_fac + add_fac;
+                        tmin = tmin * scale_fac + add_fac;
+                        tmax = tmax * scale_fac + add_fac;
+                    }
+                    {
+                        let head_ptr = &mut self.m_heads[hp];
+                        head_ptr.amin = if head_ptr.amin < tmin {
+                            head_ptr.amin
+                        } else {
+                            tmin
+                        };
+                        head_ptr.amax = if head_ptr.amax > tmax {
+                            head_ptr.amax
+                        } else {
+                            tmax
+                        };
+                        head_ptr.amean += tmean / num_files_to_do as f32;
+                    }
+                    ierr = mrc_write_z_float(&mut self.m_heads[hp], &mut li, use_sum, out_sec_num);
+                    if ierr != 0 {
+                        exit_error_fmt!(
+                            "Writing summed data to file for input file # %d (error # %d)",
+                            CArg::Int((ifile + 1) as i64),
+                            CArg::Int(ierr as i64)
+                        );
+                    }
+                    if adjust_mdoc != 0 && out_num == 0 {
+                        if !self.m_doing_frame_ts {
+                            if adoc_get_float(
+                                ADOC_ZVALUE_NAME,
+                                original_zval,
+                                b"PixelSpacing",
+                                &mut pix_temp,
+                            ) != 0
+                            {
+                                exit_error(b"Getting pixel spacing in mdoc for output image");
+                            }
+                            if adoc_set_float(
+                                ADOC_ZVALUE_NAME,
+                                original_zval,
+                                b"PixelSpacing",
+                                pix_temp * rel_binning,
+                            ) != 0
+                            {
+                                exit_error(b"Adjusting pixel spacing in mdoc for output image");
+                            }
+                            if adoc_set_three_floats(
+                                ADOC_ZVALUE_NAME,
+                                original_zval,
+                                b"MinMaxMean",
+                                tmin,
+                                tmax,
+                                tmean,
+                            ) != 0
+                            {
+                                exit_error(b"Adjusting pixel spacing in mdoc for output image");
+                            }
+
+                            // Binning was a later addition so allow it not to exist
+                            ierr = adoc_get_float(
+                                ADOC_ZVALUE_NAME,
+                                original_zval,
+                                b"Binning",
+                                &mut pix_temp,
+                            );
+                            if ierr < 0 {
+                                exit_error(b"Getting binning in mdoc for output image");
+                            }
+                            if ierr == 0 {
+                                pix_temp *= rel_binning;
+                                if pix_temp as f64 > 0.55 {
+                                    pix_temp = b3dnint!(pix_temp) as f32;
+                                }
+                                if adoc_set_float(
+                                    ADOC_ZVALUE_NAME,
+                                    original_zval,
+                                    b"Binning",
+                                    pix_temp,
+                                ) != 0
+                                {
+                                    exit_error(b"Adjusting binning in mdoc for output image");
+                                }
+                            }
+                        }
+
+                        // Change the Z value to be sequential in the mdoc if either ignoring current
+                        // Z values or reordering the processing
+                        if self.m_ignore_zvalue != 0 || changed_set_order {
+                            let text = c_format_bytes("%d", &[CArg::Int(out_sec_num as i64)]);
+                            if adoc_change_section_name(ADOC_ZVALUE_NAME, original_zval, &text)
+                                .is_err()
+                            {
+                                exit_error(b"Changing section name to new Z value");
+                            }
+                        }
+                    }
+                }
+            }
+
+            if self.m_num_bin_tests * self.m_num_filt_tests[0] > 1 {
+                let bb = ind_best_bin as usize;
+                let bf = ind_best_filt as usize;
+                printf!(
+                    "%s %d: %s at bin = %d  rad2 = %.3f  sig %.3f  mean res = %.3f  l-o = %.3f\n",
+                    CArg::Str(if num_sets != 0 { "Set" } else { "File" }),
+                    CArg::Int((ifile + 1) as i64),
+                    CArg::Str(if was_good_enough {
+                        "Good enough"
+                    } else {
+                        "Best"
+                    }),
+                    CArg::Int(bins_to_test[bb] as i64),
+                    CArg::Dbl(vary_radius2[bb][bf] as f64),
+                    CArg::Dbl(vary_sigma2[bb][bf] as f64),
+                    CArg::Dbl(min_mean as f64),
+                    CArg::Dbl(min_pred as f64)
+                );
+                num_times_best[bb][bf] += 1;
+            }
+
+            // Find FRC crossing and mean near half-nyquist
+            if self.m_test_mode == 0 && self.m_getting_frc {
+                self.s_fa.analyze_frc_crossings(
+                    &ring_corrs,
+                    frc_delta_r,
+                    &mut half_cross,
+                    &mut quart_cross,
+                    &mut eighth_cross,
+                    &mut half_nyq,
+                );
+
+                if num_summary_lines > 2 {
+                    printf!(
+                        " FRC crossings 0.5: %.4f  0.25: %.4f  0.125: %.4f  is %.4f at 0.25/pix\n",
+                        CArg::Dbl(half_cross as f64),
+                        CArg::Dbl(quart_cross as f64),
+                        CArg::Dbl(eighth_cross as f64),
+                        CArg::Dbl(half_nyq as f64)
+                    );
+                }
+            }
+            if ifile < ending_file - 1 && self.m_num_bin_tests * self.m_num_filt_tests[0] > 1 {
+                printf!("\n");
+            }
+
+            // Output the transforms
+            if let Some(ext) = xf_ext.as_deref() {
+                // The source opens on the first set (`!ifile`) and closes after set
+                // `numSets - 1` of the whole run, so a range of sets not starting at
+                // the first, or a second file broken into sets, wrote through an
+                // unopened or closed stream (BUGS.md).  Here it opens when none is
+                // open and closes after the last set of each file.
+                if num_sets == 0 || !xf_open {
+                    xf_name = filename.clone();
+                    if let Some(t) = find_last_of(&xf_name, b".") {
+                        if t + 5 >= xf_name.len() && t > 1 {
+                            xf_name.truncate(t + 1);
+                        }
+                    }
+                    xf_name.extend_from_slice(ext);
+                    imod_backup_file(&String::from_utf8_lossy(&xf_name));
+                    extra_fp = ImodFile::open(os_path(&xf_name), "w");
+                    if extra_fp.is_none() {
+                        exit_error_fmt!(
+                            "Opening output file %s for transforms",
+                            CArg::Bytes(&xf_name)
+                        );
+                    }
+                    xf_open = true;
+                }
+                num_fetch = z_dir * (z_end - z_start) + 1;
+                let fp = extra_fp.as_mut().unwrap();
+                for group in 0..nz_align {
+                    if reverse != 0 {
+                        balanced_group_limits(
+                            num_fetch,
+                            nz_align,
+                            group,
+                            &mut group_start,
+                            &mut group_end,
+                        );
+                        ind = nz_align - 1 - group;
+                    } else {
+                        balanced_group_limits(
+                            num_fetch,
+                            nz_align,
+                            nz_align - 1 - group,
+                            &mut group_start,
+                            &mut group_end,
+                        );
+                        ind = group;
+                    }
+                    if start_frame > 0 && group == 0 {
+                        group_end += start_frame - 1;
+                    }
+                    for _ in group_start..=group_end {
+                        let _ = fp.write_all(&c_format_bytes(
+                            " 1.00000    0.00000    0.00000   1.00000  %8.3f %8.3f\n",
+                            &[
+                                CArg::Dbl(best_xshifts[ind as usize] as f64),
+                                CArg::Dbl(best_yshifts[ind as usize] as f64),
+                            ],
+                        ));
+                    }
+                }
+                if num_sets == 0 || set_in_file == 0 {
+                    extra_fp = None;
+                    xf_open = false;
+                }
+            }
+
+            // Output plottable shifts
+            if let Some(fp) = plot_fp.as_mut() {
+                for ind in 0..num_done as usize {
+                    let _ = fp.write_all(&c_format_bytes(
+                        "%3d  %.3f  %.3f\n",
+                        &[
+                            CArg::Int((10 * ifile + 10) as i64),
+                            CArg::Dbl(best_xraw[ind] as f64),
+                            CArg::Dbl(best_yraw[ind] as f64),
+                        ],
+                    ));
+                }
+                if self.m_do_spline != 0 {
+                    for ind in 0..num_done as usize {
+                        let _ = fp.write_all(&c_format_bytes(
+                            "%3d  %.3f  %.3f\n",
+                            &[
+                                CArg::Int((10 * ifile + 11) as i64),
+                                CArg::Dbl(best_xshifts[ind] as f64),
+                                CArg::Dbl(best_yshifts[ind] as f64),
+                            ],
+                        ));
+                    }
+                }
+            }
+
+            // Output the FRC
+            if let Some(fp) = frc_fp.as_mut() {
+                for ind in 0..(0.5 / frc_delta_r as f64).floor() as i32 {
+                    let _ = fp.write_all(&c_format_bytes(
+                        "%2d  %.4f %10.6f\n",
+                        &[
+                            CArg::Int((ifile + 1) as i64),
+                            CArg::Dbl((ind as f64 + 0.5) * frc_delta_r as f64),
+                            CArg::Dbl(ring_corrs[ind as usize] as f64),
+                        ],
+                    ));
+                }
+            }
+
+            out_sec_num += 1;
+            ifile += 1;
+        }
+        drop(extra_fp);
+
+        if num_files_to_do > 1 && self.m_num_bin_tests * self.m_num_filt_tests[0] > 1 {
+            printf!("\nNumber of times each condition is best  (rad2 in parentheses):\n");
+            for itest in 0..self.m_num_bin_tests as usize {
+                printf!("bin = %d  ", CArg::Int(bins_to_test[itest] as i64));
+                for filt in 0..self.m_num_filt_tests[itest] as usize {
+                    printf!(
+                        "  %3d (%.3f)",
+                        CArg::Int(num_times_best[itest][filt] as i64),
+                        CArg::Dbl(vary_radius2[itest][filt] as f64)
+                    );
+                }
+                printf!("\n");
+            }
+        }
+
+        // Write the new mdoc file, possibly with re-ordering
+        if adjust_mdoc != 0 {
+            sstr = self.m_out_names[0].clone().unwrap_or_default();
+            sstr.extend_from_slice(b".mdoc");
+            if changed_set_order && adoc_order_write_by_value(Some(ADOC_ZVALUE_NAME)) != 0 {
+                exit_error(b"Memory problem in AdocOrderWriteByValue");
+            }
+            if adoc_write(&sstr) != 0 {
+                exit_error(b"Writing adjusted mdoc file");
+            }
+        }
+
+        // Finish up
+        self.s_fa.cleanup();
+        drop(summed);
+        drop(rot_sum);
+        drop(unwgt_sum);
+        drop(even_sum);
+        drop(odd_sum);
+        for ind in 0..3 {
+            self.m_partial_scan_bufs[ind] = Vec::new();
+        }
+        if self.m_test_mode == 0 {
+            for out_num in 0..self.m_num_out_files as usize {
+                let hp = self.m_out_heads[out_num];
+                let mut fp = out_fps[out_num].take().unwrap();
+                if mrc_head_write(&mut fp, &mut self.m_heads[hp]) != 0 {
+                    exit_error_fmt!(
+                        "Writing header to %s output file",
+                        CArg::Bytes(title_descs[out_num].as_deref().unwrap_or(b""))
+                    );
+                }
+                self.m_heads[hp].fp = None;
+                ii_fclose(&mut fp);
+                if let Some(name) = open_ts_names[out_num].as_deref() {
+                    let _ = std::fs::remove_file(os_path(name));
+                }
+            }
+        }
+        drop(frc_fp);
+        drop(plot_fp);
+        drop(stack_fp);
+        exit(0);
+    }
+
+    /// `AliFrame::getNextFilename` (`alignframes.cpp:2170`).
+    ///
+    /// Return the next filename (for ind) by whatever means they are available
+    pub fn get_next_filename(
+        &mut self,
+        ind: i32,
+        num_in_by_opt: i32,
+        file_list_fp: Option<&mut ImodFile>,
+        frame_path: Option<&[u8]>,
+        list_name: &[u8],
+        end_reached: &mut bool,
+    ) -> Option<Vec<u8>> {
+        let mut iz: i32 = 0;
+        let ierr: i32;
+        let mut sstr: Vec<u8> = Vec::new();
+        let mut filename: Vec<u8> = Vec::new();
+        let mut tempname: Vec<u8> = Vec::new();
+
+        if self.m_names_from_mdoc {
+            // Get the name from the mdoc file and extract it from the path
+            if self.m_ignore_zvalue != 0 {
+                iz = ind;
+            } else {
+                iz = adoc_lookup_by_name_value(ADOC_ZVALUE_NAME, ind);
+            }
+            if iz < 0 {
+                exit_error_fmt!(
+                    "Looking up section with Z value %d in mdoc file",
+                    CArg::Int(ind as i64)
+                );
+            }
+
+            // The source passes (ind, string) to "%s %d" (BUGS.md).
+            if adoc_get_string(ADOC_ZVALUE_NAME, iz, b"SubFramePath", &mut filename) != 0 {
+                exit_error_fmt!(
+                    "Getting SubFramePath for %s %d in mdoc file",
+                    CArg::Str(if self.m_ignore_zvalue != 0 {
+                        "section"
+                    } else {
+                        "Z value"
+                    }),
+                    CArg::Int(ind as i64)
+                );
+            }
+            self.extract_file_tail(&filename, &mut sstr);
+            if let Some(path) = frame_path {
+                sstr.insert(0, b'/');
+                let mut joined = path.to_vec();
+                joined.extend_from_slice(&sstr);
+                sstr = joined;
+            }
+            filename = sstr;
+
+            // Try to get a frame dose line from this section, store the dose data
+            if self.m_dose_file_type == 4 {
+                ierr = adoc_get_string(
+                    ADOC_ZVALUE_NAME,
+                    iz,
+                    FRAME_DOSE_KEY.as_bytes(),
+                    &mut tempname,
+                );
+                if ierr < 0 {
+                    exit_error_fmt!(
+                        "Trying to access FrameDosesAndNumber for %s %d in mdoc file",
+                        CArg::Str(if self.m_ignore_zvalue != 0 {
+                            "section"
+                        } else {
+                            "Z value"
+                        }),
+                        CArg::Int(ind as i64)
+                    );
+                }
+                if ierr == 0 {
+                    self.m_frame_dose_lines[ind as usize] = tempname;
+                }
+                self.m_total_dose_vec
+                    .push(self.m_dose_from_mdoc[iz as usize]);
+                self.m_prior_dose_vec.push(if self.m_dose_accumulates > 0 {
+                    self.m_prior_from_mdoc[iz as usize]
+                } else {
+                    0.
+                });
+            }
+        } else if let Some(fp) = file_list_fp {
+            // Or get name from file
+            if *end_reached {
+                return None;
+            }
+            loop {
+                iz = fgetline(fp, &mut self.m_in_line, MAX_LINE as i32);
+                if iz != 0 {
+                    break;
+                }
+            }
+            if iz == -2 {
+                return None;
+            }
+            if iz == -1 {
+                exit_error_fmt!(
+                    "Reading line %d of list of input files %s",
+                    CArg::Int((ind + 1) as i64),
+                    CArg::Bytes(list_name)
+                );
+            }
+            if iz < 0 {
+                *end_reached = true;
+            }
+            filename = c_str(&self.m_in_line).to_vec();
+        } else if ind < num_in_by_opt {
+            // Or get arguments
+            pip_get_string(b"InputFile", &mut filename);
+        } else {
+            filename = pip_get_non_option_arg(ind - num_in_by_opt).unwrap_or_default();
+        }
+        Some(filename)
+    }
+
+    /// `AliFrame::openAndReadHeader` (`alignframes.cpp:2244`).
+    ///
+    /// Open an MRC file and read its header
+    pub fn open_and_read_header(
+        &self,
+        filename: &[u8],
+        head: &mut MrcHeader,
+        descrip: &[u8],
+        test_mode: bool,
+    ) -> ImodFile {
+        let Some(mut in_fp) = ii_fopen(filename, "rb") else {
+            exit_error_fmt!(
+                "Opening %s file %s%s",
+                CArg::Bytes(descrip),
+                CArg::Bytes(filename),
+                CArg::Str(if test_mode {
+                    "; do not specify an output file when not making sums"
+                } else {
+                    ""
+                })
+            );
+        };
+        if mrc_head_read(&mut in_fp, head) != 0 {
+            exit_error_fmt!(
+                "Reading header of %s file %s",
+                CArg::Bytes(descrip),
+                CArg::Bytes(filename)
+            );
+        }
+        in_fp
+    }
+
+    /// `AliFrame::checkInputFile` (`alignframes.cpp:2259`).
+    ///
+    /// Do basic checks on size and mode for a file
+    pub fn check_input_file(
+        &self,
+        filename: &[u8],
+        head: &MrcHeader,
+        nx: i32,
+        ny: i32,
+        combine: i32,
+    ) {
+        if slice_mode_if_real(head.mode) < 0 {
+            exit_error_fmt!(
+                "File mode for %s is %d; only byte, short, float allowed",
+                CArg::Bytes(filename),
+                CArg::Int(head.mode as i64)
+            );
+        }
+        if nx > 0 && (nx != head.nx || ny != head.ny) {
+            exit_error_fmt!(
+                "File %s has a different size (%d x %d) from previous files (%d x %d)",
+                CArg::Bytes(filename),
+                CArg::Int(head.nx as i64),
+                CArg::Int(head.ny as i64),
+                CArg::Int(nx as i64),
+                CArg::Int(ny as i64)
+            );
+        }
+        if combine != 0 && head.nz > 1 {
+            exit_error_fmt!(
+                "File %s has more than one slice and cannot be used with -combine",
+                CArg::Bytes(filename)
+            );
+        }
+    }
+
+    /// `AliFrame::readAnalyzeSavedFrameList` (`alignframes.cpp:2276`).
+    ///
+    /// Get a list of frames saved from SEMCCD in a single exposure tilt series
+    pub fn read_analyze_saved_frame_list(&mut self, break_set_size: i32) -> bool {
+        let mut ierr: i32;
+        let mut saved_num: i32;
+        let mut last_kept_num: i32;
+        let mut ind: usize;
+        let mut start_of_set = 0usize;
+        let mut max_gap_in_frame_set = 0i32;
+        let num_in_list: usize;
+        let mut saved_list_name: Vec<u8> = Vec::new();
+        let mut in_frame_set: bool;
+        let mut single_sets_ok: bool;
+
+        let have_name = pip_get_string(b"SavedFrameListFile", &mut saved_list_name) == 0;
+        pip_get_integer(b"MaxGapWithinFrameSet", &mut max_gap_in_frame_set);
+        if !have_name {
+            return false;
+        }
+        if self.m_num_in_files != 1 {
+            exit_error(b"There must be only a single input file with a saved frame list");
+        }
+        if break_set_size != 0 {
+            exit_error(b"You cannot use the -break option with a saved frame list");
+        }
+        let Some(mut fp) = ImodFile::open(os_path(&saved_list_name), "r") else {
+            exit_error_fmt!(
+                "Opening saved frame list file %s",
+                CArg::Bytes(&saved_list_name)
+            );
+        };
+        loop {
+            ierr = fgetline(&mut fp, &mut self.m_in_line, MAX_LINE as i32);
+            if ierr == 0 {
+                continue;
+            }
+            if ierr == -2 {
+                break;
+            }
+            if ierr == -1 {
+                exit_error_fmt!(
+                    "Reading saved frame list file %s",
+                    CArg::Bytes(&saved_list_name)
+                );
+            }
+            let mut end = 0;
+            self.m_saved_frames
+                .push(strtol(c_str(&self.m_in_line), &mut end, 10) as i32);
+            if ierr < 0 {
+                break;
+            }
+        }
+        drop(fp);
+
+        num_in_list = self.m_saved_frames.len();
+        if num_in_list < 10 {
+            exit_error_fmt!(
+                "There are only %d numbers in the saved frame list file %s",
+                CArg::Int(num_in_list as i64),
+                CArg::Bytes(&saved_list_name)
+            );
+        }
+
+        // Analyze it now so the number is known if tilt angles come in
+        // Keep track if negative numbers seen
+        in_frame_set = false;
+        single_sets_ok = false;
+        last_kept_num = -1;
+        ind = 0;
+        while ind < num_in_list {
+            saved_num = self.m_saved_frames[ind];
+            if saved_num < 0
+                || (last_kept_num < 0 && saved_num >= 0)
+                || (in_frame_set && saved_num > last_kept_num + max_gap_in_frame_set + 1)
+            {
+                if in_frame_set {
+                    self.m_set_starts.push(start_of_set as i32);
+                    self.m_num_in_sets.push((ind - start_of_set) as i32);
+                    in_frame_set = false;
+                }
+                if saved_num >= 0 {
+                    in_frame_set = true;
+                    start_of_set = ind;
+                } else if ind < num_in_list - 1 {
+                    single_sets_ok = true;
+                }
+            }
+            if saved_num >= 0 {
+                last_kept_num = saved_num;
+            }
+            ind += 1;
+        }
+
+        // Allow single frame set at start or end if negative values were seen or if there
+        // are fewer than 4 frames per set on average (having -1 in file is less ambiguous)
+        if !single_sets_ok {
+            single_sets_ok = num_in_list < 4 * self.m_num_in_sets.len();
+        }
+        if in_frame_set && (ind - start_of_set > 1 || single_sets_ok) {
+            self.m_set_starts.push(start_of_set as i32);
+            self.m_num_in_sets.push((ind - start_of_set) as i32);
+        }
+
+        // `mNumInSets[0]` is read natively even when no set was found
+        // (BUGS.md); there is nothing to drop then.
+        if !self.m_num_in_sets.is_empty() && self.m_num_in_sets[0] == 1 && !single_sets_ok {
+            self.m_set_starts.remove(0);
+            self.m_num_in_sets.remove(0);
+        }
+        true
+    }
+
+    /// `AliFrame::readTiltAngleFile` (`alignframes.cpp:2356`).
+    ///
+    /// Read tilt angles from a file
+    pub fn read_tilt_angle_file(&mut self, tilt_name: Option<&[u8]>) {
+        let mut ierr: i32;
+        let mut ix: i32 = 0;
+        let mut iy: i32 = 0;
+        let Some(tilt_name) = tilt_name else {
+            return;
+        };
+        let Some(mut fp) = ImodFile::open(os_path(tilt_name), "r") else {
+            exit_error_fmt!("Opening tilt angle file %s", CArg::Bytes(tilt_name));
+        };
+        loop {
+            ierr = fgetline(&mut fp, &mut self.m_in_line, MAX_LINE as i32);
+            if ierr == -2 {
+                break;
+            }
+            if ierr == -1 {
+                exit_error_fmt!("Reading tilt angle file %s", CArg::Bytes(tilt_name));
+            }
+            if ierr > 0 {
+                // Convert the angle as a float then look for two integers for frame start/end
+                let line = c_str(&self.m_in_line).to_vec();
+                let mut end = 0usize;
+                self.m_tilt_angles.push(strtod(&line, &mut end) as f32);
+                let newptr = end;
+                let mut end2 = 0usize;
+                ix = strtol(&line[newptr..], &mut end2, 10) as i32;
+                iy = -1;
+                if end2 == 0 {
+                    ix = -1;
+                } else {
+                    let newptr = newptr + end2;
+                    let mut end3 = 0usize;
+                    iy = strtol(&line[newptr..], &mut end3, 10) as i32;
+                    if end3 == 0 {
+                        iy = -1;
+                    } else {
+                        self.m_rel_frame_starts_found = true;
+                    }
+                }
+                self.m_tilt_rel_start_frame.push(ix);
+                self.m_tilt_rel_end_frame.push(iy);
+            }
+            if ierr < 0 {
+                break;
+            }
+        }
+    }
+
+    /// `AliFrame::getAnglesAndTitlesFromMdoc` (`alignframes.cpp:2400`).
+    ///
+    /// Get tilt angles, axis angle, and titles from an mdoc file
+    pub fn get_angles_and_titles_from_mdoc(
+        &mut self,
+        tilt_name: Option<&[u8]>,
+        mut axis_angle: f32,
+        angles_only: bool,
+    ) {
+        let mut ix: i32 = 0;
+        let mut iy: i32 = 0;
+        let mut iz: i32 = 0;
+        let ind: i32;
+        let mut ierr: i32;
+        let mut got_angle: bool;
+        let mut title_angle: f32;
+        let mut rot_angle = 0f32;
+        let mut sstr: Vec<u8>;
+        let mut axstr: Vec<u8>;
+
+        // Get tilt angles if not already got them
+        if tilt_name.is_none() {
+            self.m_tilt_angles
+                .resize(self.m_num_sect.max(0) as usize, 0.);
+            for ind in 0..self.m_num_sect {
+                if self.m_ignore_zvalue != 0 {
+                    iz = ind;
+                } else {
+                    iz = adoc_lookup_by_name_value(ADOC_ZVALUE_NAME, ind);
+                }
+                if iz < 0 {
+                    exit_error_fmt!(
+                        "Looking up section with Z value %d in mdoc file",
+                        CArg::Int(ind as i64)
+                    );
+                }
+
+                // The source passes (ind, string) to "%s %d" (BUGS.md).
+                if adoc_get_float(
+                    ADOC_ZVALUE_NAME,
+                    iz,
+                    b"TiltAngle",
+                    &mut self.m_tilt_angles[ind as usize],
+                ) != 0
+                {
+                    exit_error_fmt!(
+                        "Getting tilt angle for %s %d in mdoc file",
+                        CArg::Str(if self.m_ignore_zvalue != 0 {
+                            "section"
+                        } else {
+                            "Z value"
+                        }),
+                        CArg::Int(ind as i64)
+                    );
+                }
+
+                // Get start and end frames for a saved frame list
+                if self.m_doing_frame_ts && !angles_only {
+                    ix = -1;
+                    iy = -1;
+                    ierr = adoc_get_two_integers(
+                        ADOC_ZVALUE_NAME,
+                        iz,
+                        b"FrameTSStartEndFrames",
+                        &mut ix,
+                        &mut iy,
+                    );
+                    if ierr < 0 {
+                        exit_error(b"Looking up frame starts and ends in mdoc file");
+                    }
+                    if ierr == 0 {
+                        self.m_rel_frame_starts_found = true;
+                    }
+                    self.m_tilt_rel_start_frame.push(ix);
+                    self.m_tilt_rel_end_frame.push(iy);
                 }
             }
         }
         if angles_only {
-            return Ok(result);
+            return;
         }
-        let mut axis = axis_angle;
-        let mut got_axis = false;
-        let titles = if input.titles.is_empty() {
-            input.global_title.iter().cloned().collect()
-        } else {
-            input.titles.clone()
-        };
-        for mut title in titles {
-            if title.contains("TiltAxisAngle") {
-                result.are_fei_frames = true;
-                if axis.is_none() {
-                    let title_angle = title.split_once('=').and_then(|(_, value)| {
-                        let value = value.trim_start();
-                        value.split([' ', ',']).next()?.parse::<f32>().ok()
-                    });
-                    if let (Some(title_angle), Some(rotation)) =
-                        (title_angle, input.first_rotation_angle)
-                    {
-                        let corrected = if (-(rotation + 90.) - title_angle).abs() < 0.11 {
-                            Some(rotation)
-                        } else if ((rotation - 90.) - title_angle).abs() < 0.11 {
-                            Some(title_angle)
-                        } else if (-(rotation - 90.) - title_angle).abs() < 0.11 {
-                            Some(-title_angle)
-                        } else {
-                            None
-                        };
-                        if let Some(value) = corrected {
-                            axis = Some(value);
-                            got_axis = true;
-                            let suffix = title
-                                .split_once('=')
-                                .map(|(_, value)| {
-                                    value.trim_start().trim_start_matches(|c: char| {
-                                        c.is_ascii_digit()
-                                            || matches!(c, '.' | '-' | '+' | 'e' | 'E')
-                                    })
-                                })
-                                .unwrap_or("");
-                            title = format!("  Tilt axis angle = {value:.2}{suffix}");
+
+        // Get Pixel and size
+        adoc_get_float(ADOC_GLOBAL_NAME, 0, b"PixelSpacing", &mut self.m_mdoc_pixel);
+        adoc_get_two_integers(
+            ADOC_GLOBAL_NAME,
+            0,
+            b"ImageSize",
+            &mut self.m_mdoc_xsize,
+            &mut self.m_mdoc_ysize,
+        );
+
+        // Get titles
+        ind = adoc_get_number_of_sections(b"T").unwrap_or(-1);
+        if ind < 0 {
+            exit_error(b"Looking up titles in mdoc file");
+        }
+
+        for out_num in 0..self.m_num_out_files as usize {
+            let hp = self.m_out_heads[out_num];
+            self.m_heads[hp].nlabl = 0;
+
+            // Transfer real titles, keep track if axis angle was gotten
+            got_angle = false;
+            iz = 0;
+            while iz < ind {
+                let Ok(sect_name) = adoc_get_section_name(b"T", iz) else {
+                    exit_error(b"Getting title from mdoc file");
+                };
+                sstr = sect_name;
+                if find_bytes(&sstr, b"TiltAxisAngle").is_some() {
+                    // Got a title apparently from FEI software
+                    self.m_are_feiframes = true;
+                    if axis_angle as f64 > -990. {
+                        iz += 1;
+                        continue;
+                    }
+
+                    // Try to extract the axis angle
+                    ix = find_bytes(&sstr, b"=").map_or(-1, |p| p as i32);
+                    axstr = sstr.clone();
+                    axstr.drain(..(ix + 1) as usize);
+                    let mut end = 0usize;
+                    title_angle = strtod(&axstr, &mut end) as f32;
+                    let end_char = axstr.get(end).copied().unwrap_or(0);
+                    if end_char == b' ' || end_char == b',' {
+                        // If that checks out correctly, extract a RotationAngle to check against
+                        // and get result if it fits different cases
+                        if adoc_get_float(ADOC_ZVALUE_NAME, 0, b"RotationAngle", &mut rot_angle)
+                            == 0
+                        {
+                            ix = 1;
+
+                            // The current wrong FEI implementation (4/23/24)
+                            if ((-(rot_angle + 90.) - title_angle).abs() as f64) < 0.11 {
+                                axis_angle = rot_angle;
+                            }
+                            // If they corrected it to match SerialEM
+                            else if (((rot_angle - 90.) - title_angle).abs() as f64) < 0.11 {
+                                axis_angle = title_angle;
+                            }
+                            // If they sorta corrected it but kept it inverted as in TS file
+                            else if ((-(rot_angle - 90.) - title_angle).abs() as f64) < 0.11 {
+                                axis_angle = -title_angle;
+                            } else {
+                                ix = 0;
+                            }
+
+                            // Fix the title to be recognized by Etomo
+                            if ix != 0 {
+                                got_angle = true;
+                                let buffer = c_format_bytes(
+                                    "  Tilt axis angle = %.2f",
+                                    &[CArg::Dbl(axis_angle as f64)],
+                                );
+                                axstr.drain(..end);
+                                sstr = buffer;
+                                sstr.extend_from_slice(&axstr);
+                            }
+                        }
+                    }
+                } else if find_bytes(&sstr, b"Tilt axis angle").is_some()
+                    && sstr.first().copied().unwrap_or(0) != b' '
+                {
+                    if axis_angle as f64 > -990. {
+                        iz += 1;
+                        continue;
+                    }
+                    got_angle = true;
+                    let mut padded = b"    ".to_vec();
+                    padded.extend_from_slice(&sstr);
+                    sstr = padded;
+                }
+
+                // The source copies into `labels[iz]` but pads and counts
+                // `labels[nlabl]`, which differ once a title is skipped, and has
+                // no bound at the ten label slots (BUGS.md).
+                let head = &mut self.m_heads[hp];
+                if (head.nlabl as usize) < MRC_NLABELS {
+                    let slot = head.nlabl as usize;
+                    strncpy_label(&mut head.labels[slot], &sstr);
+                    fix_title_padding(&mut head.labels[slot]);
+                    head.nlabl += 1;
+                }
+                iz += 1;
+            }
+
+            // If no real titles, look for a T = at top of frame stack mdoc
+            let mut sect_name = Vec::new();
+            if ind == 0 && adoc_get_string(ADOC_GLOBAL_NAME, 0, b"T", &mut sect_name) == 0 {
+                // The source pads `labels[iz++]` and leaves `nlabl` at 0, so the
+                // title was overwritten by the next one added (BUGS.md).
+                let head = &mut self.m_heads[hp];
+                let slot = head.nlabl as usize;
+                strncpy_label(&mut head.labels[slot], &sect_name);
+                fix_title_padding(&mut head.labels[slot]);
+                head.nlabl += 1;
+            }
+
+            // And if no axis angle gotten, get the rotation angle
+            if !got_angle {
+                if (axis_angle as f64) < -990.
+                    && adoc_get_float(b"FrameSet", 0, b"RotationAngle", &mut axis_angle) == 0
+                {
+                    axis_angle -= 90.;
+                }
+                if axis_angle as f64 > -990. {
+                    self.add_axis_angle_title(out_num as i32, axis_angle);
+                }
+            }
+        }
+    }
+
+    /// `AliFrame::checkTitlesForRefNames` (`alignframes.cpp:2533`).
+    ///
+    /// Looks in the titles of a frame file for gain reference name and possible defect name
+    pub fn check_titles_for_ref_names(
+        &mut self,
+        filename: &[u8],
+        ii_frames: Option<*mut ImodImageFile>,
+    ) {
+        let mut ind: i32;
+        let xml_ind: i32;
+        let mut start_ind = 0i32;
+        let mut num_item = 0i32;
+        let mut err: i32;
+        let mut sstr: Vec<u8>;
+        let mut file_str: Vec<u8>;
+        let mut gain_ref: bool;
+        let mut defect: bool;
+        let mut value: Option<Vec<u8>> = None;
+        let mut root_element: Option<Vec<u8>> = None;
+
+        // Look up metadata for EER file: anything that goes wrong is an error
+        if self.m_frames_are_eer {
+            let strng = match ii_frames {
+                Some(frames) => tiff_get_array(unsafe { &mut *frames }, FEI_EER_METADATA_TAG),
+                None => Err(-1),
+            };
+            let Ok(strng) = strng.and_then(|s| if s.is_empty() { Err(0) } else { Ok(s) }) else {
+                exit_error(b"The EER file has no metadata for looking up gain reference");
+            };
+
+            // The source copies the `count` bytes into a terminated buffer and then
+            // parses the unterminated tag memory instead (BUGS.md); the copy is
+            // what is parsed here.
+            let str_copy = c_str(&strng).to_vec();
+            xml_ind = ixml_load_string(&str_copy, 0, &mut root_element);
+            if xml_ind < 0 {
+                exit_error_fmt!(
+                    "Parsing metadata string from EER file (error %d)",
+                    CArg::Int(xml_ind as i64)
+                );
+            }
+            if root_element.as_deref() != Some(b"metadata".as_slice()) {
+                exit_error_fmt!(
+                    "Root element %s in XML string from EER file",
+                    CArg::Str(if root_element.is_some() {
+                        "is not \"metadata\""
+                    } else {
+                        "was not found"
+                    })
+                );
+            }
+
+            // All the elements are item and the have different attributes
+            ind = ixml_find_elements(xml_ind, 0, b"item", &mut start_ind, &mut num_item);
+
+            // The source's format has a %d and no argument (BUGS.md).
+            if ind != 0 {
+                exit_error_fmt!(
+                    "Error %d trying to find \"item\" nodes in metadata string",
+                    CArg::Int(ind as i64)
+                );
+            }
+            for ind in 0..num_item {
+                let mut attr = Vec::new();
+                err = ixml_get_string_attribute(xml_ind, start_ind + ind, b"name", &mut attr);
+                if err < 0 {
+                    exit_error_fmt!(
+                        "Error %d getting attribute from item node in EER metadata",
+                        CArg::Int(err as i64)
+                    );
+                }
+                if err != 0 {
+                    continue;
+                }
+
+                // When find the reference oce, get its value
+                if attr == b"eerGainReference" {
+                    let mut text = Vec::new();
+                    err = ixml_get_string_value(xml_ind, start_ind + ind, &mut text);
+                    if err != 0 {
+                        exit_error_fmt!(
+                            "Error %d getting value for \"eerGainReference\" in metadata string",
+                            CArg::Int(err as i64)
+                        );
+                    }
+                    value = Some(text);
+                    break;
+                }
+            }
+
+            // It is an error for an EER file not to have a gain reference if this option is
+            // given
+            let Some(value) = value else {
+                exit_error(
+                    b"Could not find the gain reference in the metadata string from the EER file",
+                );
+            };
+
+            // Strip the path and assign to gain name
+            file_str = c_str(&value).to_vec();
+            if let Some(pos) = find_last_of(&file_str, b"/\\") {
+                file_str = file_str[pos + 1..].to_vec();
+            }
+            self.m_gain_name = Some(file_str);
+            ixml_clear(xml_ind);
+            return;
+        }
+
+        for ind in 0..self.m_in_head.nlabl.clamp(0, MRC_NLABELS as i32) as usize {
+            sstr = c_str(&self.m_in_head.labels[ind]).to_vec();
+
+            // Strip the blanks
+            let first = sstr.iter().position(|&c| c != b' ');
+            let last = sstr.iter().rposition(|&c| c != b' ');
+            if let (Some(first), Some(last)) = (first, last) {
+                if last > first {
+                    sstr = sstr[first..last + 1].to_vec();
+                    let ext = sstr.len().wrapping_sub(4);
+
+                    // See if it qualifies as a gain ref (and none already) or defect file
+                    gain_ref = (find_bytes(&sstr, b"ref").is_some()
+                        || find_bytes(&sstr, b"Ref").is_some())
+                        && (find_bytes(&sstr, b".mrc") == Some(ext)
+                            || find_bytes(&sstr, b".dm4") == Some(ext)
+                            || find_bytes(&sstr, b".tif") == Some(ext))
+                        && self.m_gain_name.is_none();
+                    defect = find_bytes(&sstr, b"defect").is_some()
+                        && find_bytes(&sstr, b".txt") == Some(ext)
+                        && self.m_defect_name.is_none();
+                    if defect || gain_ref {
+                        file_str = filename.to_vec();
+
+                        // If there is a path to the frame filename, add it to front
+                        if let Some(pos) = find_last_of(&file_str, b"/\\") {
+                            let mut joined = file_str[..pos + 1].to_vec();
+                            joined.extend_from_slice(&sstr);
+                            sstr = joined;
+                        }
+
+                        // Look for the file and accept it
+                        if std::fs::metadata(os_path(&sstr)).is_ok() {
+                            if gain_ref {
+                                self.m_gain_name = Some(sstr.clone());
+                            } else {
+                                self.m_defect_name = Some(sstr.clone());
+                            }
                         }
                     }
                 }
-            } else if title.contains("Tilt axis angle") && !title.starts_with(' ') && axis.is_none()
-            {
-                got_axis = true;
-                title = format!("    {title}");
             }
-            result.titles.push(title);
         }
-        if !got_axis && axis.is_none() {
-            axis = input.frame_set_rotation_angle.map(|value| value - 90.);
-        }
-        result.axis_angle = axis;
-        Ok(result)
     }
 
-    /// `processDoseWeightingOptions`: process command values and non-mdoc dose
-    /// files.  Mdoc lookup remains a separate owned metadata boundary.
-    pub fn process_dose_weighting_options(
-        fixed_frame_doses: Option<&str>,
-        voltage: i32,
-        dose_scaling: f32,
-        normalize: bool,
-        dose_file_type: i32,
-        dose_file_text: Option<&str>,
-    ) -> Result<DoseWeightingOptions, String> {
-        let mut options = DoseWeightingOptions {
-            dose_scaling,
-            reweight_ones: normalize.then(|| vec![1.; 9000]),
-            fixed_frame_doses: fixed_frame_doses.map(ToOwned::to_owned),
-            ..Default::default()
-        };
-        match voltage {
-            300 => {}
-            200 => options.dose_scaling *= 0.8,
-            _ => return Err("voltage must be either 200 or 300".into()),
-        }
-        if dose_file_type <= 0 {
-            return Ok(options);
-        }
-        if dose_file_type == 4 {
-            return Err("mdoc dose metadata requires the metadata boundary".into());
-        }
-        let text = dose_file_text.ok_or("a dose weighting file is required")?;
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
-            if dose_file_type == 1 {
-                options
-                    .total_doses
-                    .push(line.trim().parse().map_err(|_| "invalid total dose")?);
-                options.prior_doses.push(0.);
-            } else if dose_file_type > 4 {
-                options.frame_dose_lines.push(line.to_owned());
-            } else {
-                let values = line
-                    .split_whitespace()
-                    .map(str::parse::<f32>)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|_| "invalid prior and dose values")?;
-                if values.len() < 2 {
-                    return Err("dose line needs prior and dose values".into());
-                }
-                options.prior_doses.push(values[0]);
-                options.total_doses.push(if dose_file_type == 3 {
-                    values[1] - values[0]
-                } else {
-                    values[1]
-                });
-            }
-        }
-        Ok(options)
+    /// `AliFrame::addAxisAngleTitle` (`alignframes.cpp:2642`).
+    ///
+    /// Adds title with tilt axis angle to one of the output headers
+    pub fn add_axis_angle_title(&mut self, out_num: i32, axis_angle: f32) {
+        let hp = self.m_out_heads[out_num as usize];
+        let mut iz = b3dmin!(self.m_heads[hp].nlabl, 8);
+        let line = c_format_bytes(
+            "    Tilt axis angle = %.1f",
+            &[CArg::Dbl(axis_angle as f64)],
+        );
+        self.m_in_line = [0; MAX_LINE + 1];
+        self.m_in_line[..line.len().min(MAX_LINE)]
+            .copy_from_slice(&line[..line.len().min(MAX_LINE)]);
+        let head = &mut self.m_heads[hp];
+        strncpy_label(&mut head.labels[iz as usize], &self.m_in_line);
+        fix_title_padding(&mut head.labels[iz as usize]);
+        iz += 1;
+        head.nlabl = iz;
     }
 
-    /// `AliFrame::analyzeExtraHeader`, operating on the already-read float
-    /// extended header instead of a borrowed C `FILE *` and scratch buffer.
-    pub fn analyze_extra_header(
-        header: &MrcHeader,
-        extended: &[f32],
-        frame_range: Option<(usize, usize)>,
-        axis_pix_only: bool,
-    ) -> Result<ExtendedHeaderAnalysis, String> {
-        let fields = usize::try_from(header.nint.max(0)).unwrap_or(0)
-            + usize::try_from(header.nreal.max(0)).unwrap_or(0);
-        let sections = usize::try_from(header.nz.max(0)).unwrap_or(0);
-        if fields == 0 || sections == 0 {
-            return Ok(ExtendedHeaderAnalysis::default());
-        }
-        if extended.len() < fields.saturating_mul(sections) {
-            return Err("extended header is shorter than its MRC dimensions".into());
-        }
-        let mut result = ExtendedHeaderAnalysis {
-            axis_angle: -999.,
-            ..Default::default()
-        };
-        if header.nreal >= 12 {
-            let base = header.nint.max(0) as usize;
-            let mut pixel = extended[base + 11];
-            if !(0.05..100_000.).contains(&pixel) {
-                pixel *= 1.0e10;
-            }
-            if (0.05..100_000.).contains(&pixel) {
-                let mut axis = extended[base + 10];
-                if (-360. ..=360.).contains(&axis) {
-                    if axis < -180. {
-                        axis += 360.;
-                    }
-                    if axis > 180. {
-                        axis -= 360.;
-                    }
-                    result.pixel_size = pixel;
-                    result.axis_angle = axis;
-                    result.source_status = 1;
-                }
-            }
-        }
-        if axis_pix_only {
-            return Ok(result);
-        }
-        let (start, end) = frame_range.unwrap_or((0, sections - 1));
-        if start > end || end >= sections {
-            return Err("extended-header frame range is invalid".into());
-        }
-        let tilt_at = |section: usize| extended[header.nint.max(0) as usize + section * fields];
-        let mut last_size = 0_usize;
-        let mut equal_sizes = 0_usize;
-        let mut inserted_double = false;
-        for section in start..=end {
-            let tilt = tilt_at(section);
-            if !(-180. ..=180.).contains(&tilt) {
-                return Ok(result);
-            }
-            if result
-                .tilts
-                .last()
-                .is_none_or(|last| (tilt - *last).abs() > 0.01)
-            {
-                if let Some(&previous_start) = result.set_starts.last() {
-                    let mut size = section - previous_start;
-                    if equal_sizes > 5 && size == 2 * last_size && !inserted_double {
-                        result.set_starts.push(section - last_size);
-                        result.tilts.push(tilt);
-                        size = last_size;
-                        inserted_double = true;
-                    }
-                    if size == last_size {
-                        equal_sizes += 1;
-                    } else {
-                        equal_sizes = 1;
-                        last_size = size;
-                    }
-                }
-                result.set_starts.push(section);
-                result.tilts.push(tilt);
-            }
-        }
-        result.set_starts.push(end + 1);
-        result.set_sizes = result
-            .set_starts
-            .windows(2)
-            .map(|pair| pair[1] - pair[0])
-            .collect();
-        result.min_set_size = result.set_sizes.iter().copied().min().unwrap_or(0);
-        result.max_set_size = result.set_sizes.iter().copied().max().unwrap_or(0);
-        result.source_status += 2;
-        Ok(result)
-    }
-
-    /// `rotateFlipGainReference()`: apply the source rotation/flip convention
-    /// to an owned floating-point gain image and return its resulting shape.
-    pub fn rotate_flip_gain_reference(
-        reference: &mut Vec<f32>,
-        nx: &mut usize,
-        ny: &mut usize,
-        rotation_flip: i32,
-    ) -> Result<(), String> {
-        if *nx == 0 || *ny == 0 || reference.len() != nx.saturating_mul(*ny) {
-            return Err("gain reference dimensions do not match its pixels".into());
-        }
-        let input_nx = i32::try_from(*nx).map_err(|_| "gain reference width is too large")?;
-        let input_ny = i32::try_from(*ny).map_err(|_| "gain reference height is too large")?;
-        let mut output = vec![0.0; reference.len()];
-        let (mut output_nx, mut output_ny) = (0, 0);
-        if rotate_flip_image(
-            RotateFlipData::Float {
-                array: reference,
-                brray: &mut output,
-            },
-            input_nx,
-            input_ny,
-            rotation_flip,
-            0,
-            0,
-            0,
-            &mut output_nx,
-            &mut output_ny,
-            0,
-        ) != 0
+    /// `AliFrame::handleTooManyTiltAngles` (`alignframes.cpp:2655`).
+    ///
+    /// If there are too many tilt angles howevere they came in, try to sort out what is
+    /// missing from a frame tilt series and give warnings
+    pub fn handle_too_many_tilt_angles(&mut self, progname: &[u8]) {
+        let mut trim_tilt = false;
+        let ix: i32;
+        let mut iz: i32 = 0;
+        if self.m_tilt_angles.len() as i32 > self.m_num_in_files
+            && self.m_doing_frame_ts
+            && self.m_rel_frame_starts_found
         {
-            return Err(format!("inappropriate rotation/flip value {rotation_flip}"));
-        }
-        *nx = output_nx as usize;
-        *ny = output_ny as usize;
-        *reference = output;
-        Ok(())
-    }
+            ix = self.m_saved_frames[self.m_set_starts[0] as usize];
+            printf!(
+                "There are more tilt angles than frame sets: analyzing starting and ending frames\n"
+            );
 
-    /// `AliFrame::defectFileToString`: read nonempty defect-file records into
-    /// the newline-delimited protocol form consumed by the alignment backend.
-    pub fn defect_file_to_string(path: impl AsRef<std::path::Path>) -> Result<String, String> {
-        let path = path.as_ref();
-        let contents = std::fs::read_to_string(path)
-            .map_err(|error| format!("failed to open defect file {}: {error}", path.display()))?;
-        let mut output = String::new();
-        for line in contents.lines() {
-            if !line.is_empty() {
-                output.push_str(line);
-                output.push('\n');
-            }
-        }
-        Ok(output)
-    }
-
-    /// `AliFrame::addToSumBuffer` (`alignframes.cpp:2886`).  Source selects
-    /// the accumulator type from the MRC input mode; matching enum variants
-    /// make invalid raw casts impossible and retain the native wrapping
-    /// integer addition behavior.
-    pub fn add_to_sum_buffer(
-        input: AliFrameInputPixels<'_>,
-        sum: &mut AliFrameSumBuffer,
-    ) -> Result<(), String> {
-        match (input, sum) {
-            (AliFrameInputPixels::Byte(input), AliFrameSumBuffer::Short(sum)) => {
-                if input.len() != sum.len() {
-                    return Err("input and sum sizes differ".into());
-                }
-                for (source, target) in input.iter().zip(sum) {
-                    *target = target.wrapping_add(*source as i16);
-                }
-            }
-            (AliFrameInputPixels::Short(input), AliFrameSumBuffer::Short(sum)) => {
-                if input.len() != sum.len() {
-                    return Err("input and sum sizes differ".into());
-                }
-                for (source, target) in input.iter().zip(sum) {
-                    *target = target.wrapping_add(*source);
-                }
-            }
-            (AliFrameInputPixels::UShort(input), AliFrameSumBuffer::UShort(sum)) => {
-                if input.len() != sum.len() {
-                    return Err("input and sum sizes differ".into());
-                }
-                for (source, target) in input.iter().zip(sum) {
-                    *target = target.wrapping_add(*source);
-                }
-            }
-            (AliFrameInputPixels::Float(input), AliFrameSumBuffer::Float(sum)) => {
-                if input.len() != sum.len() {
-                    return Err("input and sum sizes differ".into());
-                }
-                for (source, target) in input.iter().zip(sum) {
-                    *target += *source;
-                }
-            }
-            _ => return Err("input mode does not match sum buffer mode".into()),
-        }
-        Ok(())
-    }
-
-    /// Owned translation of `AliFrame::openAndReadHeader`: unlike the C
-    /// `FILE *` route, the returned handle and header remain coupled in Rust
-    /// ownership and close automatically when the handle is dropped.
-    pub fn open_and_read_header(
-        filename: impl AsRef<std::path::Path>,
-        description: &str,
-        test_mode: bool,
-    ) -> Result<(ImodFile, MrcHeader), String> {
-        let path = filename.as_ref();
-        let mut file = ImodFile::open(path, "rb").ok_or_else(|| {
-            format!(
-                "cannot open {description} file {}{}",
-                path.display(),
-                if test_mode {
-                    "; do not specify an output file when not making sums"
-                } else {
-                    ""
-                }
-            )
-        })?;
-        let mut header = MrcHeader::default();
-        if mrc_head_read(&mut file, &mut header) != 0 {
-            return Err(format!(
-                "cannot read header of {description} file {}",
-                path.display()
-            ));
-        }
-        Ok((file, header))
-    }
-
-    /// Owned-file equivalent of source `AliFrame::getNextFilename` for the
-    /// command forms already supported by the MRC route: repeated input
-    /// options, positional input names, or a list file.  Mdoc-derived frame
-    /// names require the unfinished autodoc orchestration and are intentionally
-    /// not fabricated here.
-    pub fn get_next_filename(
-        index: usize,
-        option_inputs: &[std::path::PathBuf],
-        positional_inputs: &[std::path::PathBuf],
-        input_list: Option<&std::path::Path>,
-    ) -> Result<Option<std::path::PathBuf>, String> {
-        if let Some(list_path) = input_list {
-            let text = std::fs::read_to_string(list_path).map_err(|error| {
-                format!(
-                    "cannot read input-file list {}: {error}",
-                    list_path.display()
-                )
-            })?;
-            return Ok(text
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .nth(index)
-                .map(|line| std::path::PathBuf::from(line.trim())));
-        }
-        Ok(option_inputs.get(index).cloned().or_else(|| {
-            positional_inputs
-                .get(index.saturating_sub(option_inputs.len()))
-                .cloned()
-        }))
-    }
-
-    /// Source `checkInputFile`, performed on an owned stack before alignment
-    /// creates any work buffers.
-    pub fn check_input_file(
-        filename: impl AsRef<std::path::Path>,
-        stack: &OwnedImageStack,
-        expected_size: Option<(usize, usize)>,
-        combine: bool,
-    ) -> Result<(), String> {
-        if !matches!(stack.mode, 0 | 1 | 2 | 6) {
-            return Err(format!(
-                "file mode for {} is {}; only real MRC modes are supported",
-                filename.as_ref().display(),
-                stack.mode
-            ));
-        }
-        if let Some((nx, ny)) = expected_size {
-            if (stack.nx, stack.ny) != (nx, ny) {
-                return Err(format!(
-                    "file {} has dimensions {} x {}; expected {} x {}",
-                    filename.as_ref().display(),
-                    stack.nx,
-                    stack.ny,
-                    nx,
-                    ny
-                ));
-            }
-        }
-        if combine && stack.frame_count() > 1 {
-            return Err(format!(
-                "file {} has more than one section and cannot be combined",
-                filename.as_ref().display()
-            ));
-        }
-        Ok(())
-    }
-
-    /// Owned translation of `readAnalyzeSavedFrameList`: parse SEMCCD saved
-    /// frame numbers and identify contiguous frame sets separated by the
-    /// source's gap/negative-number rules.
-    pub fn read_analyze_saved_frame_list(
-        list_path: impl AsRef<std::path::Path>,
-        input_file_count: usize,
-        break_set_size: usize,
-        max_gap_within_set: i32,
-    ) -> Result<SavedFrameSets, String> {
-        if input_file_count != 1 {
-            return Err("saved-frame lists require exactly one input file".into());
-        }
-        if break_set_size != 0 {
-            return Err("saved-frame lists cannot be used with fixed frame-set breaking".into());
-        }
-        let saved_frames = std::fs::read_to_string(list_path.as_ref())
-            .map_err(|error| {
-                format!(
-                    "cannot read saved frame list {}: {error}",
-                    list_path.as_ref().display()
-                )
-            })?
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                line.trim()
-                    .parse::<i32>()
-                    .map_err(|_| format!("invalid saved frame number {line}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if saved_frames.len() < 10 {
-            return Err(format!(
-                "there are only {} numbers in saved frame list {}",
-                saved_frames.len(),
-                list_path.as_ref().display()
-            ));
-        }
-        let mut starts = Vec::new();
-        let mut counts = Vec::new();
-        let mut in_set = false;
-        let mut single_sets_ok = false;
-        let mut last_kept = -1;
-        let mut start = 0;
-        for (index, &saved) in saved_frames.iter().enumerate() {
-            if saved < 0
-                || (last_kept < 0 && saved >= 0)
-                || (in_set && saved > last_kept + max_gap_within_set + 1)
-            {
-                if in_set {
-                    starts.push(start);
-                    counts.push(index - start);
-                    in_set = false;
-                }
-                if saved >= 0 {
-                    in_set = true;
-                    start = index;
-                } else if index + 1 < saved_frames.len() {
-                    single_sets_ok = true;
-                }
-            }
-            if saved >= 0 {
-                last_kept = saved;
-            }
-        }
-        if !single_sets_ok {
-            single_sets_ok = saved_frames.len() < 4 * counts.len();
-        }
-        if in_set && (saved_frames.len() - start > 1 || single_sets_ok) {
-            starts.push(start);
-            counts.push(saved_frames.len() - start);
-        }
-        if counts.first() == Some(&1) && !single_sets_ok {
-            starts.remove(0);
-            counts.remove(0);
-        }
-        if starts.is_empty() {
-            return Err("saved frame list contains no usable frame sets".into());
-        }
-        Ok(SavedFrameSets {
-            saved_frames,
-            starts,
-            counts,
-        })
-    }
-
-    /// Source `BreakFramesIntoSets` setup in the main processing loop.  Frame
-    /// numbers are zero-based here, matching the MRC section indices used by
-    /// the owned reader.
-    pub fn break_frames_into_sets(
-        frame_count: usize,
-        break_set_size: usize,
-        start_frame: Option<usize>,
-        end_frame: Option<usize>,
-    ) -> Result<SavedFrameSets, String> {
-        if break_set_size < 2 {
-            return Err("frame-set break size must be at least 2".into());
-        }
-        let first = start_frame.unwrap_or(0);
-        let last = end_frame.unwrap_or(frame_count.saturating_sub(1));
-        if first >= frame_count || last < first || last >= frame_count {
-            return Err("selected frame range is outside the input stack".into());
-        }
-        let usable = last + 1 - first;
-        let set_count = usable / break_set_size;
-        if set_count == 0 {
-            return Err("selected frame range is shorter than the frame-set size".into());
-        }
-        let mut starts = Vec::with_capacity(set_count);
-        let mut counts = Vec::with_capacity(set_count);
-        for set in 0..set_count {
-            let set_start = first + set * usable / set_count;
-            let set_end = first + (set + 1) * usable / set_count;
-            starts.push(set_start);
-            counts.push(set_end - set_start);
-        }
-        Ok(SavedFrameSets {
-            saved_frames: (first..=last).map(|frame| frame as i32).collect(),
-            starts,
-            counts,
-        })
-    }
-
-    /// Owned translation of `readTiltAngleFile`.  A missing first/second
-    /// relative frame integer stays `-1`, just as in the source arrays.
-    pub fn read_tilt_angle_file(
-        path: impl AsRef<std::path::Path>,
-    ) -> Result<TiltAngleRecords, String> {
-        let text = std::fs::read_to_string(path.as_ref()).map_err(|error| {
-            format!(
-                "cannot read tilt-angle file {}: {error}",
-                path.as_ref().display()
-            )
-        })?;
-        let mut angles = Vec::new();
-        let mut relative_starts = Vec::new();
-        let mut relative_ends = Vec::new();
-        let mut relative_frame_starts_found = false;
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
-            let mut fields = line.split_whitespace();
-            let angle = fields
-                .next()
-                .ok_or_else(|| "tilt-angle line is empty".to_owned())?
-                .parse::<f32>()
-                .map_err(|_| format!("invalid tilt angle {line}"))?;
-            let start = fields.next().map_or(Ok(-1), |value| {
-                value
-                    .parse::<i32>()
-                    .map_err(|_| format!("invalid relative start frame {value}"))
-            })?;
-            let end = if let Some(value) = fields.next() {
-                relative_frame_starts_found = true;
-                value
-                    .parse::<i32>()
-                    .map_err(|_| format!("invalid relative end frame {value}"))?
-            } else {
-                -1
-            };
-            angles.push(angle);
-            relative_starts.push(start);
-            relative_ends.push(end);
-        }
-        Ok(TiltAngleRecords {
-            angles,
-            relative_starts,
-            relative_ends,
-            relative_frame_starts_found,
-        })
-    }
-
-    /// Source `addAxisAngleTitle`, updating the next permitted fixed-width MRC
-    /// label without a C string buffer.
-    pub fn add_axis_angle_title(header: &mut MrcHeader, axis_angle: f32) {
-        let label_index = (header.nlabl.max(0) as usize).min(8);
-        let text = format!("    Tilt axis angle = {axis_angle:.1}");
-        let mut label = [b' '; 80];
-        let bytes = text.as_bytes();
-        let count = bytes.len().min(label.len());
-        label[..count].copy_from_slice(&bytes[..count]);
-        header.labels[label_index] = label;
-        header.nlabl = (label_index + 1) as i32;
-    }
-
-    /// Source `handleTooManyTiltAngles` overlap test, retaining only tilt
-    /// records that cover at least one saved-frame set when relative frame
-    /// limits are available.
-    pub fn handle_too_many_tilt_angles(
-        records: &mut TiltAngleRecords,
-        saved_sets: &SavedFrameSets,
-        expected_sets: usize,
-    ) -> Result<usize, String> {
-        if records.angles.len() != records.relative_starts.len()
-            || records.angles.len() != records.relative_ends.len()
-        {
-            return Err("tilt-angle records have mismatched field counts".into());
-        }
-        if saved_sets.starts.len() != saved_sets.counts.len() || saved_sets.starts.is_empty() {
-            return Err("saved-frame sets are invalid".into());
-        }
-        let mut removed = 0;
-        if records.angles.len() > expected_sets && records.relative_frame_starts_found {
-            let base = *saved_sets
-                .saved_frames
-                .get(saved_sets.starts[0])
-                .ok_or_else(|| "first saved-frame set is outside saved-frame list".to_owned())?;
-            for index in (0..records.angles.len()).rev() {
-                let (start, end) = (records.relative_starts[index], records.relative_ends[index]);
-                if start < 0 || end < 0 {
+            // For each tilt angle, look at relative frame starts and find overlap with actual
+            // relative frame starts
+            for ind in (0..self.m_tilt_angles.len()).rev() {
+                if self.m_tilt_rel_start_frame[ind] < 0 || self.m_tilt_rel_end_frame[ind] < 0 {
                     continue;
                 }
-                let overlaps =
-                    saved_sets
-                        .starts
-                        .iter()
-                        .zip(&saved_sets.counts)
-                        .any(|(&set_start, &count)| {
-                            saved_sets
-                                .saved_frames
-                                .get(set_start)
-                                .is_some_and(|&saved_start| {
-                                    let relative_start = saved_start - base;
-                                    !(relative_start > end
-                                        || relative_start + (count as i32) < start)
-                                })
-                        });
-                if !overlaps {
-                    records.angles.remove(index);
-                    records.relative_starts.remove(index);
-                    records.relative_ends.remove(index);
-                    removed += 1;
+                trim_tilt = true;
+                for iy in 0..self.m_set_starts.len() {
+                    iz = self.m_saved_frames[self.m_set_starts[iy] as usize] - ix;
+
+                    // If overlap is found, it is good
+                    if !(iz > self.m_tilt_rel_end_frame[ind]
+                        || iz + self.m_num_in_sets[iy] < self.m_tilt_rel_start_frame[ind])
+                    {
+                        trim_tilt = false;
+                        break;
+                    }
+                }
+
+                // No overlap, remove the tilt
+                if trim_tilt {
+                    printf!(
+                        "All frames seem to be lost from %.1f deg tilt\n",
+                        CArg::Dbl(self.m_tilt_angles[ind] as f64)
+                    );
+                    self.m_tilt_angles.remove(ind);
+                    self.m_tilt_rel_start_frame.remove(ind);
+                    self.m_tilt_rel_end_frame.remove(ind);
+                    if !self.m_total_dose_vec.is_empty() && self.m_total_dose_vec.len() > ind {
+                        self.m_total_dose_vec.remove(ind);
+                        self.m_prior_dose_vec.remove(ind);
+                    }
                 }
             }
         }
-        if records.angles.len() < expected_sets {
-            return Err(format!(
-                "there are only {} tilt angles for {} frame sets",
-                records.angles.len(),
-                expected_sets
-            ));
+        if (self.m_tilt_angles.len() as i32) < self.m_num_in_files {
+            exit_error_fmt!(
+                "There are %sfewer tilt angles in the file (%d) than frame files or sets (%d)",
+                CArg::Str(if trim_tilt { "now " } else { "" }),
+                CArg::Int(self.m_tilt_angles.len() as i64),
+                CArg::Int(self.m_num_in_files as i64)
+            );
         }
-        Ok(removed)
-    }
-
-    /// Source `analyzeForPartialFrames` over owned MRC sections.  It samples
-    /// first, middle, and last frames, then removes underexposed endpoints.
-    pub fn analyze_for_partial_frames(
-        &self,
-        stack: &OwnedImageStack,
-        start: usize,
-        end: usize,
-    ) -> Result<PartialFrameSelection, String> {
-        if start > end || end >= stack.frame_count() {
-            return Err("partial-frame range is outside input MRC sections".into());
-        }
-        let mut selected_start = start;
-        let mut selected_end = end;
-        let mut dropped = Vec::new();
-        let count = end + 1 - start;
-        if (self.partial_thresh[0] <= 0. && self.partial_thresh[1] <= 0.) || count < 3 {
-            return Ok(PartialFrameSelection {
-                start,
-                end,
-                dropped,
-            });
-        }
-        let data_type = type_for_sample_mean(stack.mode);
-        if data_type < 0 {
-            return Err("MRC mode cannot be sampled for partial-frame analysis".into());
-        }
-        let trim = stack.nx.min(stack.ny) / 20;
-        let (nx_use, ny_use) = (stack.nx - 2 * trim, stack.ny - 2 * trim);
-        let sample = 40_000usize.min(nx_use * ny_use) as f32 / (nx_use * ny_use) as f32;
-        let mut means = [0.; 3];
-        for (slot, frame_index) in [start, start + count / 2, end].into_iter().enumerate() {
-            let frame = &stack.frames[frame_index];
-            let row_bytes = frame.len() / stack.ny;
-            let rows: Vec<&[u8]> = frame.chunks_exact(row_bytes).collect();
-            if sample_mean_only(
-                Some(&rows),
-                data_type,
-                stack.nx as i32,
-                stack.ny as i32,
-                sample,
-                trim as i32,
-                trim as i32,
-                nx_use as i32,
-                ny_use as i32,
-                Some(&mut means[slot]),
-            ) != 0
-            {
-                return Err("cannot compute sampled mean for partial-frame analysis".into());
-            }
-        }
-        if self.partial_thresh[0] > 0. && means[0] < self.partial_thresh[0] * means[1] {
-            dropped.push(selected_start);
-            selected_start += 1;
-        }
-        if self.partial_thresh[1] > 0.
-            && means[2] < self.partial_thresh[1] * means[1]
-            && selected_end - selected_start > 1
-        {
-            dropped.push(selected_end);
-            selected_end -= 1;
-        }
-        Ok(PartialFrameSelection {
-            start: selected_start,
-            end: selected_end,
-            dropped,
-        })
-    }
-
-    /// Apply source partial-frame selection to one owned MRC movie before the
-    /// normal frame-set output path.  The retained endpoints stay inclusive.
-    pub fn align_mrc_partial_frames_to(
-        &self,
-        input: impl AsRef<std::path::Path>,
-        output: impl AsRef<std::path::Path>,
-        start: usize,
-        end: usize,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-        gain: Option<&[f32]>,
-        dark: Option<&[u8]>,
-        dose_per_frame: Option<f32>,
-        critical_dose: f32,
-    ) -> Result<(AliFrameResult, PartialFrameSelection), String> {
-        let stack = OwnedImageStack::open_mrc(input.as_ref())?;
-        let selection = self.analyze_for_partial_frames(&stack, start, end)?;
-        let sets = SavedFrameSets {
-            saved_frames: (selection.start..=selection.end)
-                .map(|index| index as i32)
-                .collect(),
-            starts: vec![selection.start],
-            counts: vec![selection.end + 1 - selection.start],
-        };
-        let mut results = self.align_mrc_frame_sets_to(
-            input,
-            output,
-            &sets,
-            bin_sum,
-            bin_align,
-            max_shift,
-            gain,
-            dark,
-            dose_per_frame,
-            critical_dose,
-        )?;
-        Ok((results.remove(0), selection))
-    }
-
-    /// Source unweighted-output branch for one owned input movie.
-    pub fn align_mrc_file_with_unweighted_to(
-        &self,
-        input: impl AsRef<std::path::Path>,
-        weighted_output: impl AsRef<std::path::Path>,
-        unweighted_output: impl AsRef<std::path::Path>,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-    ) -> Result<AliFrameResult, String> {
-        let stack = OwnedImageStack::open_mrc(input.as_ref())?;
-        let result = self.align_mrc_file_to(
-            input,
-            weighted_output,
-            bin_sum,
-            bin_align,
-            max_shift,
-            None,
-            None,
-            None,
-            0.,
-            None,
-            None,
-        )?;
-        let mut header = MrcHeader::default();
-        if mrc_head_new(
-            &mut header,
-            stack.nx as i32,
-            stack.ny as i32,
-            1,
-            MRC_MODE_FLOAT,
-        ) != 0
-        {
-            return Err("cannot initialize unweighted MRC header".into());
-        }
-        let mut file = ImodFile::open(unweighted_output.as_ref(), "wb").ok_or_else(|| {
-            format!(
-                "cannot open unweighted MRC output {}",
-                unweighted_output.as_ref().display()
-            )
-        })?;
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot write unweighted MRC header".into());
-        }
-        let bytes: Vec<u8> = result
-            .unweighted_sum
-            .iter()
-            .flat_map(|value| value.to_ne_bytes())
-            .collect();
-        if mrc_write_slice(&bytes, &mut file, &mut header, 0, b'z') != 0 {
-            return Err("cannot write unweighted MRC sum".into());
-        }
-        if let Some((&first, rest)) = result.unweighted_sum.split_first() {
-            header.amin = rest.iter().fold(first, |low, value| low.min(*value));
-            header.amax = rest.iter().fold(first, |high, value| high.max(*value));
-            header.amean =
-                result.unweighted_sum.iter().sum::<f32>() / result.unweighted_sum.len() as f32;
-        }
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot finalize unweighted MRC header".into());
-        }
-        Ok(result)
-    }
-
-    /// Source sum-scaling option for an owned float MRC output.
-    pub fn scale_sum_output(result: &mut AliFrameResult, scale: f32) {
-        for value in &mut result.weighted_sum {
-            *value *= scale;
-        }
-        for value in &mut result.unweighted_sum {
-            *value *= scale;
+        if self.m_tilt_angles.len() as i32 > self.m_num_in_files {
+            printf!(
+                "WARNING: %s - There are %sfewer frame files or sets (%d) than tilt angles in the file (%d)\n",
+                CArg::Bytes(progname),
+                CArg::Str(if trim_tilt { "still " } else { "" }),
+                CArg::Int(self.m_num_in_files as i64),
+                CArg::Int(self.m_tilt_angles.len() as i64)
+            );
         }
     }
 
-    /// Write an owned aligned MRC sum and its source tilt-axis title.
-    pub fn align_mrc_file_with_axis_to(
-        &self,
-        input: impl AsRef<std::path::Path>,
-        output: impl AsRef<std::path::Path>,
-        axis_angle: f32,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-    ) -> Result<AliFrameResult, String> {
-        let result = self.align_mrc_file_to(
-            input, &output, bin_sum, bin_align, max_shift, None, None, None, 0., None, None,
-        )?;
-        let mut file = ImodFile::open(output.as_ref(), "r+")
-            .ok_or_else(|| format!("cannot reopen output MRC {}", output.as_ref().display()))?;
-        let mut header = MrcHeader::default();
-        if mrc_head_read(&mut file, &mut header) != 0 {
-            return Err("cannot read output MRC header".into());
-        }
-        Self::add_axis_angle_title(&mut header, axis_angle);
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot write output MRC axis title".into());
-        }
-        Ok(result)
-    }
-
-    pub fn extract_file_tail(filename: &str) -> String {
-        filename
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or(filename)
-            .into()
-    }
-    pub fn adjust_title_binning(title: &str, relative_binning: f32) -> Option<String> {
-        let marker = "binning =";
-        let at = title.find(marker)?;
-        if at == 0 {
-            return None;
-        }
-        let start = at
-            + marker.len()
-            + title[at + marker.len()..]
-                .chars()
-                .take_while(|character| *character == ' ')
-                .count();
-        let end = start + title[start..].find(' ').unwrap_or(title.len() - start);
-        let stack: f32 = title[start..end].parse().ok()?;
-        let adjusted = stack * relative_binning;
-        if adjusted < 0.46
-            || (adjusted > 0.54 && adjusted < 0.96)
-            || (adjusted > 0.96 && (adjusted.round() - adjusted).abs() > 0.04)
-        {
-            return None;
-        }
-        let replacement = if adjusted < 0.54 {
-            format!("{adjusted:.1}")
-        } else {
-            adjusted.round().to_string()
-        };
-        let mut result = format!("{}{}{}", &title[..start], replacement, &title[end..]);
-        if !result.starts_with(' ') {
-            result.insert_str(0, "    ");
-        }
-        Some(result)
-    }
-    pub fn expand_frame_doses_numbers(
-        line: &str,
-        maximum_frames: usize,
-    ) -> Result<(Vec<f32>, f32), String> {
-        let values = line
-            .split_whitespace()
-            .map(|word| {
-                word.parse::<f32>()
-                    .map_err(|_| format!("invalid frame dose value {word}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if values.len() % 2 != 0 {
-            return Err("odd number of frame doses and counts".into());
-        }
-        let mut doses = Vec::new();
-        let mut total = 0.;
-        for pair in values.chunks_exact(2) {
-            let count = pair[1].round();
-            if (count - pair[1]).abs() > 1.0e-3 || count < 0. {
-                return Err("frame dose count is not a nonnegative integer".into());
-            }
-            if doses.len() + count as usize > maximum_frames {
-                return Err("frame numbers exceed maximum expected frames".into());
-            }
-            total += count * pair[0];
-            doses.extend(std::iter::repeat_n(pair[0], count as usize));
-        }
-        Ok((doses, total))
-    }
-
-    /// Owned CPU segment of `AliFrame::main`: preprocess every fetched frame,
-    /// derive the selected all-vs-all trajectory, then make weighted and
-    /// unweighted sums through the owned CPU alignment helper.
-    pub fn align_image_stack(
-        &self,
-        stack: &OwnedImageStack,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-        gain: Option<&[f32]>,
-        dark: Option<&[u8]>,
-        dose_per_frame: Option<f32>,
-        critical_dose: f32,
-    ) -> Result<AliFrameResult, String> {
-        if stack.frames.is_empty() {
-            return Err("no input frames to align".into());
-        }
-        if bin_sum == 0 || bin_align == 0 || stack.nx == 0 || stack.ny == 0 {
-            return Err("invalid frame alignment dimensions or binning".into());
-        }
-        cpu::align_image_stack(
-            stack,
-            max_shift,
-            self.group_size,
-            gain,
-            dark,
-            self.trunc_limit,
-            dose_per_frame,
-            critical_dose,
-        )
-    }
-
-    /// File-input portion of `AliFrame::main` for ordinary MRC movie stacks.
+    /// `AliFrame::assessGpuNeeds` (`alignframes.cpp:2706`).
     ///
-    /// `OwnedImageStack` reads and owns every source section before alignment,
-    /// so this active route never opens an `ImodImageFile` or transfers a raw
-    /// caller-owned pixel pointer into the native-style `FrameAlign`.
-    pub fn align_mrc_file(
-        &self,
-        path: impl AsRef<std::path::Path>,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-        gain: Option<&[f32]>,
-        dark: Option<&[u8]>,
-        dose_per_frame: Option<f32>,
-        critical_dose: f32,
-    ) -> Result<AliFrameResult, String> {
-        let stack = OwnedImageStack::open_mrc(path)?;
-        self.align_image_stack(
-            &stack,
-            bin_sum,
-            bin_align,
-            max_shift,
-            gain,
-            dark,
-            dose_per_frame,
-            critical_dose,
-        )
-    }
+    /// Determine what if anything can be done on the GPU
+    pub fn assess_gpu_needs(&mut self, use_shr_mem: i32, frc_name: Option<&[u8]>) {
+        let gpu_frac_mem = 0.85f32;
+        let mut gpu_memory = 0f32;
+        let mut needed: f32;
+        let mut need_for_ali = 0f32;
+        let mut gpu_usable_mem: f32;
+        let mut need_for_gpusum = 0f32;
+        let tot_need: f32;
+        let need_for_pre_ops: f32;
+        let mut nz_align: i32;
+        let mut ind: i32;
+        let mut sum_with_align: bool;
+        let normalize = self.m_gain_slice.is_some() && !self.m_antialias_eer;
+        let need_preprocess = self.m_trunc_limit != 0. || self.m_cam_size_x > 0 || normalize;
 
-    /// End-to-end ordinary-MRC path: read a movie stack, align it, and write
-    /// the weighted summed image as a one-section float MRC file.
-    ///
-    /// This is the owned equivalent of the source's output-header setup and
-    /// `mrcWriteZFloat` block.  Multi-input output stacks, extended headers,
-    /// and metadata-sidecar edits remain outside this already-supported
-    /// single-stack route.
-    pub fn align_mrc_file_to(
-        &self,
-        input: impl AsRef<std::path::Path>,
-        output: impl AsRef<std::path::Path>,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-        gain: Option<&[f32]>,
-        dark: Option<&[u8]>,
-        dose_per_frame: Option<f32>,
-        critical_dose: f32,
-        transform_output: Option<&std::path::Path>,
-        plottable_shift_output: Option<&std::path::Path>,
-    ) -> Result<AliFrameResult, String> {
-        let stack = OwnedImageStack::open_mrc(input)?;
-        let result = self.align_image_stack(
-            &stack,
-            bin_sum,
-            bin_align,
-            max_shift,
-            gain,
-            dark,
-            dose_per_frame,
-            critical_dose,
-        )?;
-        let mut header = MrcHeader::default();
-        if mrc_head_new(
-            &mut header,
-            i32::try_from(stack.nx).map_err(|_| "output width exceeds MRC range")?,
-            i32::try_from(stack.ny).map_err(|_| "output height exceeds MRC range")?,
-            1,
-            MRC_MODE_FLOAT,
-        ) != 0
+        if self.m_use_gpu < 0 {
+            return;
+        }
+        let _ = use_shr_mem;
+        if self
+            .s_fa
+            .gpu_available(self.m_use_gpu, &mut gpu_memory, self.m_debug % 10)
+            == 0
         {
-            return Err("cannot initialize MRC output header".into());
+            self.m_use_gpu = -1;
         }
-        let mut output_file = ImodFile::open(output.as_ref(), "wb")
-            .ok_or_else(|| format!("cannot open output MRC file {}", output.as_ref().display()))?;
-        if mrc_head_write(&mut output_file, &mut header) != 0 {
-            return Err("cannot write MRC output header".into());
+        if self.m_use_gpu < 0 {
+            return;
         }
-        let mut bytes = Vec::with_capacity(result.weighted_sum.len() * std::mem::size_of::<f32>());
-        for value in &result.weighted_sum {
-            bytes.extend_from_slice(&value.to_ne_bytes());
-        }
-        if mrc_write_slice(&bytes, &mut output_file, &mut header, 0, b'z') != 0 {
-            return Err("cannot write aligned MRC sum".into());
-        }
-        if let Some((&first, rest)) = result.weighted_sum.split_first() {
-            header.amin = rest
-                .iter()
-                .fold(first, |minimum, value| minimum.min(*value));
-            header.amax = rest
-                .iter()
-                .fold(first, |maximum, value| maximum.max(*value));
-            header.amean =
-                result.weighted_sum.iter().sum::<f32>() / result.weighted_sum.len() as f32;
-        }
-        if mrc_head_write(&mut output_file, &mut header) != 0 {
-            return Err("cannot finalize MRC output header".into());
-        }
-        if let Some(path) = transform_output {
-            let file = std::fs::File::create(path).map_err(|error| {
-                format!("cannot open transform file {}: {error}", path.display())
-            })?;
-            let mut writer = std::io::BufWriter::new(file);
-            for (&x_shift, &y_shift) in result.x_shifts.iter().zip(&result.y_shifts) {
-                writeln!(
-                    writer,
-                    " 1.00000    0.00000    0.00000   1.00000  {x_shift:8.3} {y_shift:8.3}"
-                )
-                .map_err(|error| {
-                    format!("cannot write transform file {}: {error}", path.display())
-                })?;
-            }
-        }
-        if let Some(path) = plottable_shift_output {
-            let file = std::fs::File::create(path).map_err(|error| {
-                format!(
-                    "cannot open plottable-shift file {}: {error}",
-                    path.display()
-                )
-            })?;
-            let mut writer = std::io::BufWriter::new(file);
-            for (&x_shift, &y_shift) in result.x_shifts.iter().zip(&result.y_shifts) {
-                writeln!(writer, "{:3}  {x_shift:.3}  {y_shift:.3}", 10).map_err(|error| {
-                    format!(
-                        "cannot write plottable-shift file {}: {error}",
-                        path.display()
-                    )
-                })?;
-            }
-        }
-        Ok(result)
-    }
 
-    /// Process the selected input movies in source order, writing one aligned
-    /// sum per input as a Z section of one owned float MRC output stack.
-    pub fn align_mrc_files_to(
-        &self,
-        inputs: &[std::path::PathBuf],
-        output: impl AsRef<std::path::Path>,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-        gain: Option<&[f32]>,
-        dark: Option<&[u8]>,
-        dose_per_frame: Option<f32>,
-        critical_dose: f32,
-    ) -> Result<Vec<AliFrameResult>, String> {
-        let first_path = inputs
-            .first()
-            .ok_or_else(|| "no input MRC files to align".to_owned())?;
-        let first = OwnedImageStack::open_mrc(first_path)?;
-        let (nx, ny) = (first.nx, first.ny);
-        Self::check_input_file(first_path, &first, None, false)?;
-        let mut header = MrcHeader::default();
-        if mrc_head_new(
-            &mut header,
-            i32::try_from(nx).map_err(|_| "output width exceeds MRC range")?,
-            i32::try_from(ny).map_err(|_| "output height exceeds MRC range")?,
-            i32::try_from(inputs.len()).map_err(|_| "output section count exceeds MRC range")?,
-            MRC_MODE_FLOAT,
-        ) != 0
+        gpu_usable_mem = gpu_memory * gpu_frac_mem;
+        if self.m_gpu_mem_limit > 0. {
+            gpu_usable_mem = (1024. * 1024. * 1024. * self.m_gpu_mem_limit as f64) as f32;
+        } else if self.m_gpu_mem_limit < 0. {
+            gpu_usable_mem = -gpu_memory * self.m_gpu_mem_limit;
+        }
+        needed = 0.;
+        nz_align = self.m_max_num_z;
+        if self.m_use_block_group {
+            nz_align = b3dmax!(1, nz_align / self.m_group_size);
+        }
+        FrameAlign::gpu_memory_needs(
+            self.m_full_pad_size,
+            self.m_sum_pad_size,
+            self.m_align_pad_size,
+            self.m_num_all_vs_all,
+            nz_align,
+            self.m_refine_at_end,
+            self.m_group_size,
+            &mut need_for_gpusum,
+            &mut need_for_ali,
+        );
+        if self.m_num_out_files > 1 {
+            need_for_gpusum += self.m_sum_pad_size;
+        }
+
+        // First see if summing can be done
+        if self.m_test_mode == 0 {
+            if need_for_gpusum > gpu_usable_mem {
+                printf!(
+                    "Insufficient memory on GPU to use it for summing (%.0f MB needed of %.0f MB total)\n",
+                    CArg::Dbl(need_for_gpusum as f64 / 1.048e6),
+                    CArg::Dbl(gpu_memory as f64 / 1.048e6)
+                );
+                self.m_use_gpu = -1;
+                return;
+            } else {
+                self.m_gpu_flags = GPU_FOR_SUMMING
+                    + if self.m_num_out_files > 1 {
+                        GPU_DO_UNWGT_SUM
+                    } else {
+                        0
+                    };
+                needed = need_for_gpusum;
+            }
+        }
+
+        // Summing will be done with alignment if only one binning, only one filter or
+        // using hybrid shift, and not assessing or doing spline or refining at end
+        sum_with_align = ((self.m_num_bin_tests == 1
+            && (self.m_hybrid_shifts != 0 || self.m_num_filt_tests[0] == 1))
+            || self.m_start_assess >= 0)
+            && self.m_test_mode == 0
+            && self.m_do_spline == 0
+            && self.m_refine_at_end == 0;
+
+        // If that is the case, and alignment alone would fit but both would not,
+        // then see if deferring the sum will require less memory than the limit and if
+        // so, then defer the summing
+        // Call this first unconditionally to get mNumHoldFull set properly
+        FrameAlign::total_memory_needs(
+            self.m_full_pad_size,
+            4,
+            self.m_sum_pad_size,
+            self.m_align_pad_size,
+            self.m_num_all_vs_all,
+            nz_align,
+            self.m_refine_at_end,
+            self.m_num_bin_tests,
+            self.m_num_filt_tests[0],
+            self.m_hybrid_shifts,
+            self.m_group_size,
+            self.m_do_spline,
+            GPU_FOR_ALIGNING,
+            0,
+            self.m_test_mode,
+            self.m_start_assess,
+            &mut self.m_sum_in_one_pass,
+            &mut self.m_num_hold_full,
+        );
+        if sum_with_align && need_for_ali < gpu_usable_mem && need_for_ali + needed > gpu_usable_mem
         {
-            return Err("cannot initialize MRC output header".into());
-        }
-        let mut file = ImodFile::open(output.as_ref(), "wb")
-            .ok_or_else(|| format!("cannot open output MRC file {}", output.as_ref().display()))?;
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot write MRC output header".into());
-        }
-        let mut results = Vec::with_capacity(inputs.len());
-        let mut sum = 0f64;
-        for (section, path) in inputs.iter().enumerate() {
-            let stack = if section == 0 {
-                first.clone()
-            } else {
-                OwnedImageStack::open_mrc(path)?
-            };
-            Self::check_input_file(path, &stack, Some((nx, ny)), false)?;
-            let result = self.align_image_stack(
-                &stack,
-                bin_sum,
-                bin_align,
-                max_shift,
-                gain,
-                dark,
-                dose_per_frame,
-                critical_dose,
-            )?;
-            let bytes: Vec<u8> = result
-                .weighted_sum
-                .iter()
-                .flat_map(|value| value.to_ne_bytes())
-                .collect();
-            if mrc_write_slice(&bytes, &mut file, &mut header, section as i32, b'z') != 0 {
-                return Err(format!("cannot write aligned MRC output section {section}"));
-            }
-            let (&first_value, _) = result
-                .weighted_sum
-                .split_first()
-                .ok_or_else(|| "alignment produced an empty summed section".to_owned())?;
-            let (minimum, maximum) = result.weighted_sum[1..]
-                .iter()
-                .fold((first_value, first_value), |(minimum, maximum), &value| {
-                    (minimum.min(value), maximum.max(value))
-                });
-            header.amin = if section == 0 {
-                minimum
-            } else {
-                header.amin.min(minimum)
-            };
-            header.amax = if section == 0 {
-                maximum
-            } else {
-                header.amax.max(maximum)
-            };
-            sum += result
-                .weighted_sum
-                .iter()
-                .map(|&value| value as f64)
-                .sum::<f64>();
-            results.push(result);
-        }
-        header.amean = (sum / (nx * ny * inputs.len()) as f64) as f32;
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot finalize MRC output header".into());
-        }
-        Ok(results)
-    }
-
-    /// Source frame-set processing branch: align each selected group from one
-    /// movie independently and write its summed image as one output Z section.
-    pub fn align_mrc_frame_sets_to(
-        &self,
-        input: impl AsRef<std::path::Path>,
-        output: impl AsRef<std::path::Path>,
-        sets: &SavedFrameSets,
-        bin_sum: usize,
-        bin_align: usize,
-        max_shift: usize,
-        gain: Option<&[f32]>,
-        dark: Option<&[u8]>,
-        dose_per_frame: Option<f32>,
-        critical_dose: f32,
-    ) -> Result<Vec<AliFrameResult>, String> {
-        if sets.starts.len() != sets.counts.len() || sets.starts.is_empty() {
-            return Err("frame-set starts and counts are invalid".into());
-        }
-        let stack = OwnedImageStack::open_mrc(input.as_ref())?;
-        Self::check_input_file(input.as_ref(), &stack, None, false)?;
-        let mut header = MrcHeader::default();
-        if mrc_head_new(
-            &mut header,
-            i32::try_from(stack.nx).map_err(|_| "output width exceeds MRC range")?,
-            i32::try_from(stack.ny).map_err(|_| "output height exceeds MRC range")?,
-            i32::try_from(sets.starts.len())
-                .map_err(|_| "output section count exceeds MRC range")?,
-            MRC_MODE_FLOAT,
-        ) != 0
-        {
-            return Err("cannot initialize MRC output header".into());
-        }
-        let mut file = ImodFile::open(output.as_ref(), "wb")
-            .ok_or_else(|| format!("cannot open output MRC file {}", output.as_ref().display()))?;
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot write MRC output header".into());
-        }
-        let mut results = Vec::with_capacity(sets.starts.len());
-        let mut total = 0f64;
-        for (section, (&start, &count)) in sets.starts.iter().zip(&sets.counts).enumerate() {
-            let end = start
-                .checked_add(count)
-                .ok_or_else(|| "frame-set range overflows".to_owned())?;
-            let frames = stack
-                .frames
-                .get(start..end)
-                .ok_or_else(|| format!("frame-set {section} is outside input MRC section range"))?;
-            let group =
-                OwnedImageStack::from_raw_frames(stack.nx, stack.ny, stack.mode, frames.to_vec())?;
-            let result = self.align_image_stack(
-                &group,
-                bin_sum,
-                bin_align,
-                max_shift,
-                gain,
-                dark,
-                dose_per_frame,
-                critical_dose,
-            )?;
-            let bytes: Vec<u8> = result
-                .weighted_sum
-                .iter()
-                .flat_map(|value| value.to_ne_bytes())
-                .collect();
-            if mrc_write_slice(&bytes, &mut file, &mut header, section as i32, b'z') != 0 {
-                return Err(format!("cannot write aligned frame-set section {section}"));
-            }
-            let (&first, _) = result
-                .weighted_sum
-                .split_first()
-                .ok_or_else(|| "alignment produced an empty summed section".to_owned())?;
-            let (minimum, maximum) = result.weighted_sum[1..]
-                .iter()
-                .fold((first, first), |(minimum, maximum), &value| {
-                    (minimum.min(value), maximum.max(value))
-                });
-            header.amin = if section == 0 {
-                minimum
-            } else {
-                header.amin.min(minimum)
-            };
-            header.amax = if section == 0 {
-                maximum
-            } else {
-                header.amax.max(maximum)
-            };
-            total += result
-                .weighted_sum
-                .iter()
-                .map(|&value| value as f64)
-                .sum::<f64>();
-            results.push(result);
-        }
-        header.amean = (total / (stack.nx * stack.ny * sets.starts.len()) as f64) as f32;
-        if mrc_head_write(&mut file, &mut header) != 0 {
-            return Err("cannot finalize MRC output header".into());
-        }
-        Ok(results)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct AliFrameResult {
-    pub weighted_sum: Vec<f32>,
-    pub unweighted_sum: Vec<f32>,
-    pub x_shifts: Vec<f32>,
-    pub y_shifts: Vec<f32>,
-}
-
-/// Owned result of `analyzeExtraHeader`.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ExtendedHeaderAnalysis {
-    pub source_status: i32,
-    pub axis_angle: f32,
-    pub pixel_size: f32,
-    pub tilts: Vec<f32>,
-    pub set_starts: Vec<usize>,
-    pub set_sizes: Vec<usize>,
-    pub min_set_size: usize,
-    pub max_set_size: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SavedFrameSets {
-    pub saved_frames: Vec<i32>,
-    pub starts: Vec<usize>,
-    pub counts: Vec<usize>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct TiltAngleRecords {
-    pub angles: Vec<f32>,
-    pub relative_starts: Vec<i32>,
-    pub relative_ends: Vec<i32>,
-    pub relative_frame_starts_found: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PartialFrameSelection {
-    pub start: usize,
-    pub end: usize,
-    pub dropped: Vec<usize>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mdoc_tilts_saved_frames_and_fei_axis_title_are_transferred() {
-        let result = AliFrame::get_angles_and_titles_from_mdoc(
-            &MdocTiltTitleInput {
-                tilt_angles: vec![-30., 30.],
-                frame_ts_start_end: vec![Some((2, 7)), None],
-                pixel_spacing: Some(1.25),
-                image_size: Some((4096, 4096)),
-                titles: vec!["TiltAxisAngle = -100.00 deg".into()],
-                first_rotation_angle: Some(10.),
-                ..Default::default()
-            },
-            true,
-            true,
-            None,
-            false,
-        )
-        .unwrap();
-        assert_eq!(result.tilt_records.angles, vec![-30., 30.]);
-        assert_eq!(result.tilt_records.relative_starts, vec![2, -1]);
-        assert_eq!(result.axis_angle, Some(10.));
-        assert_eq!(result.titles, vec!["  Tilt axis angle = 10.00 deg"]);
-        assert!(result.are_fei_frames);
-    }
-
-    #[test]
-    fn mdoc_doses_keep_section_order_and_reject_bad_metadata_sizes() {
-        let lines = vec!["1.5 3".to_owned()];
-        let result =
-            AliFrame::get_doses_from_mdoc(2, 2, &[1.5, 2.], &[0., 1.5], &[4, 9], &lines).unwrap();
-        assert_eq!(result.dose_from_mdoc, vec![1.5, 2.]);
-        assert_eq!(result.prior_from_mdoc, vec![0., 1.5]);
-        assert_eq!(result.iz_piece, vec![4, 9]);
-        assert!(AliFrame::get_doses_from_mdoc(2, 1, &[1.], &[0.], &[0], &[]).is_err());
-    }
-
-    #[test]
-    fn title_reference_discovery_keeps_existing_files_and_eer_basename() {
-        let directory =
-            std::env::temp_dir().join(format!("imod-title-refs-{}", std::process::id()));
-        std::fs::create_dir_all(&directory).unwrap();
-        std::fs::write(directory.join("gainRef.mrc"), []).unwrap();
-        std::fs::write(directory.join("camera-defect.txt"), []).unwrap();
-        let references = AliFrame::check_titles_for_ref_names(
-            directory.join("frames.mrc"),
-            &[" gainRef.mrc ".into(), "camera-defect.txt".into()],
-            None,
-        )
-        .unwrap();
-        assert_eq!(references.gain_name, Some(directory.join("gainRef.mrc")));
-        assert_eq!(
-            references.defect_name,
-            Some(directory.join("camera-defect.txt"))
-        );
-        assert_eq!(
-            AliFrame::check_titles_for_ref_names("frames.eer", &[], Some("C:\\refs\\eer.tif"))
-                .unwrap()
-                .gain_name,
-            Some(std::path::PathBuf::from("eer.tif"))
-        );
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn owned_frame_reader_selects_one_section_and_checks_bounds() {
-        let stack =
-            OwnedImageStack::from_raw_frames(2, 1, 0, vec![vec![1, 2], vec![3, 4]]).unwrap();
-        assert_eq!(AliFrame::read_one_frame(&stack, 1).unwrap(), vec![3, 4]);
-        assert!(AliFrame::read_one_frame(&stack, 2).is_err());
-    }
-
-    #[test]
-    fn mdoc_open_reports_the_source_missing_file_category() {
-        let path = std::env::temp_dir().join(format!("imod-no-mdoc-{}", std::process::id()));
-        assert!(
-            AliFrame::open_mdoc_file(path)
-                .unwrap_err()
-                .contains("does not exist")
-        );
-    }
-
-    #[test]
-    fn unified_doses_expand_fixed_frames_and_accumulate_priors() {
-        let result = AliFrame::unify_dose_information(&UnifiedDoseInput {
-            number_of_files: 3,
-            fixed_frame_doses: Some("1.5 2 3 1".into()),
-            dose_accumulates: 1,
-            maximum_frames: 8,
-            ..Default::default()
-        })
-        .unwrap();
-        assert_eq!(result.dose_file_type, 5);
-        assert_eq!(result.total_doses, vec![6., 6., 6.]);
-        assert_eq!(result.prior_doses, vec![0., 6., 12.]);
-        assert_eq!(result.frame_dose_lines.len(), 3);
-    }
-
-    #[test]
-    fn gain_dark_validation_preserves_source_modes_sizes_and_super_resolution() {
-        let gain =
-            OwnedImageStack::from_raw_frames(2, 2, MRC_MODE_FLOAT, vec![vec![0; 16]]).unwrap();
-        let dark =
-            OwnedImageStack::from_raw_frames(4, 4, MRC_MODE_USHORT, vec![vec![0; 32]]).unwrap();
-        let result = AliFrame::get_gain_dark_defects(GainDarkDefectsInput {
-            image_dimensions: (4, 4),
-            gain: Some(gain),
-            dark: Some(dark),
-            frames_are_eer: true,
-            ..Default::default()
-        })
-        .unwrap();
-        assert_eq!(result.super_resolution_factor, 2);
-        assert_eq!(result.gain_dimensions, Some((2, 2)));
-        assert!(result.dark.is_some());
-        let bad =
-            OwnedImageStack::from_raw_frames(3, 2, MRC_MODE_FLOAT, vec![vec![0; 24]]).unwrap();
-        assert!(
-            AliFrame::get_gain_dark_defects(GainDarkDefectsInput {
-                image_dimensions: (4, 4),
-                gain: Some(bad),
-                frames_are_eer: true,
-                ..Default::default()
-            })
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn gpu_planner_keeps_sum_alignment_and_drops_only_unaffordable_frc() {
-        let result = AliFrame::assess_gpu_needs(GpuNeedsInput {
-            gpu_requested: true,
-            gpu_available_memory: 1_000.,
-            sum_memory_need: 600.,
-            alignment_memory_need: 200.,
-            sum_pad_size: 300.,
-            getting_frc: true,
-            ..Default::default()
-        });
-        assert_eq!(result.flags & 1, 1);
-        assert_eq!(result.flags & (1 << 2), 1 << 2);
-        assert!(!result.getting_frc);
-    }
-
-    #[test]
-    fn source_constructor_and_defect_protocol_are_owned() {
-        assert_eq!(ali_frame().memory_limit, 12.);
-        let path = std::env::temp_dir().join(format!("imod-defects-{}", std::process::id()));
-        std::fs::write(&path, "# header\n\n1 2 3\n").unwrap();
-        assert_eq!(
-            AliFrame::defect_file_to_string(&path).unwrap(),
-            "# header\n1 2 3\n"
-        );
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn dose_option_processing_preserves_voltage_and_text_file_rules() {
-        let options =
-            AliFrame::process_dose_weighting_options(None, 200, 2., true, 3, Some("1 4\n2 6\n"))
-                .unwrap();
-        assert_eq!(options.dose_scaling, 1.6);
-        assert_eq!(options.total_doses, vec![3., 4.]);
-        assert_eq!(options.prior_doses, vec![1., 2.]);
-        assert_eq!(options.reweight_ones.as_ref().unwrap().len(), 9000);
-    }
-
-    #[test]
-    fn gain_reference_rotation_uses_source_float_transform() {
-        let (mut nx, mut ny) = (2, 3);
-        let mut gain = vec![1., 2., 3., 4., 5., 6.];
-        AliFrame::rotate_flip_gain_reference(&mut gain, &mut nx, &mut ny, 0).unwrap();
-        assert_eq!((nx, ny), (2, 3));
-        assert_eq!(gain, vec![1., 2., 3., 4., 5., 6.]);
-    }
-
-    #[test]
-    fn extended_header_analysis_normalizes_axis_and_groups_tilts() {
-        let header = MrcHeader {
-            nz: 3,
-            nint: 1,
-            nreal: 12,
-            ..Default::default()
-        };
-        let mut extended = vec![0.; 39];
-        for (section, tilt) in [10., 10., 20.].into_iter().enumerate() {
-            extended[section * 13 + 1] = tilt;
-        }
-        extended[11] = -190.;
-        extended[12] = 2.5;
-        let result = AliFrame::analyze_extra_header(&header, &extended, None, false).unwrap();
-        assert_eq!(result.source_status, 3);
-        assert_eq!(result.axis_angle, 170.);
-        assert_eq!(result.pixel_size, 2.5);
-        assert_eq!(result.tilts, vec![10., 20.]);
-        assert_eq!(result.set_sizes, vec![2, 1]);
-    }
-
-    #[test]
-    fn source_filename_title_and_dose_helpers() {
-        assert_eq!(AliFrame::extract_file_tail("a\\b/c.mrc"), "c.mrc");
-        assert_eq!(
-            AliFrame::adjust_title_binning("title binning = 2 rest", 0.5).unwrap(),
-            "    title binning = 1 rest"
-        );
-        assert_eq!(
-            AliFrame::expand_frame_doses_numbers("1.5 2 3 1", 4).unwrap(),
-            (vec![1.5, 1.5, 3.], 6.)
-        );
-    }
-
-    #[test]
-    fn source_sum_buffer_accumulates_each_real_input_mode() {
-        let mut short = AliFrameSumBuffer::Short(vec![1, 2]);
-        AliFrame::add_to_sum_buffer(AliFrameInputPixels::Byte(&[3, 4]), &mut short).unwrap();
-        AliFrame::add_to_sum_buffer(AliFrameInputPixels::Short(&[-1, 2]), &mut short).unwrap();
-        assert_eq!(short, AliFrameSumBuffer::Short(vec![3, 8]));
-        let mut float = AliFrameSumBuffer::Float(vec![1., 2.]);
-        AliFrame::add_to_sum_buffer(AliFrameInputPixels::Float(&[0.5, -1.]), &mut float).unwrap();
-        assert_eq!(float, AliFrameSumBuffer::Float(vec![1.5, 1.]));
-    }
-
-    #[test]
-    fn source_filename_selection_prefers_list_then_option_then_positional_inputs() {
-        let list = std::env::temp_dir().join(format!(
-            "imod-alignframes-list-{}-{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        std::fs::write(&list, "\nfirst.mrc\n\nsecond.mrc\n").unwrap();
-        assert_eq!(
-            AliFrame::get_next_filename(1, &[], &[], Some(&list)).unwrap(),
-            Some("second.mrc".into())
-        );
-        let _ = std::fs::remove_file(list);
-        assert_eq!(
-            AliFrame::get_next_filename(
+            tot_need = FrameAlign::total_memory_needs(
+                self.m_full_pad_size,
+                4,
+                self.m_sum_pad_size,
+                self.m_align_pad_size,
+                self.m_num_all_vs_all,
+                nz_align,
+                self.m_refine_at_end,
+                self.m_num_bin_tests,
+                self.m_num_filt_tests[0],
+                self.m_hybrid_shifts,
+                self.m_group_size,
+                self.m_do_spline,
+                GPU_FOR_ALIGNING,
                 1,
-                &["option.mrc".into()],
-                &["positional.mrc".into()],
-                None,
-            )
-            .unwrap(),
-            Some("positional.mrc".into())
-        );
-    }
-
-    #[test]
-    fn source_header_open_reports_the_test_mode_context() {
-        let missing =
-            std::env::temp_dir().join(format!("imod-alignframes-missing-{}", std::process::id()));
-        let error = match AliFrame::open_and_read_header(&missing, "input", true) {
-            Ok(_) => panic!("opening a missing header unexpectedly succeeded"),
-            Err(error) => error,
-        };
-        assert!(error.contains("cannot open input file"));
-        assert!(error.contains("do not specify an output file"));
-    }
-
-    #[test]
-    fn saved_frame_list_groups_source_gap_separated_sets() {
-        let list = std::env::temp_dir().join(format!(
-            "imod-alignframes-saved-{}-{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        std::fs::write(&list, "0\n1\n2\n10\n11\n12\n20\n21\n22\n23\n").unwrap();
-        let sets = AliFrame::read_analyze_saved_frame_list(&list, 1, 0, 0).unwrap();
-        let _ = std::fs::remove_file(list);
-        assert_eq!(sets.starts, vec![0, 3, 6]);
-        assert_eq!(sets.counts, vec![3, 3, 4]);
-    }
-
-    #[test]
-    fn frame_set_breaking_balances_the_source_selected_range() {
-        let sets = AliFrame::break_frames_into_sets(12, 3, Some(1), Some(10)).unwrap();
-        assert_eq!(sets.starts, vec![1, 4, 7]);
-        assert_eq!(sets.counts, vec![3, 3, 4]);
-    }
-
-    #[test]
-    fn tilt_angle_file_retains_optional_relative_frame_limits() {
-        let path = std::env::temp_dir().join(format!(
-            "imod-alignframes-tilts-{}-{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        std::fs::write(&path, "-60\n0 2\n60 4 8\n").unwrap();
-        let records = AliFrame::read_tilt_angle_file(&path).unwrap();
-        let _ = std::fs::remove_file(path);
-        assert_eq!(records.angles, vec![-60., 0., 60.]);
-        assert_eq!(records.relative_starts, vec![-1, 2, 4]);
-        assert_eq!(records.relative_ends, vec![-1, -1, 8]);
-        assert!(records.relative_frame_starts_found);
-    }
-
-    #[test]
-    fn axis_angle_title_uses_source_label_slot_and_fixed_width_padding() {
-        let mut header = MrcHeader::default();
-        header.nlabl = 8;
-        AliFrame::add_axis_angle_title(&mut header, -12.25);
-        assert_eq!(header.nlabl, 9);
-        assert_eq!(
-            std::str::from_utf8(&header.labels[8][..27]).unwrap(),
-            "    Tilt axis angle = -12.2"
-        );
-        assert!(header.labels[8][27..].iter().all(|&byte| byte == b' '));
-    }
-
-    #[test]
-    fn tilt_overlap_trimming_removes_angles_without_a_saved_frame_set() {
-        let sets = SavedFrameSets {
-            saved_frames: vec![100, 101, 102, 110, 111, 112],
-            starts: vec![0, 3],
-            counts: vec![3, 3],
-        };
-        let mut records = TiltAngleRecords {
-            angles: vec![-10., 0., 10.],
-            relative_starts: vec![0, 10, 30],
-            relative_ends: vec![2, 12, 31],
-            relative_frame_starts_found: true,
-        };
-        assert_eq!(
-            AliFrame::handle_too_many_tilt_angles(&mut records, &sets, 2).unwrap(),
-            1
-        );
-        assert_eq!(records.angles, vec![-10., 0.]);
-    }
-
-    #[test]
-    fn partial_frame_sampling_drops_dim_endpoints_in_source_order() {
-        let ali = AliFrame {
-            partial_thresh: [0.5, 0.5],
-            ..AliFrame::default()
-        };
-        let stack =
-            OwnedImageStack::from_raw_frames(4, 4, 0, vec![vec![1; 16], vec![10; 16], vec![1; 16]])
-                .unwrap();
-        assert_eq!(
-            ali.analyze_for_partial_frames(&stack, 0, 2).unwrap(),
-            PartialFrameSelection {
-                start: 1,
-                // `analyzeForPartialFrames` retains two frames after dropping
-                // the first endpoint: its native guard is `end - start > 1`.
-                end: 2,
-                dropped: vec![0]
+                self.m_test_mode,
+                self.m_start_assess,
+                &mut self.m_sum_in_one_pass,
+                &mut self.m_num_hold_full,
+            );
+            if tot_need < self.m_memory_limit {
+                sum_with_align = false;
+                self.m_defer_sum = 1;
             }
-        );
+        }
+
+        // If summing is done with aligning add the usage for summing if any
+        if sum_with_align {
+            need_for_ali += needed;
+        }
+
+        // Decide if alignment can be done there
+        if need_for_ali > gpu_usable_mem {
+            printf!(
+                "Insufficient memory on GPU to do alignment (%.0f MB needed of %.0f MB total)\n",
+                CArg::Dbl(need_for_ali as f64 / 1.048e6),
+                CArg::Dbl(gpu_memory as f64 / 1.048e6)
+            );
+        } else {
+            if sum_with_align {
+                needed = need_for_ali;
+            }
+            self.m_gpu_flags |= GPU_FOR_ALIGNING;
+        }
+
+        // Now if summing, see if there is room for even/odd
+        if (self.m_gpu_flags & GPU_FOR_SUMMING) != 0 && self.m_getting_frc {
+            needed += self.m_sum_pad_size;
+            if needed > gpu_usable_mem {
+                printf!(
+                    "Insufficient memory on GPU to get even/odd sums for FRC (%.0f MB needed of %.0f MB total)\n",
+                    CArg::Dbl(needed as f64 / 1.048e6),
+                    CArg::Dbl(gpu_memory as f64 / 1.048e6)
+                );
+                if frc_name.is_some() {
+                    exit_error(b"Insufficient memory on GPU to get FRC output");
+                }
+                self.m_getting_frc = false;
+                needed -= self.m_sum_pad_size;
+            } else {
+                self.m_gpu_flags |= GPU_DO_EVEN_ODD;
+            }
+        }
+
+        // Now see about adding bin, noise, and preproc to GPU
+        if self.m_gpu_flags != 0 {
+            // If option is entered, just use it to set the flags
+            ind = 0;
+            if pip_get_integer(b"FlagsForGPU", &mut ind) == 0 {
+                if ind % 10 != 0 {
+                    self.m_gpu_flags |= GPU_DO_NOISE_TAPER;
+                }
+                if (ind / 10) % 10 != 0 {
+                    self.m_gpu_flags |= GPU_DO_BIN_PAD;
+                }
+                if (self.m_gpu_flags & (GPU_DO_NOISE_TAPER | GPU_DO_BIN_PAD)) != 0 {
+                    if (ind / 100) % 10 != 0 {
+                        self.m_gpu_flags |= STACK_FULL_ON_GPU;
+                        if ind / 10000 != 0 {
+                            self.m_gpu_flags |=
+                                GPU_STACK_LIMITED + ((ind / 10000) << GPU_STACK_LIM_SHIFT);
+                        }
+                    }
+                    if (ind / 1000 % 10) != 0 && need_preprocess {
+                        self.m_gpu_flags |= GPU_DO_PREPROCESS;
+                        if normalize {
+                            self.m_gpu_flags |= GPU_DO_GAIN_NORM;
+                        }
+                        if self.m_cam_size_x > 0 {
+                            self.m_gpu_flags |= GPU_CORRECT_DEFECTS;
+                        }
+                    }
+                }
+            } else {
+                // Otherwise, need to analyze which preprocessing/bin/pad operations to perform
+                let in_flags = self.m_gpu_flags;
+                need_for_pre_ops = FrameAlign::find_preproc_pad_gpu_flags(
+                    self.m_nx,
+                    self.m_ny,
+                    if self.m_dark_slice.is_some() {
+                        std::mem::size_of::<f32>() as i32
+                    } else {
+                        self.m_max_data_size
+                    },
+                    self.m_min_binning_to_test,
+                    self.m_dark_slice.is_none() && normalize,
+                    self.m_dark_slice.is_none() && self.m_cam_size_x > 0,
+                    self.m_dark_slice.is_none() && self.m_trunc_limit != 0.,
+                    b3dmax!(self.m_num_hold_full, 1),
+                    gpu_usable_mem - needed,
+                    (0.5 * (1. - gpu_frac_mem as f64) * gpu_usable_mem as f64) as f32,
+                    in_flags,
+                    &mut self.m_gpu_flags,
+                );
+                needed += need_for_pre_ops;
+            }
+            let _ = needed;
+            ind = (self.m_gpu_flags >> GPU_STACK_LIM_SHIFT) & GPU_STACK_LIM_MASK;
+            if self.m_debug != 0 && (self.m_gpu_flags & (GPU_DO_NOISE_TAPER | GPU_DO_BIN_PAD)) != 0
+            {
+                printf!(
+                    "%s  %s  %s  %s %s %d on GPU\n",
+                    CArg::Str(if (self.m_gpu_flags & GPU_DO_NOISE_TAPER) != 0 {
+                        "noise-pad"
+                    } else {
+                        ""
+                    }),
+                    CArg::Str(if (self.m_gpu_flags & GPU_DO_BIN_PAD) != 0 {
+                        "bin-pad"
+                    } else {
+                        ""
+                    }),
+                    CArg::Str(if (self.m_gpu_flags & GPU_DO_PREPROCESS) != 0 {
+                        "preprocess"
+                    } else {
+                        ""
+                    }),
+                    CArg::Str(if (self.m_gpu_flags & STACK_FULL_ON_GPU) != 0 {
+                        "stack"
+                    } else {
+                        ""
+                    }),
+                    CArg::Str(if (self.m_gpu_flags & GPU_STACK_LIMITED) != 0 {
+                        "limit"
+                    } else {
+                        "   "
+                    }),
+                    CArg::Int(if (self.m_gpu_flags & GPU_STACK_LIMITED) != 0 {
+                        ind as i64
+                    } else {
+                        0
+                    })
+                );
+            }
+
+            // Can stack smaller size if doing either operation on GPU and either there is
+            // no preprocess or preprocessing is on GPU
+            if (self.m_gpu_flags & (GPU_DO_BIN_PAD | GPU_DO_NOISE_TAPER)) != 0
+                && (!need_preprocess || (self.m_gpu_flags & GPU_DO_PREPROCESS) != 0)
+            {
+                self.m_full_data_size = self.m_max_data_size;
+            }
+        }
     }
 
-    #[test]
-    fn real_mrc_partial_selection_preserves_the_middle_section() {
-        let base = std::env::temp_dir().join(format!("imod-partial-{}", std::process::id()));
-        let input = base.with_extension("in.mrc");
-        let output = base.with_extension("out.mrc");
-        let weighted = base.with_extension("weighted.mrc");
-        let unweighted = base.with_extension("unweighted.mrc");
-        let axis_output = base.with_extension("axis.mrc");
+    /// `AliFrame::readOneFrame` (`alignframes.cpp:2867`).
+    ///
+    /// Read one frame of data in parallel for TIFF file or with regular call
+    pub fn read_one_frame(&mut self, read_buf: &mut [u8], iz_read: i32, ifile: i32) {
+        let wall_start = wall_time();
+        if self.m_parallel_read {
+            if unsafe {
+                tiff_parallel_read(
+                    self.m_file_copies.as_mut_ptr(),
+                    self.m_num_read_threads,
+                    0,
+                    self.m_nx - 1,
+                    0,
+                    self.m_ny - 1,
+                    self.m_in_data_size,
+                    read_buf.as_mut_ptr(),
+                    iz_read,
+                    MRSA_NOPROC,
+                )
+            } != 0
+            {
+                exit_error_fmt!(
+                    "Reading frame %d from file # %d: %s",
+                    CArg::Int(iz_read as i64),
+                    CArg::Int((ifile + 1) as i64),
+                    CArg::Str(&b3d_get_error())
+                );
+            }
+        } else if mrc_read_slice(
+            read_buf,
+            self.m_in_fp.as_mut().unwrap(),
+            &mut self.m_in_head,
+            iz_read,
+            b'Z',
+        ) != 0
         {
-            let mut file = ImodFile::open(&input, "wb").unwrap();
-            let mut header = MrcHeader::default();
-            assert_eq!(mrc_head_new(&mut header, 4, 4, 3, 0), 0);
-            header.bytes_signed = 0;
-            assert_eq!(mrc_head_write(&mut file, &mut header), 0);
-            for (section, value) in [1_u8, 10, 1].into_iter().enumerate() {
-                assert_eq!(
-                    mrc_write_slice(
-                        &vec![value; 16],
-                        &mut file,
-                        &mut header,
-                        section as i32,
-                        b'z'
-                    ),
-                    0
+            exit_error_fmt!(
+                "Reading frame %d from file # %d",
+                CArg::Int(iz_read as i64),
+                CArg::Int((ifile + 1) as i64)
+            );
+        }
+        self.m_wall_read += wall_time() - wall_start;
+    }
+
+    /// `AliFrame::addToSumBuffer` (`alignframes.cpp:2886`).
+    ///
+    /// Add a read-in image to a sum buffer of the proper type.  Both buffers
+    /// are frame storage (`f32`-aligned), so the typed views are aligned.
+    pub fn add_to_sum_buffer(
+        &self,
+        read_buf: &[u8],
+        in_mode: i32,
+        sum_buf: &mut [u8],
+        use_mode: &mut i32,
+        nxy: i32,
+    ) {
+        let nxy = nxy as usize;
+        let b_data = read_buf;
+        let s_data = unsafe {
+            std::slice::from_raw_parts(read_buf.as_ptr().cast::<i16>(), read_buf.len() / 2)
+        };
+        let us_data = unsafe {
+            std::slice::from_raw_parts(read_buf.as_ptr().cast::<u16>(), read_buf.len() / 2)
+        };
+        let f_data = unsafe {
+            std::slice::from_raw_parts(read_buf.as_ptr().cast::<f32>(), read_buf.len() / 4)
+        };
+        let sum_ptr = sum_buf.as_mut_ptr();
+        let sum_len = sum_buf.len();
+        match in_mode {
+            MRC_MODE_BYTE => {
+                *use_mode = SLICE_MODE_SHORT;
+                let s_buf =
+                    unsafe { std::slice::from_raw_parts_mut(sum_ptr.cast::<i16>(), sum_len / 2) };
+                for ix in 0..nxy {
+                    s_buf[ix] = (s_buf[ix] as i32 + b_data[ix] as i32) as i16;
+                }
+            }
+            MRC_MODE_SHORT => {
+                *use_mode = SLICE_MODE_SHORT;
+                let s_buf =
+                    unsafe { std::slice::from_raw_parts_mut(sum_ptr.cast::<i16>(), sum_len / 2) };
+                for ix in 0..nxy {
+                    s_buf[ix] = (s_buf[ix] as i32 + s_data[ix] as i32) as i16;
+                }
+            }
+            MRC_MODE_USHORT => {
+                *use_mode = SLICE_MODE_USHORT;
+                let us_buf =
+                    unsafe { std::slice::from_raw_parts_mut(sum_ptr.cast::<u16>(), sum_len / 2) };
+                for ix in 0..nxy {
+                    us_buf[ix] = (us_buf[ix] as i32 + us_data[ix] as i32) as u16;
+                }
+            }
+            MRC_MODE_FLOAT => {
+                *use_mode = SLICE_MODE_FLOAT;
+                let f_buf =
+                    unsafe { std::slice::from_raw_parts_mut(sum_ptr.cast::<f32>(), sum_len / 4) };
+                for ix in 0..nxy {
+                    f_buf[ix] += f_data[ix];
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `AliFrame::extractFileTail` (`alignframes.cpp:2922`).
+    ///
+    /// Get the tail from a filename, i.e. strip the path
+    pub fn extract_file_tail(&self, filename: &[u8], sstr: &mut Vec<u8>) {
+        *sstr = filename.to_vec();
+        let iz = match find_last_of(sstr, b"/\\") {
+            None => 0,
+            Some(pos) => pos + 1,
+        };
+        *sstr = sstr[iz..].to_vec();
+    }
+
+    /// `AliFrame::adjustTitleBinning` (`alignframes.cpp:2937`).
+    ///
+    /// Checks if the given title has the binning value in it, adjusts by relBinning and places
+    /// into sstr, and gives message if printChange true.  Returns 1 if binning found
+    pub fn adjust_title_binning(
+        &self,
+        title: &[u8],
+        sstr: &mut Vec<u8>,
+        mut rel_binning: f32,
+        print_change: bool,
+    ) -> i32 {
+        let title = c_str(title);
+        let at = |i: usize| title.get(i).copied().unwrap_or(0);
+        let ierr: usize;
+        let stack_bin: i32;
+        let bin_text: Vec<u8>;
+        let mut iz: usize;
+        *sstr = title.to_vec();
+
+        // Find binning = string
+        match find_bytes(sstr, b"binning =") {
+            None | Some(0) => return 0,
+            Some(pos) => iz = pos,
+        }
+        iz += 9;
+
+        // Find beginning and end of the binning number
+        while at(iz) == b' ' {
+            iz += 1;
+        }
+        if at(iz) == 0x00 {
+            return 0;
+        }
+        ierr = iz;
+        while at(iz) != b' ' && at(iz) != 0x00 {
+            iz += 1;
+        }
+        let mut end = 0;
+        stack_bin = strtol(&title[ierr..], &mut end, 10) as i32;
+
+        // Make sure it reads, then adjust and make sure that is a sensible value
+        if stack_bin == 0 {
+            return 0;
+        }
+        rel_binning *= stack_bin as f32;
+        if (rel_binning as f64) < 0.46
+            || (rel_binning as f64 > 0.54 && (rel_binning as f64) < 0.96)
+            || (rel_binning as f64 > 0.96
+                && ((b3dnint!(rel_binning) as f32 - rel_binning).abs() as f64) > 0.04)
+        {
+            return 0;
+        }
+
+        // Replace with new value
+        if (rel_binning as f64) < 0.54 {
+            bin_text = c_format_bytes("%.1f", &[CArg::Dbl(rel_binning as f64)]);
+            if print_change {
+                printf!(
+                    "Adjusted binning in header title to %.1f\n",
+                    CArg::Dbl(rel_binning as f64)
+                );
+            }
+        } else {
+            bin_text = c_format_bytes("%d", &[CArg::Int(b3dnint!(rel_binning) as i64)]);
+            if print_change {
+                printf!(
+                    "Adjusted binning in header title to %d\n",
+                    CArg::Int(b3dnint!(rel_binning) as i64)
                 );
             }
         }
-        let ali = AliFrame {
-            partial_thresh: [0.5, 0.5],
-            ..AliFrame::default()
-        };
-        let (result, selection) = ali
-            .align_mrc_partial_frames_to(&input, &output, 0, 2, 1, 1, 1, None, None, None, 0.)
-            .unwrap();
-        assert_eq!(
-            selection,
-            PartialFrameSelection {
-                start: 1,
-                end: 2,
-                dropped: vec![0]
+        sstr.splice(ierr..iz, bin_text);
+        if sstr.first().copied().unwrap_or(0) != b' ' {
+            sstr.splice(0..0, b"    ".iter().copied());
+        }
+        1
+    }
+
+    /// `AliFrame::minMaxSetSize` (`alignframes.cpp:2989`).
+    ///
+    /// Determine actual minimum and maximum size for sets or groups given the nominal size and
+    /// the total to be divided into the groups.
+    pub fn min_max_set_size(
+        &self,
+        basic_size: i32,
+        num_frames: i32,
+        min_size: &mut i32,
+        max_size: &mut i32,
+    ) {
+        let num_sets = num_frames / basic_size;
+        let remainder = num_frames % basic_size;
+        *min_size = basic_size + remainder / num_sets;
+        *max_size = *min_size + if remainder % num_sets > 0 { 1 } else { 0 };
+    }
+
+    /// `AliFrame::getGainDarkDefects` (`alignframes.cpp:3000`).
+    ///
+    /// Read in gain reference, dark reference, and defect file
+    pub fn get_gain_dark_defects(&mut self, use_shr_mem: i32) {
+        let mut gain_head = MrcHeader::default();
+        let mut dark_head = MrcHeader::default();
+        let mut extra_name: Vec<u8> = Vec::new();
+        let mut ind: i32;
+        let yfac: i32;
+        let super_fac: i32;
+        let retval: i32;
+        let mut scale_defects = 0i32;
+        let use_fac: i32;
+        let mut images_binned = -1.0f32;
+        let mut mess_buf = String::new();
+        let ii_gain: Option<*mut ImodImageFile>;
+        let super_res_ok: bool;
+        let gain_is_tiff: bool;
+        let mut ref_temp: Vec<f32>;
+        let mut num_in_x = 0i32;
+        let mut x_start = 0i32;
+        let mut x_interval = 0i32;
+        let mut num_in_y = 0i32;
+        let mut y_start = 0i32;
+        let mut y_interval = 0i32;
+        let mut biases: Vec<Vec<f32>> = Vec::new();
+        let _ = use_shr_mem;
+
+        // Defect file first to override defects in Falcon gain ref
+        if let Some(defect_name) = self.m_defect_name.clone() {
+            let defects = Rc::get_mut(&mut self.m_defects).unwrap();
+            let ierr = cor_def_parse_defects(
+                &String::from_utf8_lossy(&defect_name),
+                false,
+                defects,
+                &mut self.m_cam_size_x,
+                &mut self.m_cam_size_y,
+            );
+            if ierr != 0 {
+                exit_error_fmt!(
+                    "%s defect file %s\n",
+                    CArg::Str(if ierr == 1 {
+                        "Opening"
+                    } else {
+                        "Reading or parsing lines in"
+                    }),
+                    CArg::Bytes(&defect_name)
+                );
             }
-        );
-        // The source keeps sections 1 and 2, so the aligned sum is their mean.
-        assert_eq!(result.weighted_sum, vec![5.5; 16]);
-        assert_eq!(OwnedImageStack::open_mrc(&output).unwrap().frame_count(), 1);
-        AliFrame::default()
-            .align_mrc_file_with_unweighted_to(&input, &weighted, &unweighted, 1, 1, 1)
-            .unwrap();
-        let weighted_stack = OwnedImageStack::open_mrc(&weighted).unwrap();
-        let unweighted_stack = OwnedImageStack::open_mrc(&unweighted).unwrap();
-        assert_eq!(weighted_stack.frames, unweighted_stack.frames);
-        let mut weighted_file = ImodFile::open(&weighted, "rb").unwrap();
-        let mut unweighted_file = ImodFile::open(&unweighted, "rb").unwrap();
-        let mut weighted_header = MrcHeader::default();
-        let mut unweighted_header = MrcHeader::default();
-        assert_eq!(mrc_head_read(&mut weighted_file, &mut weighted_header), 0);
-        assert_eq!(
-            mrc_head_read(&mut unweighted_file, &mut unweighted_header),
-            0
-        );
-        assert_eq!(
-            (
-                weighted_header.amin,
-                weighted_header.amax,
-                weighted_header.amean
-            ),
-            (
-                unweighted_header.amin,
-                unweighted_header.amax,
-                unweighted_header.amean
-            )
-        );
-        AliFrame::default()
-            .align_mrc_file_with_axis_to(&input, &axis_output, 37.5, 1, 1, 1)
-            .unwrap();
-        let mut axis_file = ImodFile::open(&axis_output, "rb").unwrap();
-        let mut axis_header = MrcHeader::default();
-        assert_eq!(mrc_head_read(&mut axis_file, &mut axis_header), 0);
-        assert_eq!(axis_header.nlabl, 1);
-        assert_eq!(
-            std::str::from_utf8(&axis_header.labels[0][..26]).unwrap(),
-            "    Tilt axis angle = 37.5"
-        );
-        let _ = std::fs::remove_file(input);
-        let _ = std::fs::remove_file(output);
-        let _ = std::fs::remove_file(weighted);
-        let _ = std::fs::remove_file(unweighted);
-        let _ = std::fs::remove_file(axis_output);
-    }
-    #[test]
-    fn sum_scaling_applies_to_both_source_output_buffers() {
-        let mut result = AliFrameResult {
-            weighted_sum: vec![1., 2.],
-            unweighted_sum: vec![3., 4.],
-            x_shifts: vec![],
-            y_shifts: vec![],
-        };
-        AliFrame::scale_sum_output(&mut result, 2.);
-        assert_eq!(
-            (result.weighted_sum, result.unweighted_sum),
-            (vec![2., 4.], vec![6., 8.])
-        );
-    }
-    #[test]
-    fn owned_orchestration_uses_active_framealign() {
-        let ali = AliFrame::default();
-        let stack =
-            OwnedImageStack::from_raw_frames(2, 2, 0, vec![vec![1, 2, 3, 4], vec![1, 2, 3, 4]])
-                .unwrap();
-        let result = ali
-            .align_image_stack(&stack, 1, 1, 1, None, None, Some(1.), 2.)
-            .unwrap();
-        assert_eq!(result.unweighted_sum, vec![1., 2., 3., 4.]);
-        assert_eq!(result.x_shifts, vec![0., 0.]);
+            if self.m_cam_size_x == 0 || self.m_cam_size_y == 0 {
+                exit_error(b"Defect list file must have CameraSizeX and CameraSizeY entries");
+            }
+            pip_get_float(b"ImagesAreBinned", &mut images_binned);
+            pip_get_integer(b"DoubleDefectCoords", &mut scale_defects);
+            cor_def_flip_defects_in_y(defects, self.m_cam_size_x, self.m_cam_size_y, 0);
+            cor_def_find_touching_pixels(defects, self.m_cam_size_x, self.m_cam_size_y, 0);
+            if cor_def_setup_to_correct(
+                self.m_in_head.nx,
+                self.m_in_head.ny,
+                defects,
+                &mut self.m_cam_size_x,
+                &mut self.m_cam_size_y,
+                scale_defects,
+                images_binned,
+                &mut self.m_cor_def_binning,
+                Some("-imagebinned"),
+            ) != 0
+            {
+                exit_error(
+                    b"Image size is more than twice the size stored in the camera defect list",
+                );
+            }
+        }
+
+        // Gain reference
+        self.m_nx_gain = 0;
+        self.m_ny_gain = 0;
+        self.m_super_fac_for_defects = 0;
+        if let Some(gain_name) = self.m_gain_name.clone() {
+            let mut extra_fp =
+                self.open_and_read_header(&gain_name, &mut gain_head, b"gain reference", false);
+            if gain_head.mode != MRC_MODE_FLOAT {
+                exit_error(b"Gain reference must be floating point");
+            }
+            let Some(slice) = slice_read_mrc(&mut gain_head, 0, b'Z') else {
+                exit_error(b"Reading gain reference file");
+            };
+            let MrcData::F(gain_data) = slice.data else {
+                exit_error(b"Reading gain reference file");
+            };
+            let mut gain_data = gain_data;
+
+            // General evaluation of super-resolution relative to the gain
+            super_fac = self.m_in_head.nx / gain_head.nx;
+            yfac = self.m_in_head.ny / gain_head.ny;
+            super_res_ok = !(yfac != super_fac
+                || super_fac * gain_head.nx != self.m_in_head.nx
+                || super_fac * gain_head.ny != self.m_in_head.ny
+                || (super_fac != 1 && super_fac != 2 && super_fac != 4));
+
+            // Find out if frames are in an EER file and if gain is in a TIFF file
+            ii_gain = ii_lookup_file_from_fp(&extra_fp);
+            gain_is_tiff = ii_gain.is_some() && unsafe { (*ii_gain.unwrap()).file } == IIFILE_TIFF;
+
+            if (gain_is_tiff || self.m_frames_are_eer) && !super_res_ok {
+                exit_error_fmt!(
+                    "Image file size (%d x %d) must be exactly the same, twice, or 4 times the gain reference size (%d x %d)",
+                    CArg::Int(self.m_in_head.nx as i64),
+                    CArg::Int(self.m_in_head.ny as i64),
+                    CArg::Int(gain_head.nx as i64),
+                    CArg::Int(gain_head.ny as i64)
+                );
+            }
+
+            // If no defects entered, look for defects in a TIFF gain file
+            if self.m_cam_size_x == 0 && gain_is_tiff {
+                let defects = Rc::get_mut(&mut self.m_defects).unwrap();
+                retval = cor_def_process_fei_defects(
+                    unsafe { &mut *ii_gain.unwrap() },
+                    defects,
+                    gain_head.nx,
+                    gain_head.ny,
+                    true,
+                    super_fac,
+                    self.m_fei_defect_pad,
+                    None,
+                    &mut mess_buf,
+                    256,
+                );
+                if retval > 0 {
+                    exit_error(mess_buf.as_bytes());
+                }
+                if retval == 0 {
+                    if super_fac > 1 && defects.falcon_type != 0 && defects.num_avg_super_res > 0 {
+                        self.m_super_fac_for_defects = super_fac;
+                    }
+                    self.m_cam_size_x = self.m_in_head.nx;
+                    self.m_cam_size_y = self.m_in_head.ny;
+                }
+            }
+
+            // Finish up with the gain file and apply rotation
+            ii_fclose(&mut extra_fp);
+            gain_head.fp = None;
+            self.m_nx_gain = gain_head.nx;
+            self.m_ny_gain = gain_head.ny;
+            if self.m_rotation_flip != 0 {
+                self.rotate_flip_gain_reference(&mut gain_data);
+            }
+
+            // Now expand the gain reference for super-resolution
+            if (gain_is_tiff || self.m_frames_are_eer) && (super_fac > 1 || self.m_antialias_eer) {
+                use_fac = if self.m_antialias_eer { 4 } else { super_fac };
+                ref_temp = vec![0.; (self.m_nx_gain * self.m_ny_gain * use_fac * use_fac) as usize];
+                cor_def_expand_gain_reference(
+                    &gain_data,
+                    gain_head.nx,
+                    gain_head.ny,
+                    use_fac,
+                    &mut ref_temp,
+                );
+                self.m_nx_gain *= use_fac;
+                self.m_ny_gain *= use_fac;
+                gain_data = ref_temp;
+
+                if pip_get_string(b"SuperGainFactorFile", &mut extra_name) == 0 {
+                    ind = cor_def_read_super_gain(
+                        &String::from_utf8_lossy(&extra_name),
+                        use_fac,
+                        &mut biases,
+                        &mut num_in_x,
+                        &mut x_start,
+                        &mut x_interval,
+                        &mut num_in_y,
+                        &mut y_start,
+                        &mut y_interval,
+                    );
+                    if ind != 0 {
+                        exit_error_fmt!(
+                            "Reading file with super-resolution gain adjustments (error %d)",
+                            CArg::Int(ind as i64)
+                        );
+                    }
+                    cor_def_refine_super_res_ref(
+                        &mut gain_data,
+                        self.m_nx_gain,
+                        self.m_ny_gain,
+                        use_fac,
+                        &biases,
+                        num_in_x,
+                        x_start,
+                        x_interval,
+                        num_in_y,
+                        y_start,
+                        y_interval,
+                    );
+                }
+            }
+            let mut gain_rc = Rc::new(gain_data);
+
+            // `tiffGainReferenceForEER(refTemp)` precedes the refinement in the
+            // source, but it only stores the pointer, which reads the refined
+            // reference when frames are read; registered once the data has its
+            // final home.
+            if (gain_is_tiff || self.m_frames_are_eer)
+                && (super_fac > 1 || self.m_antialias_eer)
+                && self.m_antialias_eer
+            {
+                let data = Rc::get_mut(&mut gain_rc).unwrap();
+                tiff_gain_reference_for_eer_bytes(buf_bytes_mut(data));
+            }
+            self.m_gain_slice = Some(gain_rc);
+
+            if self.m_nx_gain < self.m_nx || self.m_ny_gain < self.m_ny {
+                exit_error_fmt!(
+                    "Gain reference is smaller than image in %s%s%s",
+                    CArg::Str(if self.m_nx_gain < self.m_nx { "X" } else { "" }),
+                    CArg::Str(
+                        if self.m_nx_gain < self.m_nx && self.m_ny_gain < self.m_ny {
+                            " and "
+                        } else {
+                            ""
+                        }
+                    ),
+                    CArg::Str(if self.m_ny_gain < self.m_ny { "Y" } else { "" })
+                );
+            }
+
+            // Recognize K3 and set scaling to 32
+            for ind in 1..=2 {
+                if (self.m_nx_gain == ind * 5760 && self.m_ny_gain == ind * 4092)
+                    || (self.m_ny_gain == ind * 5760 && self.m_nx_gain == ind * 4092)
+                {
+                    self.m_default_byte_scale = 32.;
+                }
+            }
+        } else if self.m_extra_has_gain_ref != 0 {
+            let Some(slice) = slice_create(self.m_nx, self.m_ny, SLICE_MODE_FLOAT) else {
+                exit_error(b"Allocating memory for gain reference");
+            };
+            let MrcData::F(data) = slice.data else {
+                exit_error(b"Allocating memory for gain reference");
+            };
+            self.m_gain_slice = Some(Rc::new(data));
+        }
+
+        // Dark reference
+        if pip_get_string(b"DarkReferenceFile", &mut extra_name) == 0 {
+            let mut extra_fp =
+                self.open_and_read_header(&extra_name, &mut dark_head, b"dark reference", false);
+            if dark_head.mode != MRC_MODE_SHORT && dark_head.mode != MRC_MODE_USHORT {
+                exit_error(b"Dark reference must be signed or unsigned short integers");
+            }
+            if dark_head.nx != self.m_nx || dark_head.ny != self.m_ny {
+                exit_error(b"Dark reference is not the same size as the image");
+            }
+            self.m_dark_slice = slice_read_mrc(&mut dark_head, 0, b'Z');
+            if self.m_dark_slice.is_none() {
+                exit_error(b"Reading dark reference file");
+            }
+            dark_head.fp = None;
+            ii_fclose(&mut extra_fp);
+        }
     }
 
-    #[test]
-    fn mrc_entry_reports_a_read_error_without_a_legacy_image_handle() {
-        assert!(
-            AliFrame::default()
-                .align_mrc_file("does-not-exist.mrc", 1, 1, 1, None, None, None, 0.)
-                .is_err()
-        );
+    /// `AliFrame::analyzeExtraHeader` (`alignframes.cpp:3151`).
+    ///
+    /// Analyze the extra header from a UCSFtomo file for pixel size, rotation angle, and
+    /// tilt angles and determine division into groups by tilt angle
+    pub fn analyze_extra_header(
+        &mut self,
+        in_fp: &mut ImodFile,
+        head: &mut MrcHeader,
+        start_frame: i32,
+        end_frame: i32,
+        axis_pix_only: bool,
+        buffer: &mut Vec<f32>,
+        buf_size: &mut i32,
+        tilts: &mut Vec<f32>,
+        min_set: &mut i32,
+        max_set: &mut i32,
+        axis_angle: &mut f32,
+        pix_size: &mut f32,
+    ) -> i32 {
+        let num_int_real = head.nint as i32 + head.nreal as i32;
+        let num = num_int_real * head.nz;
+        let mut iz: i32 = 0;
+        let mut set: i32;
+        let iz_start: i32;
+        let iz_end: i32;
+        let mut size: i32;
+        let mut last_size = 0i32;
+
+        // `numAtSize` is read uninitialised natively at the first tilt
+        // change (BUGS.md); it cannot change the outcome there.
+        let mut num_at_size = 0i32;
+        let mut ret_val = 0i32;
+        let mut got_double = 0i32;
+        let mut temp: f32;
+        let mut last_tilt = 0f32;
+        if num == 0 {
+            return 0;
+        }
+        *axis_angle = -999.;
+        if *buf_size < num {
+            *buffer = vec![0.; num as usize];
+            *buf_size = num;
+        }
+        if b3d_fseek(in_fp, MRC_HEADER_SIZE as i32, SEEK_SET) != 0
+            || b3d_fread(
+                buf_bytes_mut(&mut buffer[..num as usize]),
+                4,
+                num as usize,
+                in_fp,
+            ) as i32
+                != num
+        {
+            exit_error(b"Reading extended header data");
+        }
+
+        // Look for a legal pixel size and rotation angle
+        if head.nreal >= 12 {
+            *pix_size = 0.;
+            temp = buffer[(head.nint + 11) as usize];
+
+            // UCSF tomo puts out angstroms, but it could still be meters.  These are limits for
+            // angstroms in flib/image/header.f90
+            if temp as f64 > 0.05 && (temp as f64) < 100000. {
+                *pix_size = temp;
+            } else {
+                temp = (temp as f64 * 1.0e10) as f32;
+                if temp as f64 > 0.05 && (temp as f64) < 100000. {
+                    *pix_size = temp;
+                }
+            }
+            temp = buffer[(head.nint + 10) as usize];
+
+            // set return to 1 if both are legal
+            if *pix_size > 0. && temp as f64 >= -360. && temp as f64 <= 360. {
+                ret_val = 1;
+                if (temp as f64) < -180. {
+                    temp = (temp as f64 + 360.) as f32;
+                }
+                if temp as f64 > 180. {
+                    temp = (temp as f64 - 360.) as f32;
+                }
+                *axis_angle = temp;
+            }
+        }
+
+        if axis_pix_only {
+            return ret_val;
+        }
+
+        // Now analyze tilt angles in slot 1.  Loop on the subset of frames if any
+        // (an ending frame past the file is clamped to it: the source reads past
+        // the extended header buffer, BUGS.md)
+        if start_frame > 0 {
+            iz_start = start_frame - 1;
+            iz_end = b3dmin!(end_frame, head.nz) - 1;
+        } else {
+            iz_start = 0;
+            iz_end = head.nz - 1;
+        }
+        tilts.clear();
+        self.m_set_starts.clear();
+
+        // The set sizes of the previous file are not cleared in the source, so
+        // a second file's sets were sized from the first's (BUGS.md).
+        self.m_num_in_sets.clear();
+
+        // Look for each place where tilt angle changes and save the angle and set start
+        iz = iz_start;
+        while iz <= iz_end {
+            temp = buffer[(head.nint as i32 + iz * num_int_real) as usize];
+            if (temp as f64) < -180. || temp as f64 > 180. {
+                return ret_val;
+            }
+            if iz == iz_start || ((temp - last_tilt).abs() as f64) > 0.01 {
+                if iz > iz_start {
+                    // Keep track of size of sets and number of ones at the last size
+                    // If there have been at least 5 in a row at a size and there is one at twice
+                    // the size, it must be the repeated one at the starting angle
+                    size = iz - *self.m_set_starts.last().unwrap();
+                    if num_at_size > 5 && size == 2 * last_size && got_double == 0 {
+                        self.m_set_starts.push(iz - last_size);
+                        tilts.push(temp);
+                        size = last_size;
+                        got_double = 1;
+                    }
+                    if size == last_size {
+                        num_at_size += 1;
+                    } else {
+                        num_at_size = 1;
+                        last_size = size;
+                    }
+                }
+                self.m_set_starts.push(iz);
+                tilts.push(temp);
+                last_tilt = temp;
+            }
+            iz += 1;
+        }
+        self.m_set_starts.push(iz);
+
+        // Get the min and max set size
+        for iz in 0..tilts.len() {
+            set = self.m_set_starts[iz + 1] - self.m_set_starts[iz];
+            self.m_num_in_sets.push(set);
+            if iz == 0 {
+                *min_set = set;
+                *max_set = set;
+            }
+            *min_set = b3dmin!(*min_set, set);
+            *max_set = b3dmax!(*max_set, set);
+        }
+        2 + ret_val
     }
 
-    #[test]
-    fn owned_mrc_route_writes_a_real_sum_and_source_transform_layout() {
-        let base = std::env::temp_dir().join(format!(
-            "imod-alignframes-{}-{}",
-            std::process::id(),
-            std::thread::current().name().unwrap_or("test")
-        ));
-        let input = base.with_extension("input.mrc");
-        let input_two = base.with_extension("input-two.mrc");
-        let output = base.with_extension("output.mrc");
-        let batch_output = base.with_extension("batch.mrc");
-        let grouped_output = base.with_extension("grouped.mrc");
-        let transforms = base.with_extension("xf");
-        let shifts = base.with_extension("shifts");
+    /// `AliFrame::rotateFlipGainReference` (`alignframes.cpp:3262`).
+    ///
+    /// Apply rotation and flip operation to gain reference: now it's simple
+    pub fn rotate_flip_gain_reference(&mut self, reference: &mut [f32]) {
+        let nx_in = self.m_nx_gain;
+        let ny_in = self.m_ny_gain;
+        let n = (self.m_nx_gain * self.m_ny_gain) as usize;
+        let mut summed = vec![0f32; n];
+        if rotate_flip_image(
+            RotateFlipData::Float {
+                array: &reference[..n],
+                brray: &mut summed,
+            },
+            nx_in,
+            ny_in,
+            self.m_rotation_flip,
+            0,
+            0,
+            0,
+            &mut self.m_nx_gain,
+            &mut self.m_ny_gain,
+            0,
+        ) != 0
         {
-            let mut file = ImodFile::open(&input, "wb").unwrap();
-            let mut header = MrcHeader::default();
-            assert_eq!(mrc_head_new(&mut header, 2, 2, 2, 0), 0);
-            header.bytes_signed = 0;
-            assert_eq!(mrc_head_write(&mut file, &mut header), 0);
-            assert_eq!(
-                mrc_write_slice(&[1, 2, 3, 4], &mut file, &mut header, 0, b'z'),
-                0
-            );
-            assert_eq!(
-                mrc_write_slice(&[1, 2, 3, 4], &mut file, &mut header, 1, b'z'),
-                0
+            exit_error_fmt!(
+                "Inappropriate rotation/flip value %d entered",
+                CArg::Int(self.m_rotation_flip as i64)
             );
         }
-        {
-            let mut file = ImodFile::open(&input_two, "wb").unwrap();
-            let mut header = MrcHeader::default();
-            assert_eq!(mrc_head_new(&mut header, 2, 2, 2, 0), 0);
-            header.bytes_signed = 0;
-            assert_eq!(mrc_head_write(&mut file, &mut header), 0);
-            assert_eq!(
-                mrc_write_slice(&[5, 6, 7, 8], &mut file, &mut header, 0, b'z'),
-                0
-            );
-            assert_eq!(
-                mrc_write_slice(&[5, 6, 7, 8], &mut file, &mut header, 1, b'z'),
-                0
+        let n = (self.m_nx_gain * self.m_ny_gain) as usize;
+        reference[..n].copy_from_slice(&summed[..n]);
+    }
+
+    /// `AliFrame::openMdocFile` (`alignframes.cpp:3278`).
+    ///
+    /// Common operations when opening mdoc for either option
+    pub fn open_mdoc_file(&mut self, filename: &[u8], num_sect: &mut i32, adoc_type: &mut i32) {
+        let mut ind = 0;
+        self.m_adoc_ind = adoc_open_image_metadata(filename, 0, &mut ind, num_sect, adoc_type);
+        if self.m_adoc_ind == -1 {
+            exit_error_fmt!("Opening or reading mdoc file %s", CArg::Bytes(filename));
+        }
+        if self.m_adoc_ind == -2 {
+            exit_error_fmt!("Metadata file %s does not exist", CArg::Bytes(filename));
+        }
+        if self.m_adoc_ind == -3 {
+            exit_error_fmt!(
+                "Metadata file %s does not have image stack information",
+                CArg::Bytes(filename)
             );
         }
-        let result = AliFrame::default()
-            .align_mrc_file_to(
-                &input,
-                &output,
-                1,
-                1,
-                1,
+    }
+
+    /// `AliFrame::processDoseWeightingOptions` (`alignframes.cpp:3293`).
+    ///
+    /// Read some dose weighting options and get information from the dose weighting file
+    pub fn process_dose_weighting_options(
+        &mut self,
+        frame_doses: Option<Vec<u8>>,
+        adoc_type: &mut i32,
+    ) {
+        let mut dose_name: Option<Vec<u8>> = None;
+        let mut iz: i32 = 0;
+        let mut ierr: i32;
+        let mut dose_temp = 0f32;
+        let mut prior_temp = 0f32;
+        let crit_dose_scale200_kv = 0.8f32;
+        let mut voltage = 300i32;
+
+        pip_get_float(b"InitialPriorDose", &mut self.m_initial_dose);
+        pip_get_integer(b"Voltage", &mut voltage);
+        pip_get_integer(b"BidirectionalNumViews", &mut self.m_num_bidir);
+        pip_get_float(b"OptimalDoseScaling", &mut self.m_dose_scaling);
+        iz = 0;
+        pip_get_boolean(b"NormalizeDoseWeighting", &mut iz);
+        if iz != 0 {
+            self.m_reweight_ones.resize(9000, 1.);
+            self.m_reweight_filt = true;
+        }
+
+        // Incorporate voltage info into scaling factor
+        if voltage != 300 {
+            if voltage != 200 {
+                exit_error(b"Voltage must be either 200 or 300");
+            }
+            self.m_dose_scaling *= crit_dose_scale200_kv;
+        }
+        if let Some(frame_doses) = frame_doses {
+            self.m_fixed_frame_doses = frame_doses;
+        }
+
+        // Get dose file of various kinds
+        if self.m_dose_file_type > 0 {
+            let mut temp = Vec::new();
+            if pip_get_string(b"DoseWeightingFile", &mut temp) == 0 {
+                dose_name = Some(temp);
+            }
+            if self.m_dose_file_type == 4 {
+                if dose_name.is_none() && self.m_adoc_ind < 0 {
+                    exit_error(
+                        b"You cannot specify dose file type 4 without entering the name of an .mdoc file",
+                    );
+                }
+
+                // Mdoc file, either existing one or specified one
+                if dose_name.is_some() && self.m_adoc_ind >= 0 {
+                    exit_error(
+                        b"You cannot enter a dose weighting mdoc file name if you also enter the -mdoc option",
+                    );
+                }
+                if self.m_adoc_ind >= 0 {
+                    self.m_num_mdoc_sect = self.m_num_sect;
+                } else {
+                    let mut num_mdoc_sect = 0;
+                    self.open_mdoc_file(
+                        dose_name.as_deref().unwrap(),
+                        &mut num_mdoc_sect,
+                        adoc_type,
+                    );
+                    self.m_num_mdoc_sect = num_mdoc_sect;
+                }
+
+                ierr = self.get_doses_from_mdoc(*adoc_type);
+                if ierr == 1 {
+                    exit_error_fmt!(
+                        "Problems occurred accessing dose data in the mdoc file: %s",
+                        CArg::Str(&b3d_get_error())
+                    );
+                }
+                if ierr == 2 {
+                    exit_error_fmt!(
+                        "The dose information in the mdoc file was not usable: %s",
+                        CArg::Str(&b3d_get_error())
+                    );
+                }
+
+                // If the PriorRecordDose entries are missing, add them to protect against
+                // excludeviews being used, which would invalidate date-time analysis
+                if self.m_adoc_ind >= 0
+                    && adoc_get_float(ADOC_ZVALUE_NAME, 0, PRIOR_DOSE_KEY, &mut prior_temp) != 0
+                {
+                    for iz in 0..self.m_num_mdoc_sect {
+                        if adoc_set_float(
+                            ADOC_ZVALUE_NAME,
+                            iz,
+                            PRIOR_DOSE_KEY,
+                            self.m_prior_from_mdoc[iz as usize],
+                        ) != 0
+                        {
+                            exit_error(b"Setting the new accumulated dose into the mdoc structure");
+                        }
+                    }
+                }
+            } else {
+                // Other text files, the name must be provided; open the file and read lines
+                let Some(dose_name) = dose_name.as_deref() else {
+                    exit_error(b"You must enter a dose weighting file also");
+                };
+                let Some(mut fp) = ImodFile::open(os_path(dose_name), "r") else {
+                    exit_error_fmt!("Opening dose file %s", CArg::Bytes(dose_name));
+                };
+                loop {
+                    ierr = fgetline(&mut fp, &mut self.m_in_line, MAX_LINE as i32);
+                    if ierr == 0 {
+                        continue;
+                    }
+                    if ierr == -2 {
+                        break;
+                    }
+                    if ierr == -1 {
+                        exit_error_fmt!("Reading dose file %s", CArg::Bytes(dose_name));
+                    }
+                    let line = c_str(&self.m_in_line).to_vec();
+
+                    // A single dose value for type 1, a line for type 4, or prior and another value
+                    if self.m_dose_file_type == 1 {
+                        let mut end = 0;
+                        self.m_total_dose_vec.push(strtod(&line, &mut end) as f32);
+                        self.m_prior_dose_vec.push(0.);
+                    } else if self.m_dose_file_type > 4 {
+                        self.m_frame_dose_lines.push(line);
+                    } else {
+                        crate::imod::clip::clip::sscanf(
+                            &String::from_utf8_lossy(&line),
+                            "%f %f",
+                            &mut [
+                                crate::imod::clip::clip::ScanArg::Flt(&mut prior_temp),
+                                crate::imod::clip::clip::ScanArg::Flt(&mut dose_temp),
+                            ],
+                        );
+                        if self.m_dose_file_type == 3 {
+                            dose_temp -= prior_temp;
+                        }
+                        self.m_total_dose_vec.push(dose_temp);
+                        self.m_prior_dose_vec.push(prior_temp);
+                    }
+                    if ierr < 0 {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// `AliFrame::getDosesFromMdoc` (`alignframes.cpp:3398`).
+    ///
+    /// Set up vectors to receive doses from mdoc file and call function to get them
+    pub fn get_doses_from_mdoc(&mut self, adoc_type: i32) -> i32 {
+        // Set up vectors to call for doses from mdoc
+        let n = self.m_num_mdoc_sect.max(0) as usize;
+        self.m_dose_from_mdoc.resize(n, 0.);
+        self.m_prior_from_mdoc.resize(n, 0.);
+        self.m_iz_piece.resize(n, 0);
+        self.m_frame_dose_lines
+            .resize(self.m_num_in_files.max(0) as usize, Vec::new());
+        for iz in 0..n {
+            self.m_iz_piece[iz] = iz as i32;
+        }
+        if self.m_zero_dose_thresh > 0. {
+            set_zero_dose_thresh_and_accum(self.m_zero_dose_thresh, self.m_zero_dose_accum);
+        }
+        get_metadata_weighting_doses(
+            self.m_adoc_ind,
+            adoc_type,
+            self.m_num_mdoc_sect,
+            &self.m_iz_piece,
+            self.m_num_bidir,
+            &mut self.m_prior_from_mdoc,
+            &mut self.m_dose_from_mdoc,
+        )
+    }
+
+    /// `AliFrame::unifyDoseInformation` (`alignframes.cpp:3419`).
+    ///
+    /// Process dose information some more so all pathways end up in mTotalDoseVec and
+    /// mPriorDoseVec
+    pub fn unify_dose_information(
+        &mut self,
+        break_set_size: i32,
+        combine_files: i32,
+        adoc_type: i32,
+    ) {
+        let mut mdoc_file_tails: Vec<Vec<u8>> = Vec::new();
+        let mut full_frame_paths: Vec<Option<String>>;
+        let mut sstr: Vec<u8> = Vec::new();
+        let mut ind: i32 = 0;
+        let mut iz: i32 = 0;
+        let mut ierr: i32;
+        let mut tempname: Vec<u8> = Vec::new();
+        let mut dose_temp = 0f32;
+        let mut had_priors: bool;
+        let mut got_prior = false;
+        let mut priors_with_mdoc_prior: Vec<f32> = Vec::new();
+        let mut mdoc_prior_index: Vec<i32> = Vec::new();
+        let mut dt_prior_index: Vec<i32> = Vec::new();
+
+        if self.m_total_dose > 0.
+            || self.m_dose_file_type > 0
+            || !self.m_fixed_frame_doses.is_empty()
+        {
+            self.m_frame_doses
+                .resize(self.m_max_frame_doses.max(0) as usize, 0.);
+            self.m_temp_val1
+                .resize(2 * self.m_max_frame_doses.max(0) as usize, 0.);
+        }
+        if self.m_dose_file_type > 0 {
+            ind = if self.m_dose_file_type < 4 {
+                self.m_total_dose_vec.len() as i32
+            } else {
+                self.m_frame_dose_lines.len() as i32
+            };
+            if self.m_dose_file_type != 4 && ind < self.m_num_in_files {
+                exit_error_fmt!(
+                    "The dose file has fewer lines (%d) than frame sets to be aligned %d",
+                    CArg::Int(ind as i64),
+                    CArg::Int(self.m_num_in_files as i64)
+                );
+            }
+            if (combine_files > 0 || break_set_size > 0) && self.m_dose_file_type == 4 {
+                exit_error(
+                    b"You cannot use an mdoc for a dose file when combining files or breaking frames into sets",
+                );
+            }
+            if self.m_dose_file_type == 4 && !self.m_names_from_mdoc && !self.m_doing_frame_ts {
+                // Need to match frame paths in mdoc to actual files being aligned
+                let n = self.m_num_mdoc_sect.max(0) as usize;
+                full_frame_paths = vec![None; n];
+                if self.m_temp_val1.len() < n {
+                    self.m_temp_val1.resize(n, 0.);
+                }
+                let mut val2: Vec<f32> = Vec::new();
+                let mut val3: Vec<f32> = Vec::new();
+                if get_metadata_by_key(
+                    self.m_adoc_ind,
+                    adoc_type,
+                    self.m_num_mdoc_sect,
+                    "SubFramePath",
+                    0,
+                    &mut self.m_temp_val1,
+                    &mut val2,
+                    &mut val3,
+                    Some(&mut full_frame_paths),
+                    &mut ind,
+                    &mut iz,
+                    self.m_num_mdoc_sect,
+                    &self.m_iz_piece,
+                ) != 0
+                    || iz == 0
+                {
+                    exit_error(b"Getting all frame paths from mdoc file");
+                }
+
+                // Got some names: reduce them all to filename only
+                mdoc_file_tails.resize(n, Vec::new());
+                for ind in 0..n {
+                    if let Some(path) = full_frame_paths[ind].take() {
+                        self.extract_file_tail(path.as_bytes(), &mut sstr);
+                        mdoc_file_tails[ind] = sstr.clone();
+                    }
+                }
+
+                // Loop on the filenames
+                for ifile in 0..self.m_num_in_files as usize {
+                    let in_file = self.m_in_files[ifile].clone();
+                    self.extract_file_tail(&in_file, &mut sstr);
+                    ind = 0;
+                    while (ind as usize) < n {
+                        let i = ind as usize;
+                        if mdoc_file_tails[i] == sstr {
+                            self.m_total_dose_vec.push(self.m_dose_from_mdoc[i]);
+                            self.m_prior_dose_vec.push(
+                                if (self.m_adoc_ind >= 0 && self.m_dose_accumulates > 0)
+                                    || self.m_dose_accumulates > 1
+                                {
+                                    self.m_prior_from_mdoc[i]
+                                } else {
+                                    0.
+                                },
+                            );
+                            mdoc_file_tails[i] = Vec::new();
+                            break;
+                        }
+                        ind += 1;
+                    }
+                    if ind >= self.m_num_mdoc_sect {
+                        exit_error_fmt!(
+                            "No section was found in the mdoc file with a filename matching input file %s",
+                            CArg::Bytes(&in_file)
+                        );
+                    }
+                    ierr = adoc_get_string(
+                        ADOC_ZVALUE_NAME,
+                        ind,
+                        FRAME_DOSE_KEY.as_bytes(),
+                        &mut tempname,
+                    );
+                    if ierr < 0 {
+                        exit_error_fmt!(
+                            "Trying to access FrameDosesAndNumber from section %d in mdoc file",
+                            CArg::Int(ind as i64)
+                        );
+                    }
+                    if ierr == 0 {
+                        self.m_frame_dose_lines[ifile] = tempname.clone();
+                    }
+                }
+            }
+
+            // When there is a saved frame list, just copy the entries over
+            if self.m_dose_file_type == 4 && self.m_doing_frame_ts {
+                self.m_total_dose_vec = self.m_dose_from_mdoc.clone();
+                self.m_prior_dose_vec = self.m_prior_from_mdoc.clone();
+            }
+
+            // Now want to check mFrameDoses for reasonableness and get a total dose for type 5
+            if self.m_dose_file_type > 3 && !self.m_doing_frame_ts {
+                for ifile in 0..self.m_num_in_files as usize {
+                    let line = self.m_frame_dose_lines[ifile].clone();
+                    let mut temp_arr = std::mem::take(&mut self.m_temp_val1);
+                    self.expand_frame_doses_numbers(
+                        &line,
+                        &mut temp_arr,
+                        self.m_max_frame_doses,
+                        &mut ind,
+                        &mut dose_temp,
+                        None,
+                    );
+                    self.m_temp_val1 = temp_arr;
+                    if self.m_dose_file_type > 4 {
+                        self.m_total_dose_vec.push(dose_temp);
+                        self.m_prior_dose_vec.push(0.);
+                    }
+                }
+            }
+        }
+
+        // Single frame dose entry: check it, fill arrays, and pretend it is type 5
+        if !self.m_fixed_frame_doses.is_empty() {
+            let line = self.m_fixed_frame_doses.clone();
+            let mut temp_arr = std::mem::take(&mut self.m_temp_val1);
+            self.expand_frame_doses_numbers(
+                &line,
+                &mut temp_arr,
+                self.m_max_frame_doses,
+                &mut ind,
+                &mut dose_temp,
                 None,
-                None,
-                None,
-                0.,
-                Some(&transforms),
-                Some(&shifts),
-            )
-            .unwrap();
-        let written = OwnedImageStack::open_mrc(&output).unwrap();
-        let pixels: Vec<f32> = written.frames[0]
-            .chunks_exact(4)
-            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-            .collect();
-        assert_eq!(result.weighted_sum, vec![1., 2., 3., 4.]);
-        assert_eq!(pixels, result.weighted_sum);
-        assert_eq!(
-            std::fs::read_to_string(&transforms).unwrap(),
-            " 1.00000    0.00000    0.00000   1.00000     0.000    0.000\n".repeat(2)
+            );
+            self.m_temp_val1 = temp_arr;
+            for _ in 0..self.m_num_in_files {
+                self.m_frame_dose_lines
+                    .push(self.m_fixed_frame_doses.clone());
+                self.m_total_dose_vec.push(dose_temp);
+                self.m_prior_dose_vec.push(0.);
+            }
+            self.m_dose_file_type = 5;
+        }
+
+        // Fixed dose, fill the arrays
+        if self.m_total_dose > 0. {
+            self.m_total_dose_vec
+                .resize(self.m_num_in_files.max(0) as usize, self.m_total_dose);
+            self.m_prior_dose_vec
+                .resize(self.m_num_in_files.max(0) as usize, 0.);
+
+            // If there is an mdoc file, try to insert this exposure dose and use it to compute
+            // the prior doses.  First make sure every entry has date-time
+            if self.m_adoc_ind >= 0 && self.m_dose_accumulates > 0 {
+                iz = 0;
+                while iz < self.m_num_sect {
+                    if adoc_get_string(ADOC_ZVALUE_NAME, iz, b"DateTime", &mut tempname) != 0 {
+                        break;
+                    }
+                    iz += 1;
+                }
+                if iz == self.m_num_sect {
+                    // If they are all there, get the doses first in case there are priors, and save
+                    self.m_num_mdoc_sect = self.m_num_sect;
+                    ierr = self.get_doses_from_mdoc(adoc_type);
+                    had_priors = ierr == 0;
+                    if had_priors {
+                        priors_with_mdoc_prior = self.m_prior_from_mdoc.clone();
+                    }
+
+                    // Wipe out the prior Record doses if any and insert/update the dose in each sect
+                    for iz in 0..self.m_num_sect {
+                        if adoc_delete_key_value(ADOC_ZVALUE_NAME, iz, PRIOR_DOSE_KEY).is_err() {
+                            had_priors = false;
+                        }
+                        if adoc_set_float(ADOC_ZVALUE_NAME, iz, b"ExposureDose", self.m_total_dose)
+                            != 0
+                        {
+                            exit_error(
+                                b"Setting the entered fixed total dose into the mdoc structure",
+                            );
+                        }
+                    }
+
+                    // Get the doses back from mdoc, accessing the date-time info
+                    ierr = self.get_doses_from_mdoc(adoc_type);
+
+                    got_prior = ierr == 0;
+                    if ierr == 1 {
+                        exit_error(b"Problems occurred accessing data in the mdoc file");
+                    }
+                    if ierr != 0 {
+                        printf!(
+                            "WARNING: The date-time information in the mdoc file was not usable for computing accumulated doses\n"
+                        );
+                    } else {
+                        self.m_total_dose_vec = self.m_dose_from_mdoc.clone();
+                        self.m_prior_dose_vec = self.m_prior_from_mdoc.clone();
+
+                        // Check consistency of ordering between original mdoc if it has priors,
+                        // and the order based on date-time
+                        if had_priors && !priors_with_mdoc_prior.is_empty() {
+                            for iz in 0..self.m_num_sect {
+                                mdoc_prior_index.push(iz);
+                                dt_prior_index.push(iz);
+                            }
+                            rs_sort_indexed_floats(
+                                &priors_with_mdoc_prior,
+                                &mut mdoc_prior_index,
+                                self.m_num_sect,
+                            );
+                            rs_sort_indexed_floats(
+                                &self.m_prior_from_mdoc,
+                                &mut dt_prior_index,
+                                self.m_num_sect,
+                            );
+                            for iz in 0..self.m_num_sect as usize {
+                                if mdoc_prior_index[iz] != dt_prior_index[iz] {
+                                    printf!(
+                                        "WARNING: Inconsistency between image ordering implied by pre-existing PriorRecordDose entries and new ordering from DateTime entries in mdoc\n"
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+
+                        // (Re)insert the PriorRecordDose entries to protect against excludeviews
+                        for iz in 0..self.m_num_sect {
+                            if adoc_set_float(
+                                ADOC_ZVALUE_NAME,
+                                iz,
+                                PRIOR_DOSE_KEY,
+                                self.m_prior_from_mdoc[iz as usize],
+                            ) != 0
+                            {
+                                exit_error(
+                                    b"Setting the new accumulated dose into the mdoc structure",
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If assuming a tilt series, assign prior doses when none available
+        if (self.m_dose_accumulates > 0
+            && (self.m_dose_file_type == 1
+                || self.m_dose_file_type > 4
+                || (self.m_total_dose > 0. && !got_prior)))
+            || (self.m_dose_accumulates == 1 && self.m_dose_file_type == 4 && self.m_adoc_ind < 0)
+        {
+            let n = self.m_total_dose_vec.len();
+            self.m_prior_dose_vec
+                .resize(b3dmax!(n, self.m_prior_dose_vec.len()), 0.);
+            prior_doses_from_image_doses(
+                &self.m_total_dose_vec,
+                self.m_num_bidir,
+                &mut self.m_prior_dose_vec[..n],
+            );
+        }
+    }
+
+    /// `AliFrame::expandFrameDosesNumbers` (`alignframes.cpp:3605`).
+    ///
+    /// Convert a text line for frame doses and number into an array of doses.
+    /// `tempArr` is grown to the `2 * maxFrames` values the parse may store
+    /// (natively a write within the vector's capacity but past its size, BUGS.md).
+    pub fn expand_frame_doses_numbers(
+        &self,
+        line: &[u8],
+        temp_arr: &mut Vec<f32>,
+        max_frames: i32,
+        total_frames: &mut i32,
+        total_dose: &mut f32,
+        mut frame_doses: Option<&mut Vec<f32>>,
+    ) {
+        let mut num_same: i32;
+        let mut num_to_get = 0i32;
+        *total_frames = 0;
+        *total_dose = 0.;
+        if line.is_empty() {
+            return;
+        }
+        let need = (2 * max_frames).max(0) as usize;
+        if temp_arr.len() < need {
+            temp_arr.resize(need, 0.);
+        }
+        if pip_get_line_of_values(
+            FRAME_DOSE_KEY.as_bytes(),
+            line,
+            PipValueArray::Float(&mut temp_arr[..]),
+            PIP_FLOAT,
+            &mut num_to_get,
+            2 * max_frames,
+        )
+        .is_err()
+        {
+            exit_error_fmt!(
+                "Processing an entry for frame doses and numbers: %s",
+                CArg::Bytes(line)
+            );
+        }
+        if num_to_get % 2 != 0 {
+            exit_error_fmt!(
+                "Odd number of numbers in entry for frame doses and numbers: %s",
+                CArg::Bytes(line)
+            );
+        }
+        let mut ind = 0usize;
+        while (ind as i32) < num_to_get {
+            num_same = b3dnint!(temp_arr[ind + 1]);
+            if ((num_same as f32 - temp_arr[ind + 1]).abs() as f64) > 1.0e-3 {
+                exit_error_fmt!(
+                    "Non-integer value for count in entry for frame doses and numbers: %s",
+                    CArg::Bytes(line)
+                );
+            }
+            if *total_frames + num_same > max_frames {
+                exit_error_fmt!(
+                    "Frame numbers add up to more than maximum expected number of frames in: %s",
+                    CArg::Bytes(line)
+                );
+            }
+            *total_dose += num_same as f32 * temp_arr[ind];
+            if let Some(doses) = frame_doses.as_deref_mut() {
+                for _ in 0..num_same {
+                    doses[*total_frames as usize] = temp_arr[ind];
+                    *total_frames += 1;
+                }
+            } else {
+                *total_frames += num_same;
+            }
+            ind += 2;
+        }
+    }
+
+    /// `AliFrame::frameGroupLimits` (`alignframes.cpp:3640`).
+    ///
+    /// Compute limits for looping over frame groups.  Yes, class members would be easier
+    #[allow(clippy::too_many_arguments)]
+    pub fn frame_group_limits(
+        &self,
+        num_fetch: i32,
+        nz_align: i32,
+        group: i32,
+        group_start: &mut i32,
+        group_end: &mut i32,
+        z_start: i32,
+        z_dir: i32,
+        iz_low: &mut i32,
+        iz_high: &mut i32,
+    ) {
+        let mut iz = 0;
+        balanced_group_limits(
+            num_fetch,
+            nz_align,
+            nz_align - 1 - group,
+            group_start,
+            &mut iz,
         );
-        assert_eq!(
-            std::fs::read_to_string(&shifts).unwrap(),
-            " 10  0.000  0.000\n".repeat(2)
-        );
-        let batch = AliFrame::default()
-            .align_mrc_files_to(
-                &[input.clone(), input_two.clone()],
-                &batch_output,
-                1,
-                1,
-                1,
-                None,
-                None,
-                None,
-                0.,
-            )
-            .unwrap();
-        let batch_stack = OwnedImageStack::open_mrc(&batch_output).unwrap();
-        assert_eq!(batch.len(), 2);
-        assert_eq!(batch_stack.frame_count(), 2);
-        assert_eq!(batch_stack.mode, MRC_MODE_FLOAT);
-        let section_values = |section: usize| {
-            batch_stack.frames[section]
-                .chunks_exact(4)
-                .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(section_values(0), vec![1., 2., 3., 4.]);
-        assert_eq!(section_values(1), vec![5., 6., 7., 8.]);
-        let mut output_file = ImodFile::open(&batch_output, "rb").unwrap();
-        let mut output_header = MrcHeader::default();
-        assert_eq!(mrc_head_read(&mut output_file, &mut output_header), 0);
-        assert_eq!(
-            (output_header.amin, output_header.amax, output_header.amean),
-            (1., 8., 4.5)
-        );
-        let grouped = AliFrame::default()
-            .align_mrc_frame_sets_to(
-                &input,
-                &grouped_output,
-                &AliFrame::break_frames_into_sets(2, 2, None, None).unwrap(),
-                1,
-                1,
-                1,
-                None,
-                None,
-                None,
-                0.,
-            )
-            .unwrap();
-        assert_eq!(grouped.len(), 1);
-        assert_eq!(
-            OwnedImageStack::open_mrc(&grouped_output)
-                .unwrap()
-                .frame_count(),
-            1
-        );
-        let _ = std::fs::remove_file(input);
-        let _ = std::fs::remove_file(input_two);
-        let _ = std::fs::remove_file(output);
-        let _ = std::fs::remove_file(batch_output);
-        let _ = std::fs::remove_file(grouped_output);
-        let _ = std::fs::remove_file(transforms);
-        let _ = std::fs::remove_file(shifts);
+        *group_end = num_fetch - 1 - *group_start;
+        *group_start = num_fetch - 1 - iz;
+        *iz_low = z_start + z_dir * *group_start;
+        *iz_high = z_start + z_dir * *group_end;
+    }
+
+    /// `AliFrame::analyzeForPartialFrames` (`alignframes.cpp:3656`).
+    ///
+    /// Load in first, last, and middle frame of a frame set and compare their means to
+    /// see if first or last should be skipped
+    pub fn analyze_for_partial_frames(
+        &mut self,
+        nz: &mut i32,
+        start_combine: &mut i32,
+        end_combine: &mut i32,
+        ifile: i32,
+        dropped: &mut [i32; 2],
+    ) {
+        let mut drop_ind = 0usize;
+        let num_sample = 40000i32;
+        let sample: f32;
+        let mut means = [0f32; 3];
+        let trim = b3dmin!(self.m_nx, self.m_ny) / 20;
+        let nx_use = self.m_nx - 2 * trim;
+        let ny_use = self.m_ny - 2 * trim;
+        let typ = type_for_sample_mean(self.m_in_head.mode);
+        dropped[0] = -1;
+        dropped[1] = -1;
+
+        // Skip if no partial thresholds or too few frames
+        if (self.m_partial_thresh[0] <= 0. && self.m_partial_thresh[1] <= 0.) || *nz < 3 {
+            return;
+        }
+
+        self.m_in_data_size = data_size_for_mode(self.m_in_head.mode).map_or(0, |(d, _)| d);
+
+        // Allocation buffers and their line pointers the first time
+        let line_bytes = (self.m_in_data_size * self.m_nx) as usize;
+        if self.m_partial_scan_bufs[0].is_empty() {
+            for ind in 0..3 {
+                self.m_partial_scan_bufs[ind] = frame_storage(line_bytes * self.m_ny as usize);
+            }
+        }
+
+        //Keep track of what frames these are
+        sample = b3dmin!(num_sample, nx_use * ny_use) as f32 / (nx_use * ny_use) as f32;
+        self.m_zin_partial_bufs[0] = *start_combine;
+        self.m_zin_partial_bufs[1] = *start_combine + *nz / 2;
+        self.m_zin_partial_bufs[2] = *end_combine;
+
+        // Read and get the sample mean
+        for ind in 0..3 {
+            let mut buf = std::mem::take(&mut self.m_partial_scan_bufs[ind]);
+            self.read_one_frame(buf_bytes_mut(&mut buf), self.m_zin_partial_bufs[ind], ifile);
+            let bytes = buf_bytes(&buf);
+            let lines: Vec<&[u8]> = (0..self.m_ny as usize)
+                .map(|iy| &bytes[iy * line_bytes..(iy + 1) * line_bytes])
+                .collect();
+            if sample_mean_only(
+                Some(&lines),
+                typ,
+                self.m_nx,
+                self.m_ny,
+                sample,
+                trim,
+                trim,
+                nx_use,
+                ny_use,
+                Some(&mut means[ind]),
+            ) != 0
+            {
+                exit_error(b"Error computing mean with sampling for partial frame analysis");
+            }
+            drop(lines);
+            self.m_partial_scan_bufs[ind] = buf;
+        }
+
+        // Make decisions and adjust the frame set
+        if self.m_partial_thresh[0] > 0. && means[0] < self.m_partial_thresh[0] * means[1] {
+            if self.m_debug != 0 {
+                printf!(
+                    "Skipping frame %d  mean %.3f  ref  %.3f\n",
+                    CArg::Int((*start_combine + 1) as i64),
+                    CArg::Dbl(means[0] as f64),
+                    CArg::Dbl(means[1] as f64)
+                );
+            }
+            dropped[drop_ind] = *start_combine;
+            drop_ind += 1;
+            *start_combine += 1;
+        }
+        if self.m_partial_thresh[1] > 0.
+            && means[2] < self.m_partial_thresh[1] * means[1]
+            && *end_combine - *start_combine > 1
+        {
+            if self.m_debug != 0 {
+                printf!(
+                    "Skipping frame %d  mean %.3f  ref  %.3f\n",
+                    CArg::Int((*end_combine + 1) as i64),
+                    CArg::Dbl(means[2] as f64),
+                    CArg::Dbl(means[1] as f64)
+                );
+            }
+            dropped[drop_ind] = *end_combine;
+            *end_combine -= 1;
+        }
+        *nz = *end_combine + 1 - *start_combine;
     }
 }

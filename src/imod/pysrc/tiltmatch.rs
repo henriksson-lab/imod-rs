@@ -227,7 +227,8 @@ fn py_min(a: f64, b: f64) -> f64 {
 struct Interrupted;
 
 /// Matches `searchPairs` (`tiltmatch.py:116`).  Returns `(asecBest,
-/// bsecBest, diffList, allXfList)`.
+/// bsecBest, diffList, allXfList)`.  `expand_afac` is the `str()` of the
+/// caller's value, an int (`matchrotpairs`) or a float (`transferfid`).
 #[allow(clippy::too_many_arguments)]
 pub fn search_pairs(
     progname: &str,
@@ -249,7 +250,7 @@ pub fn search_pairs(
     distort: &str,
     bilinear: i64,
     all_xf_out: i32,
-    expand_afac: i64,
+    expand_afac: &str,
 ) -> (i64, i64, Vec<Vec<f64>>, Vec<Vec<String>>) {
     // Get common temp filenames and the additional one needed here
     let tmp_minxf = get_temp_names(progname);

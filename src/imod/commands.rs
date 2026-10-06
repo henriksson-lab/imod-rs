@@ -50,6 +50,7 @@ pub struct Command {
 pub const COMMANDS: &[Command] = &[
     cmd("3dmod", three_dmod, false),
     cmd("3dmodv", three_dmod, false),
+    cmd("alignframes", alignframes, true),
     cmd("alignlog", alignlog, false),
     cmd(
         "alterheader",
@@ -139,6 +140,11 @@ pub const COMMANDS: &[Command] = &[
     ),
     cmd("findbeads3d", findbeads3d, true),
     cmd(
+        "flattenwarp",
+        crate::imod::imodutil::flattenwarp::flattenwarp,
+        true,
+    ),
+    cmd(
         "extractmagrad",
         crate::imod::flib::image::extractmagrad::extractmagrad,
         true,
@@ -164,6 +170,13 @@ pub const COMMANDS: &[Command] = &[
     cmd("etomo-popup", etomo_popup, false),
     #[cfg(feature = "gui")]
     cmd("etomo-filechooser", etomo_filechooser, false),
+    // The plot window: runs its program on a second thread and the window
+    // on the main one (`qtplax`), so never in another program's process.
+    cmd(
+        "genhstplt",
+        crate::imod::flib::graphics::genhstplt::genhstplt,
+        false,
+    ),
     cmd("header", crate::imod::flib::image::header::header, true),
     cmd(
         "imodchopconts",
@@ -175,8 +188,24 @@ pub const COMMANDS: &[Command] = &[
         crate::imod::imodutil::imodfindbeads::imodfindbeads,
         true,
     ),
+    cmd(
+        "imodextract",
+        crate::imod::imodutil::imodextract::imodextract,
+        true,
+    ),
     cmd("imodinfo", crate::imod::imodutil::imodinfo::imodinfo, true),
     cmd("imodmop", crate::imod::imodutil::imodmop::imodmop, true),
+    cmd("imodauto", imodauto, true),
+    cmd(
+        "imod2patch",
+        crate::imod::imodutil::imod2patch::imod2patch,
+        true,
+    ),
+    cmd(
+        "joinwarp2model",
+        crate::imod::imodutil::joinwarp2model::joinwarp2model,
+        true,
+    ),
     cmd("imodjoin", crate::imod::imodutil::imodjoin::imodjoin, true),
     cmd("imodmesh", crate::imod::imodutil::imodmesh::imodmesh, true),
     cmd(
@@ -215,6 +244,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("mrctaper", mrctaper, true),
     cmd("mrctilt", mrctilt, true),
     cmd("mtffilter", mtffilter, true),
+    cmd("nad_eed_3d", nad_eed_3d, true),
     cmd(
         "newstack",
         crate::imod::flib::image::newstack::newstack,
@@ -308,7 +338,98 @@ pub const COMMANDS: &[Command] = &[
         true,
     ),
     cmd("xftoxg", crate::imod::flib::image::xftoxg::xftoxg, true),
+    cmd(
+        "subimage",
+        crate::imod::flib::image::subimage::subimage,
+        true,
+    ),
+    cmd(
+        "maxjoinsize",
+        crate::imod::flib::image::maxjoinsize::maxjoinsize,
+        true,
+    ),
+    cmd(
+        "boxstartend",
+        crate::imod::flib::model::boxstartend::boxstartend,
+        true,
+    ),
+    cmd(
+        "model2point",
+        crate::imod::flib::model::model2point::model2point,
+        true,
+    ),
+    cmd(
+        "repackseed",
+        crate::imod::flib::model::repackseed::repackseed,
+        true,
+    ),
+    cmd(
+        "avgstack",
+        crate::imod::flib::image::avgstack::avgstack,
+        true,
+    ),
+    cmd(
+        "extractpieces",
+        crate::imod::flib::image::extractpieces::extractpieces,
+        true,
+    ),
+    cmd(
+        "goodframe",
+        crate::imod::flib::image::goodframe::goodframe,
+        true,
+    ),
+    cmd(
+        "remapmodel",
+        crate::imod::flib::model::remapmodel::remapmodel,
+        true,
+    ),
+    cmd(
+        "rotatevol",
+        crate::imod::flib::image::rotatevol::rotatevol,
+        true,
+    ),
+    cmd(
+        "taperoutvol",
+        crate::imod::flib::image::taperoutvol::taperoutvol,
+        true,
+    ),
+    cmd(
+        "xfjointomo",
+        crate::imod::flib::model::xfjointomo::xfjointomo,
+        true,
+    ),
     cmd("xyzproj", crate::imod::flib::image::xyzproj::xyzproj, true),
+    cmd("b3dhostname", b3dhostname, false),
+    cmd("b3dtouch", b3dtouch, false),
+    cmd("b3dtomosetexts", b3dtomosetexts, false),
+    cmd("startprocess", startprocess, false),
+    cmd("slicesforsample", slicesforsample, false),
+    cmd("sampletilt", sampletilt, false),
+    cmd("squeezevol", squeezevol, false),
+    cmd("splitcorrection", splitcorrection, false),
+    cmd("sorttiltframes", sorttiltframes, false),
+    cmd("multifiltsetup", multifiltsetup, false),
+    cmd("reducefiltvol", reducefiltvol, false),
+    cmd("copyheader", copyheader, false),
+    cmd("archiveorig", archiveorig, false),
+    cmd("splitbatch", splitbatch, false),
+    cmd("finishjoin", finishjoin, false),
+    cmd("makejoincom", makejoincom, false),
+    cmd("xfalign", xfalign, false),
+    cmd("transferfid", transferfid, false),
+    cmd("imodkillgroup", imodkillgroup, false),
+    cmd("gputilttest", gputilttest, false),
+    cmd("cryoposition", cryoposition, false),
+    cmd("onegenplot", onegenplot, false),
+    cmd("tomodataplots", tomodataplots, false),
+    cmd("excludeviews", excludeviews, false),
+    cmd("swaptomostacks", swaptomostacks, false),
+    cmd("ctf3dsetup", ctf3dsetup, false),
+    cmd("alttomosetup", alttomosetup, false),
+    cmd("subtomosetup", subtomosetup, false),
+    cmd("tomosnapshot", tomosnapshot, false),
+    cmd("serieswatcher", serieswatcher, false),
+    cmd("edmont", crate::imod::flib::model::edmont::edmont, true),
 ];
 
 const fn cmd(name: &'static str, entry: fn(), in_process: bool) -> Command {
@@ -537,6 +658,14 @@ fn etomo_gui() {
     }
 }
 
+fn nad_eed_3d() {
+    exit(crate::imod::mrc::nad_eed_3d::nad_eed_3d(&program_args()))
+}
+
+fn imodauto() {
+    exit(crate::imod::imodutil::imodauto::imodauto(&program_args()))
+}
+
 fn imodqtassist() {
     exit(crate::imod::qttools::qtassist::imodqtassist::imodqtassist(
         &program_args(),
@@ -726,6 +855,184 @@ fn b3dcopy() {
 
 fn vmstopy() {
     exit(crate::imod::pysrc::vmstopy::vmstopy(&program_args_os()))
+}
+
+fn b3dhostname() {
+    exit(crate::imod::pysrc::b3dhostname::b3dhostname())
+}
+
+fn b3dtouch() {
+    exit(crate::imod::pysrc::b3dtouch::b3dtouch(&program_args_os()))
+}
+
+fn b3dtomosetexts() {
+    exit(crate::imod::pysrc::b3dtomosetexts::b3dtomosetexts(
+        &program_args_os(),
+    ))
+}
+
+fn startprocess() {
+    exit(crate::imod::pysrc::startprocess::startprocess(
+        &program_args_os(),
+    ))
+}
+
+fn slicesforsample() {
+    exit(crate::imod::pysrc::slicesforsample::slicesforsample(
+        &program_args_os(),
+    ))
+}
+
+fn sampletilt() {
+    exit(crate::imod::pysrc::sampletilt::sampletilt(
+        &program_args_os(),
+    ))
+}
+
+fn squeezevol() {
+    exit(crate::imod::pysrc::squeezevol::squeezevol(
+        &program_args_os(),
+    ))
+}
+
+fn splitcorrection() {
+    exit(crate::imod::pysrc::splitcorrection::splitcorrection(
+        &program_args_os(),
+    ))
+}
+
+fn sorttiltframes() {
+    exit(crate::imod::pysrc::sorttiltframes::sorttiltframes(
+        &program_args_os(),
+    ))
+}
+
+fn multifiltsetup() {
+    exit(crate::imod::pysrc::multifiltsetup::multifiltsetup(
+        &program_args_os(),
+    ))
+}
+
+fn reducefiltvol() {
+    exit(crate::imod::pysrc::reducefiltvol::reducefiltvol(
+        &program_args_os(),
+    ))
+}
+
+fn copyheader() {
+    exit(crate::imod::pysrc::copyheader::copyheader(
+        &program_args_os(),
+    ))
+}
+
+fn alignframes() {
+    exit(crate::imod::mrc::alignframes::alignframes(&program_args()))
+}
+
+fn archiveorig() {
+    exit(crate::imod::pysrc::archiveorig::archiveorig(
+        &program_args_os(),
+    ))
+}
+
+fn splitbatch() {
+    exit(crate::imod::pysrc::splitbatch::splitbatch(
+        &program_args_os(),
+    ))
+}
+
+fn finishjoin() {
+    exit(crate::imod::pysrc::finishjoin::finishjoin(
+        &program_args_os(),
+    ))
+}
+
+fn makejoincom() {
+    exit(crate::imod::pysrc::makejoincom::makejoincom(
+        &program_args_os(),
+    ))
+}
+
+fn xfalign() {
+    exit(crate::imod::pysrc::xfalign::xfalign(&program_args_os()))
+}
+
+fn transferfid() {
+    exit(crate::imod::pysrc::transferfid::transferfid(
+        &program_args_os(),
+    ))
+}
+
+fn imodkillgroup() {
+    exit(crate::imod::pysrc::imodkillgroup::imodkillgroup(
+        &program_args_os(),
+    ))
+}
+
+fn gputilttest() {
+    exit(crate::imod::pysrc::gputilttest::gputilttest(
+        &program_args_os(),
+    ))
+}
+
+fn cryoposition() {
+    exit(crate::imod::pysrc::cryoposition::cryoposition(
+        &program_args_os(),
+    ))
+}
+
+fn onegenplot() {
+    exit(crate::imod::pysrc::onegenplot::onegenplot(
+        &program_args_os(),
+    ))
+}
+
+fn tomodataplots() {
+    exit(crate::imod::pysrc::tomodataplots::tomodataplots(
+        &program_args_os(),
+    ))
+}
+
+fn excludeviews() {
+    exit(crate::imod::pysrc::excludeviews::excludeviews(
+        &program_args_os(),
+    ))
+}
+
+fn swaptomostacks() {
+    exit(crate::imod::pysrc::swaptomostacks::swaptomostacks(
+        &program_args_os(),
+    ))
+}
+
+fn ctf3dsetup() {
+    exit(crate::imod::pysrc::ctf3dsetup::ctf3dsetup(
+        &program_args_os(),
+    ))
+}
+
+fn alttomosetup() {
+    exit(crate::imod::pysrc::alttomosetup::alttomosetup(
+        &program_args_os(),
+    ))
+}
+
+fn subtomosetup() {
+    exit(crate::imod::pysrc::subtomosetup::subtomosetup(
+        &program_args_os(),
+    ))
+}
+
+fn tomosnapshot() {
+    exit(crate::imod::pysrc::tomosnapshot::tomosnapshot(
+        &program_args_os(),
+    ))
+}
+
+fn serieswatcher() {
+    exit(crate::imod::pysrc::serieswatcher::serieswatcher(
+        &program_args_os(),
+    ))
 }
 
 fn b3dremove() {

@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 pub mod golden;
+pub mod small_prog;
 
 /// A `Command` running `<command>` through the `imod <command> …` subcommand
 /// form.  The launcher re-execs itself with `argv[0]` rewritten, so the
@@ -98,7 +99,8 @@ fn is_label_stamp(w: &[u8]) -> bool {
     // leading blank is part of the stamp (the tests failed on every 1st-9th
     // of a month until this accepted it).
     let d_or_blank = |k: usize| w[k].is_ascii_digit() || w[k] == b' ';
-    d_or_blank(0) && d(1)
+    d_or_blank(0)
+        && d(1)
         && w[2] == b'-'
         && MONTHS.iter().any(|m| &w[3..6] == &m[..])
         && w[6] == b'-'
@@ -159,7 +161,9 @@ pub fn mask_mrc_stamps(bytes: &mut [u8]) {
 ///   `imodDefault` writes 13 bytes): defined as zero.
 /// - Binary model `MINX` chunk: `oscale` and `orot` of an `IrefImage` the
 ///   source `malloc`s and never sets (`imodjoin.c:181`, `imodtrans.c:93`):
-///   defined as the identity, `oscale` (1,1,1) and `orot` (0,0,0).
+///   defined as the identity, `oscale` (1,1,1) and `orot` (0,0,0); and
+///   `otrans` and `crot` of the one `joinwarp2model.c:208` fills only
+///   `cscale`/`ctrans` of: defined as zero.
 pub fn reconcile_uninitialised(ours: &[u8], native: &[u8]) -> Vec<u8> {
     fn take(
         ours: &[u8],
@@ -214,6 +218,16 @@ pub fn reconcile_uninitialised(ours: &[u8], native: &[u8]) -> Vec<u8> {
                 let base = index + 8;
                 take(ours, &mut out, base..base + 12, &unit, "MINX oscale");
                 take(ours, &mut out, base + 24..base + 36, &[0; 12], "MINX orot");
+                // `joinwarp2model.c:208` sets only `cscale` and `ctrans`, so
+                // `otrans` and `crot` are residue too: defined as zero.
+                take(
+                    ours,
+                    &mut out,
+                    base + 12..base + 24,
+                    &[0; 12],
+                    "MINX otrans",
+                );
+                take(ours, &mut out, base + 60..base + 72, &[0; 12], "MINX crot");
                 index += 80;
             } else {
                 index += 1;

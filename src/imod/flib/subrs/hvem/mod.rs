@@ -11,6 +11,7 @@ pub mod getinout;
 pub mod indmap;
 pub mod int_iwrite;
 pub mod inside;
+pub mod mypause;
 pub mod objtocont;
 pub mod parse_input_params;
 pub mod rdlist;
