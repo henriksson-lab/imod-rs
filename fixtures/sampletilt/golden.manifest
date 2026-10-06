@@ -1,0 +1,54 @@
+# imod-rs native golden manifest for fixtures/sampletilt; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh sampletilt; do not edit by hand.
+text 31 golden/ali_file.files
+g.tlt
+g.xtilt
+smp.rec
+tilt.com
+
+sha256 8f7c1796fc245b6e5b9e6213e207f2ec9efab6226ea4862a3910cf9d45c4cfe5 1938 golden/ali_file.out
+text 2 golden/ali_file.rc
+0
+
+sha256 5fa0ee3618e4677eed62a35a36b3518a6bcfa911aacf644da2e57abf46f2433d 35584 golden/ali_file/smp.rec
+text 0 golden/args.files
+
+text 171 golden/args.out
+ERROR: sampletilt - Need 6, 7, 9, or 10 params: slice start & end, ystart, set name, rec name, com file name, [aliFile] | [orig and new # of lines, # of slices [aliFile]]
+
+text 2 golden/args.rc
+1
+
+text 9 golden/badint.files
+tilt.com
+
+text 87 golden/badint.out
+ERROR: sampletilt - Error converting number of input lines or output slices to integer
+
+text 2 golden/badint.rc
+1
+
+text 37 golden/new_style.files
+g.ali
+g.tlt
+g.xtilt
+smp.rec
+tilt.com
+
+sha256 8f7c1796fc245b6e5b9e6213e207f2ec9efab6226ea4862a3910cf9d45c4cfe5 1938 golden/new_style.out
+text 2 golden/new_style.rc
+0
+
+sha256 5fa0ee3618e4677eed62a35a36b3518a6bcfa911aacf644da2e57abf46f2433d 35584 golden/new_style/smp.rec
+text 37 golden/old_style.files
+g.ali
+g.tlt
+g.xtilt
+smp.rec
+tilt.com
+
+sha256 f9c17c555f3cde95679bbd36b7d2a6beb728c6683ca0dad215c9ecf19556a088 1938 golden/old_style.out
+text 2 golden/old_style.rc
+0
+
+sha256 0d6b8bc8fbf5ca32a5f44adfe5104c30a430af1b2648f39e4c8f6e3858beb777 32704 golden/old_style/smp.rec

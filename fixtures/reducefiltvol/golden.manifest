@@ -1,0 +1,304 @@
+# imod-rs native golden manifest for fixtures/reducefiltvol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh reducefiltvol; do not edit by hand.
+text 52 golden/astig.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 06488ac09d599ecfcf66a44db8930c2e41121427f37b6741dd095b39c6e75027 1340 golden/astig.out
+text 2 golden/astig.rc
+0
+
+sha256 b5fd101ae88833cd2cfddf1ad5586b1dfee5f45a54d6b139095bf025e32707c4 7168 golden/astig/o.mrc
+text 46 golden/both_filters.files
+ctfplotter.com
+g.ali
+g.defocus
+tilt.com
+v.mrc
+
+text 87 golden/both_filters.out
+ERROR: reducefiltvol - You cannot do both a Gaussian filter and a deconvolution filter
+
+text 2 golden/both_filters.rc
+1
+
+text 52 golden/deconv.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 a0c3997f1640b0b7c18626191be98f8b69f8dc1aa655afacb182715b4d282b69 802 golden/deconv.out
+text 2 golden/deconv.rc
+0
+
+sha256 11d2656549af7d84dcd23de8afae30b93a683bf9ec880da395c5122f72823476 62464 golden/deconv/o.mrc
+text 52 golden/deconv_entered.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 cee51667357f06cb408461286ac33222ee6b68dc9a1f22def4032c4235a0e5aa 802 golden/deconv_entered.out
+text 2 golden/deconv_entered.rc
+0
+
+sha256 542dbc362b288ce1ed45b36bd4d802e1a426d3f540789963c7b2494c01490160 62464 golden/deconv_entered/o.mrc
+text 46 golden/deconv_options.files
+ctfplotter.com
+g.ali
+g.defocus
+tilt.com
+v.mrc
+
+sha256 a5f76d2ee8c3efa1e210bd281d2f8aab2184dde00a8e5f101f1770eefa72facb 534 golden/deconv_options.out
+text 2 golden/deconv_options.rc
+1
+
+text 52 golden/lowpass.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 247f7b2e774f2894c989942bcb6c22242d204604ef47013c2c6fbaa8a0ad5d41 750 golden/lowpass.out
+text 2 golden/lowpass.rc
+0
+
+sha256 506e2e035dc8b11ce664e8320f42929b0e26688bc6264b90fca7d782e2c6a88a 62464 golden/lowpass/o.mrc
+text 52 golden/mode.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+text 453 golden/mode.out
+Reducing the volume with Binvol...
+
+ RO image file on unit   1 : v.mrc     Size=         61 K
+ Dimensions:     64     48      5   Pixel size:  1.000      1.000      1.000    
+ Mode:  2               Min, max, mean:   26.778       181.23       99.859    
+raw2mrc: Converted to mrc format.                       05-Oct-26  10:13:37    
+
+
+ NEW image file on unit   3 : o.mrc
+ Antialiasing is being applied in X and Y as well as Z
+ PROGRAM EXECUTED TO END.
+
+text 2 golden/mode.rc
+0
+
+sha256 9bcc0c475bf8bafe7f2dda467f8adbad37cc136d2f2a4e3bf475acdccf81e804 7168 golden/mode/o.mrc
+text 37 golden/no_ctfplotter.files
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 1efdff31e30cd047a999b3124380db528a150feec7bdf0913354c41c00ade1e4 1016 golden/no_ctfplotter.out
+text 2 golden/no_ctfplotter.rc
+0
+
+sha256 5655c23d3e4ac489cddb8ee956c0bc86bdf34f87776e2088e5707fbee0d8825b 62464 golden/no_ctfplotter/o.mrc
+text 46 golden/no_input.files
+ctfplotter.com
+g.ali
+g.defocus
+tilt.com
+v.mrc
+
+text 62 golden/no_input.out
+ERROR: reducefiltvol - Input file nonexist.mrc does not exist
+
+text 2 golden/no_input.rc
+1
+
+text 46 golden/no_raw_stack.files
+ctfplotter.com
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 ea33eb75bebb957e68acb96ddffba95ca1264edb3cdd80fc2d36af7ac02a7710 1438 golden/no_raw_stack.out
+text 2 golden/no_raw_stack.rc
+0
+
+sha256 edd181b463be85aee1a7235faf3e89bc4fc55cca695cd573bf9dda31f11c961d 7168 golden/no_raw_stack/o.mrc
+text 6 golden/no_root.files
+v.mrc
+
+text 303 golden/no_root.out
+Assuming pixel size of 0.100 nm in volume header is correct; ctfplotter.com does not exist
+Assuming voltage is 300; ctfplotter.com does not exist
+Assuming spherical aberration is 2.7; ctfplotter.com does not exist
+ERROR: reducefiltvol - Defocus must be entered; could not determine root name of dataset
+
+text 2 golden/no_root.rc
+1
+
+text 46 golden/nothing.files
+ctfplotter.com
+g.ali
+g.defocus
+tilt.com
+v.mrc
+
+text 66 golden/nothing.out
+ERROR: reducefiltvol - There is no meaningful operation specified
+
+text 2 golden/nothing.rc
+1
+
+text 52 golden/old_defocus.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 f45797fc64bf7dbd60b07a50c305b9ff4873b28141dc0ba7301407d4dfdc6546 944 golden/old_defocus.out
+text 2 golden/old_defocus.rc
+0
+
+sha256 5c5eb147cacb9598912c1e3790b4dcd2a2f48caa23072b61a21984b552991baa 62464 golden/old_defocus/o.mrc
+text 52 golden/reduce.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+text 453 golden/reduce.out
+Reducing the volume with Binvol...
+
+ RO image file on unit   1 : v.mrc     Size=         61 K
+ Dimensions:     64     48      5   Pixel size:  1.000      1.000      1.000    
+ Mode:  2               Min, max, mean:   26.778       181.23       99.859    
+raw2mrc: Converted to mrc format.                       05-Oct-26  10:13:37    
+
+
+ NEW image file on unit   3 : o.mrc
+ Antialiasing is being applied in X and Y as well as Z
+ PROGRAM EXECUTED TO END.
+
+text 2 golden/reduce.rc
+0
+
+sha256 9bcc0c475bf8bafe7f2dda467f8adbad37cc136d2f2a4e3bf475acdccf81e804 7168 golden/reduce/o.mrc
+text 52 golden/reduce_lowpass.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 ef1b23069ab693cd98339c49ee7bc3fe84e002f5d12da25a26b51b930090089c 1288 golden/reduce_lowpass.out
+text 2 golden/reduce_lowpass.rc
+0
+
+sha256 4a7c838b2c42db41ada1024890abc776bc354142c0e541bd4447f6ef9962981a 7168 golden/reduce_lowpass/o.mrc
+text 52 golden/reduce_lowpass_mode.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+sha256 188ff93cf23bce4597e70ac5852f01376444889d2a8f72ef99a33d039993531d 1288 golden/reduce_lowpass_mode.out
+text 2 golden/reduce_lowpass_mode.rc
+0
+
+sha256 e35f733b2654791ba3af4fc8301f5864273f8857b64eaf0fe08a54acf7057bf0 2560 golden/reduce_lowpass_mode/o.mrc
+text 46 golden/reduce_one.files
+ctfplotter.com
+g.ali
+g.defocus
+tilt.com
+v.mrc
+
+text 66 golden/reduce_one.out
+ERROR: reducefiltvol - There is no meaningful operation specified
+
+text 2 golden/reduce_one.rc
+1
+
+text 46 golden/reduce_small.files
+ctfplotter.com
+g.ali
+g.defocus
+tilt.com
+v.mrc
+
+text 76 golden/reduce_small.out
+ERROR: reducefiltvol - Reduction factors must be greater than or equal to 1
+
+text 2 golden/reduce_small.rc
+1
+
+text 52 golden/reduce_xy.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+text 453 golden/reduce_xy.out
+Reducing the volume with Binvol...
+
+ RO image file on unit   1 : v.mrc     Size=         61 K
+ Dimensions:     64     48      5   Pixel size:  1.000      1.000      1.000    
+ Mode:  2               Min, max, mean:   26.778       181.23       99.859    
+raw2mrc: Converted to mrc format.                       05-Oct-26  10:13:37    
+
+
+ NEW image file on unit   3 : o.mrc
+ Antialiasing is being applied in X and Y as well as Z
+ PROGRAM EXECUTED TO END.
+
+text 2 golden/reduce_xy.rc
+0
+
+sha256 eb57fb1dc29581c5742eb195bc570cd488545d017caa3f3647981729631733c9 16384 golden/reduce_xy/o.mrc
+text 52 golden/reduce_z.files
+ctfplotter.com
+g.ali
+g.defocus
+o.mrc
+tilt.com
+v.mrc
+
+text 398 golden/reduce_z.out
+Reducing the volume with Binvol...
+
+ RO image file on unit   1 : v.mrc     Size=         61 K
+ Dimensions:     64     48      5   Pixel size:  1.000      1.000      1.000    
+ Mode:  2               Min, max, mean:   26.778       181.23       99.859    
+raw2mrc: Converted to mrc format.                       05-Oct-26  10:13:37    
+
+
+ NEW image file on unit   3 : o.mrc
+ PROGRAM EXECUTED TO END.
+
+text 2 golden/reduce_z.rc
+0
+
+sha256 01f48c6b89e14714004c37cf038444b6eae243cfdb550bfdbb17eb8a22e52940 25600 golden/reduce_z/o.mrc

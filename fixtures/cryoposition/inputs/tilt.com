@@ -1,0 +1,16 @@
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+THICKNESS 40
+RADIAL 0.35 0.035
+FalloffIsTrueSigma 1
+XAXISTILT 0.0
+SCALE 0.0 1000.0
+PERPENDICULAR
+MODE 1
+FULLIMAGE 128 128
+SUBSETSTART 0 0
+AdjustOrigin 1
+ActionIfGPUFails 1,2

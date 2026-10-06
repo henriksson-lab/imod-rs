@@ -1,0 +1,20 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+alt	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt
+evenodd	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-evenodd
+alt_procs1	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt -procs 1
+alt_ctf_erase_filter	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt -ctf -erase -filter
+alt_ctf_erase_filter1	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt -ctf -erase -filter -procs 1
+evenodd_trim	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st g.edf:g.edf	-	-evenodd -trim -clean -preproc 2
+alt_trim1	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st g.edf:g.edf	-	-rootname alt -trim -preproc 1 -procs 1
+trim_noedf	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt -trim
+alt_restore	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt -restore
+alt_axis	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt -axis a
+alt_evenodd	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-rootname alt -evenodd
+neither	s/:. s/g.st:g.ali s/g.st:g_even.st s/g.st:g_odd.st s/g.st:alt.st	-	-ctf
+badaxis	d/:. s/g.st:ga.st s/g.st:gb.st s/g.st:ga.ali s/g.st:gb.ali s/g.st:alta.st s/g.st:altb.st	-	-rootname alt -axis c
+nonstandard	s/tilt.com:tilt.com	-	-rootname alt
+dual_alt	d/:. s/g.st:ga.st s/g.st:gb.st s/g.st:ga.ali s/g.st:gb.ali s/g.st:alta.st s/g.st:altb.st	-	-rootname alt
+dual_axis_b_ctf	d/:. s/g.st:ga.st s/g.st:gb.st s/g.st:ga.ali s/g.st:gb.ali s/g.st:alta.st s/g.st:altb.st	-	-rootname alt -axis b -ctf
+dual_axis_A_procs1	d/:. s/g.st:ga.st s/g.st:gb.st s/g.st:ga.ali s/g.st:gb.ali s/g.st:alta.st s/g.st:altb.st	-	-rootname alt -axis A -procs 1
+dual_trim	d/:. s/g.st:ga.st s/g.st:gb.st s/g.st:ga.ali s/g.st:gb.ali s/g.st:alta.st s/g.st:altb.st	-	-rootname alt -trim
+dual_evenodd	d/:. s/g.st:ga.st s/g.st:gb.st s/g.st:ga.ali s/g.st:gb.ali s/g.st:alta.st s/g.st:altb.st	-	-evenodd

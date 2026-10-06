@@ -1,0 +1,27 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+plain	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	jr 1,12 1,10 1,8
+use_option	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-use 1,12 -use 1,10 -use 1,8 jr
+subranges	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	jr 3,10 2,9 2,7
+size_offset	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-size 70,60 -offset 2,-3 jr 1,12 1,10 1,8
+trial	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-trial 3 -bin 2 jr 1,12 1,10 1,8
+reference	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-ref 2 jr 1,12 1,10 1,8
+local	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-local jr 1,12 1,10 1,8
+local_ref	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-local -ref 2 jr 1,12 1,10 1,8
+refine	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-xform ref.xf jr 1,12 1,10 1,8
+maxsize	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-maxsize jr 1,12 1,10 1,8
+gaps	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-gaps jr 1,15 1,10 1,8
+out_of_range	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	jr 1,15 1,10 1,8
+no_image	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-no jr 1,12 1,10 1,8
+too_few	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	jr 1,12 1,10
+both_ways	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-use 1,12 jr 1,10 1,8
+reversed	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	jr 12,1 10,1 8,1
+angle	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-angle 20 jr 1,12 1,10 1,8
+bad_binning	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	-trial 3 -bin 20 jr 1,12 1,10 1,8
+no_info	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:jr.info jr.xf:jr.xf ref.xf:ref.xf	-	nojr 1,2 1,2
+squeezed	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec sq.info:sq.info sq.xf:sq.xf sq.sqzxf:sq.sqzxf sq.xpndxf:sq.xpndxf ref.xf:ref.xf	-	sq 1,12 1,10 1,8
+squeezed_refine	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec sq.info:sq.info sq.xf:sq.xf sq.sqzxf:sq.sqzxf sq.xpndxf:sq.xpndxf ref.xf:ref.xf	-	-xform ref.xf sq 1,12 1,10 1,8
+squeezed_maxsize	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec sq.info:sq.info sq.xf:sq.xf sq.sqzxf:sq.sqzxf sq.xpndxf:sq.xpndxf ref.xf:ref.xf	-	-maxsize sq 1,12 1,10 1,8
+unit_lines	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec jr.info:u.info jr4.xf:u.xf	-	u 1,12 1,10 1,8
+old_info	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec o.info:o.info jr.xf:o.xf	-	o 1,12 1,10 1,8
+old_info_maxsize	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec o.info:o.info jr.xf:o.xf	-	-maxsize o 1,12 1,10 1,8
+info_v2	t1.rec:t1.rec t2.rec:t2.rec t3.rec:t3.rec o2.info:o2.info jr.xf:o2.xf	-	o2 1,12 1,10 1,8

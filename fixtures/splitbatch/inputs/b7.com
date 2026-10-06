@@ -1,0 +1,13 @@
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CPUMachineList localhost:4,server2:2
+DirectiveFile  d1.adoc
+RootName ts1
+CurrentLocation /data/a
+DeliverToDirectory /data/out1
+DirectiveFile  d2.adoc
+RootName ts2
+CurrentLocation /data/b
+CheckFile batch.cmds
+EmailAddress x@y

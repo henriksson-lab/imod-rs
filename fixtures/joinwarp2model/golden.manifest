@@ -1,0 +1,71 @@
+# imod-rs native golden manifest for fixtures/joinwarp2model; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh joinwarp2model; do not edit by hand.
+text 2 golden/jw_both_sizes.rc
+1
+
+text 117 golden/jw_both_sizes.stdout
+ERROR: joinwarp2model - You must enter either the joined image file name or the pixel size and X/Y size of that file
+
+text 2 golden/jw_chunk_count.rc
+1
+
+text 118 golden/jw_chunk_count.stdout
+ERROR: joinwarp2model - The number of chunks entered (1) does not match the number of transforms in the warp file (2)
+
+sha256 c4e173c6d9b85811f2d843e692eda4bc3af041e10af2834fd97f159e1f296394 748 golden/jw_joined.out.j.mod
+sha256 bc4a3cef89c4b03d3f2a57dbe5219dfee8e956dca1c6b5e18bc26979f2863bbb 688 golden/jw_joined.out.j.mod.origpts
+sha256 320b637a7915e8bfe74a8688c185cc8d41b9f737592400dccafb0fbb61f87612 688 golden/jw_joined.out.j.mod.xfpts
+text 2 golden/jw_joined.rc
+0
+
+text 149 golden/jw_joined.stdout
+Using model header to determine center coordinates:   256.0   240.0
+Warping file opened: grid.warp
+Transforming model with transforms from grid.warp
+
+text 2 golden/jw_joined_mismatch.rc
+1
+
+text 104 golden/jw_joined_mismatch.stdout
+ERROR: joinwarp2model - The sum of the chunk sizes (5) does not match the Z size of the joined file (d)
+
+text 2 golden/jw_no_points.rc
+1
+
+text 91 golden/jw_no_points.stdout
+ERROR: joinwarp2model - The warp file does not contain control points to turn into a model
+
+text 2 golden/jw_no_xform.rc
+1
+
+text 74 golden/jw_no_xform.stdout
+ERROR: joinwarp2model - No file of applied warping G transforms specified
+
+sha256 1323a6b1509e7ce64d1c22fda9248d5092a40ec07d455211128805eebec3860c 668 golden/jw_offset_bin.out.j.mod
+sha256 bc4a3cef89c4b03d3f2a57dbe5219dfee8e956dca1c6b5e18bc26979f2863bbb 688 golden/jw_offset_bin.out.j.mod.origpts
+sha256 320b637a7915e8bfe74a8688c185cc8d41b9f737592400dccafb0fbb61f87612 688 golden/jw_offset_bin.out.j.mod.xfpts
+text 2 golden/jw_offset_bin.rc
+0
+
+text 149 golden/jw_offset_bin.stdout
+Using model header to determine center coordinates:   256.0   240.0
+Warping file opened: grid.warp
+Transforming model with transforms from grid.warp
+
+sha256 cd8cbfc472ef2ce3dc602680580eaa1f1d091a0f8c80134267eb1f035f9c5617 668 golden/jw_size.out.j.mod
+sha256 bc4a3cef89c4b03d3f2a57dbe5219dfee8e956dca1c6b5e18bc26979f2863bbb 688 golden/jw_size.out.j.mod.origpts
+sha256 320b637a7915e8bfe74a8688c185cc8d41b9f737592400dccafb0fbb61f87612 688 golden/jw_size.out.j.mod.xfpts
+text 2 golden/jw_size.rc
+0
+
+text 149 golden/jw_size.stdout
+Using model header to determine center coordinates:   256.0   240.0
+Warping file opened: grid.warp
+Transforming model with transforms from grid.warp
+
+text 2 golden/jw_xform_has_points.rc
+1
+
+text 94 golden/jw_xform_has_points.stdout
+ERROR: joinwarp2model - Applied transform file does appear to be derived from warp point file
+

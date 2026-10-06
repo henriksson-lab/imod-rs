@@ -1,0 +1,16 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+b1	b1.com:b1.com	-	-c b1.com
+b1_root_maxgpu	b1.com:b1.com	-	-c b1 -maxgpu 2
+b2	b2.com:b2.com	-	-c b2.com
+b3	b3.com:b3.com	-	-c b3.com
+b4	b4.com:b4.com	-	-c b4.com
+b5	b5.com:b5.com	-	-c b5.com
+b6	b6.com:b6.com	-	-c b6.com
+b7	b7.com:b7.com	-	-c b7.com
+b8	b8.com:b8.com	-	-c b8.com
+b9	b9.com:b9.com	-	-c b9.com
+b10	b10.com:b10.com	-	-c b10.com
+b1_maxgpu0	b1.com:b1.com	-	-c b1.com -maxgpu 0
+noargs	-	-	-
+help	-	-	-help
+nonexist	-	-	-c nonexist.com

@@ -1,0 +1,532 @@
+# imod-rs native golden manifest for fixtures/tomodataplots; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh tomodataplots; do not edit by hand.
+text 112 golden/t01.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t01.out
+Close graph window to exit
+
+text 2 golden/t01.rc
+0
+
+sha256 d1ea8213c8a0e046e2ac3afad217b23832c4e39bb04257a0d829def03bf5ced0 5922 golden/t01/genhstplt.calls
+text 112 golden/t02.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t02.out
+Close graph window to exit
+
+text 2 golden/t02.rc
+0
+
+sha256 9bb472d962a9a32b833b6fbf3a56550d70578231a40b26b4cdafe51a8bccd7bc 5616 golden/t02/genhstplt.calls
+text 112 golden/t03.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t03.out
+Close graph window to exit
+
+text 2 golden/t03.rc
+0
+
+sha256 8ede523c4f31ae01c2fade06275be23b34ba1386b5c639aa986591033726b1db 8092 golden/t03/genhstplt.calls
+text 112 golden/t04.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t04.out
+Close graph window to exit
+
+text 2 golden/t04.rc
+0
+
+sha256 51c8e0a88b0978155ae239638746e30c8307ce6d71e9c76c014205373d2a067b 3091 golden/t04/genhstplt.calls
+text 112 golden/t05.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t05.out
+Close graph window to exit
+
+text 2 golden/t05.rc
+0
+
+sha256 1eb39cd63ef3007c39ec605ca032d0e172a2bd0ebffea472c2971c566599b2a0 3219 golden/t05/genhstplt.calls
+text 112 golden/t06.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t06.out
+Close graph window to exit
+
+text 2 golden/t06.rc
+0
+
+sha256 b063a82d603c1338019c89beed6cbb5950f5ce89892cedf24d8298ddd0ea7b2a 4009 golden/t06/genhstplt.calls
+text 112 golden/t07.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t07.out
+Close graph window to exit
+
+text 2 golden/t07.rc
+0
+
+sha256 f1c7543ac64d4627663fd23befffcd90a556ef01bb92d5123d798873f211f1df 3222 golden/t07/genhstplt.calls
+text 112 golden/t08.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t08.out
+Close graph window to exit
+
+text 2 golden/t08.rc
+0
+
+sha256 4ad408010fea58cc3a3ca0e0357fd70beda3eb9b9240f63bb87d18be3ea95d12 3974 golden/t08/genhstplt.calls
+text 112 golden/t09.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t09.out
+Close graph window to exit
+
+text 2 golden/t09.rc
+0
+
+sha256 43f30d6634690f9855f71ebf35cd55fc30289801b8bbc4ff5b4bd049ef8ced30 4357 golden/t09/genhstplt.calls
+text 112 golden/t10.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t10.out
+Close graph window to exit
+
+text 2 golden/t10.rc
+0
+
+sha256 741b52dda0389570ed25fe9aabb323a86b51c1eed11469ae834e53509b3b3b38 4357 golden/t10/genhstplt.calls
+text 112 golden/t11.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t11.out
+Close graph window to exit
+
+text 2 golden/t11.rc
+0
+
+sha256 f4d62465dd080761e90f12d700757e25d71256491a54e6bd0585c82c0d3d0f7c 2952 golden/t11/genhstplt.calls
+text 112 golden/t12.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t12.out
+Close graph window to exit
+
+text 2 golden/t12.rc
+0
+
+sha256 80fa2d0f55b6fa743e4961a899e30bf26c0daa4ea047a1ce3826ab680aab3218 2843 golden/t12/genhstplt.calls
+text 112 golden/t13.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t13.out
+Close graph window to exit
+
+text 2 golden/t13.rc
+0
+
+sha256 bdc32ca4f55500c9b11e8119e5e166ff8135a1ec29f200f67bd15c4a036553c9 3230 golden/t13/genhstplt.calls
+text 112 golden/t14.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t14.out
+Close graph window to exit
+
+text 2 golden/t14.rc
+0
+
+sha256 cc68217e79f7d18a88803c8e60a3be82d2a75f5256950bc255aa2b825a8f175e 5098 golden/t14/genhstplt.calls
+text 112 golden/t15.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t15.out
+Close graph window to exit
+
+text 2 golden/t15.rc
+0
+
+sha256 c1078ce320c4b6857d728c4821df784c53a665c0001825e7d237602e8988ceb5 2975 golden/t15/genhstplt.calls
+text 112 golden/t16.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t16.out
+Close graph window to exit
+
+text 2 golden/t16.rc
+0
+
+sha256 79572c2027319ce2124dc5884412ade2bae2b98a83627af2fb54a77ab76643fc 2807 golden/t16/genhstplt.calls
+text 112 golden/t17.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t17.out
+Close graph window to exit
+
+text 2 golden/t17.rc
+0
+
+sha256 7a506db546f1b01afafd3d017571b3eca9ab326efc2ff81f0df7bb2a1ecc20b6 3405 golden/t17/genhstplt.calls
+text 112 golden/t18.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t18.out
+Close graph window to exit
+
+text 2 golden/t18.rc
+0
+
+sha256 cd088fc56d5484cdcddff459e1f113167f576cc31771b21dabec6c59359c36e1 2941 golden/t18/genhstplt.calls
+text 112 golden/t19.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t19.out
+Close graph window to exit
+
+text 2 golden/t19.rc
+0
+
+sha256 34cb88d9078f2a1f4e77048536f4c1db00bda57c49831b2129d399e6d2d00521 2977 golden/t19/genhstplt.calls
+text 96 golden/t20.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 79 golden/t20.out
+ERROR: tomodataplots - There are no phase shift solutions in this defocus file
+
+text 2 golden/t20.rc
+1
+
+text 112 golden/t21.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t21.out
+Close graph window to exit
+
+text 2 golden/t21.rc
+0
+
+sha256 3a06bdd1d34c1ece036708616bcb6f0aa128d0c551f4cff299d82e5aacbf1f5f 3039 golden/t21/genhstplt.calls
+text 112 golden/t22.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t22.out
+Close graph window to exit
+
+text 2 golden/t22.rc
+0
+
+sha256 e1b9a92bff061323c06fcc702f9e18e9a5ecc4f57f62df7d8b8a46898a308dcc 3039 golden/t22/genhstplt.calls
+text 112 golden/t23.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t23.out
+Close graph window to exit
+
+text 2 golden/t23.rc
+0
+
+sha256 ef390b93706a22e4393edcdfa60b5424ba744896b9f04d36de60f93d876de860 2749 golden/t23/genhstplt.calls
+text 96 golden/t24.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 71 golden/t24.out
+ERROR: tomodataplots - A type of data must be entered between 1 and 22
+
+text 2 golden/t24.rc
+1
+
+text 112 golden/t25.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t25.out
+Close graph window to exit
+
+text 2 golden/t25.rc
+0
+
+sha256 0eab875e2e4220df7f667b2aed6ad934b576701ae8329d6eb72d7861c121eb94 4849 golden/t25/genhstplt.calls
+text 112 golden/t26.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+genhstplt.calls
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 27 golden/t26.out
+Close graph window to exit
+
+text 2 golden/t26.rc
+0
+
+sha256 4a51f7330f2c6245fcf6cee3f8a44fb71cf94908fcfe9a11180ebbb6e85a4851 8092 golden/t26/genhstplt.calls
+text 96 golden/t27.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 57 golden/t27.out
+ERROR: tomodataplots - Input file missing does not exist
+
+text 2 golden/t27.rc
+1
+
+text 96 golden/t28.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 73 golden/t28.out
+ERROR: tomodataplots - Could not find global solution table in blend.log
+
+text 2 golden/t28.rc
+1
+
+text 96 golden/t29.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 84 golden/t29.out
+ERROR: tomodataplots - Cannot find starting and ending lines for stats in blend.log
+
+text 2 golden/t29.rc
+1
+
+text 96 golden/t30.files
+align.log
+astig.defocus
+blend.log
+clipstats.log
+frames.log
+phasecut.defocus
+ts.defocus
+ts.prexf
+
+text 148 golden/t30.out
+Close graph window to exit
+ERROR: onegenplot - 2 is an invalid column number
+ERROR: tomodataplots - onegenplot -StandardInput: exited with status 1
+
+text 2 golden/t30.rc
+1
+

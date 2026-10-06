@@ -1,0 +1,23 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+exclude	ts.st:ts.st ts.rawtlt:ts.rawtlt ts.st.mdoc:ts.st.mdoc	-	-views 2,4-5 ts.st
+dose_warning	tsw.st:tsw.st tsw.st.mdoc:tsw.st.mdoc	-	-views 3 tsw.st
+delete	plain.st:plain.st	-	-views 1,6 -del plain.st
+unsorted	ts.st:ts.st ts.rawtlt:ts.rawtlt ts.st.mdoc:ts.st.mdoc	-	-views 5,2 ts.st
+montage_pl	mp.st:mp.st mp.pl:mp.pl	-	-views 2 -mont mp.st
+montage_header	mt.st:mt.st	-	-views 2 mt.st
+duplicate	ts.st:ts.st ts.rawtlt:ts.rawtlt ts.st.mdoc:ts.st.mdoc	-	-views 2,2 ts.st
+out_of_range	ts.st:ts.st ts.rawtlt:ts.rawtlt ts.st.mdoc:ts.st.mdoc	-	-views 9 ts.st
+no_views	ts.st:ts.st ts.rawtlt:ts.rawtlt ts.st.mdoc:ts.st.mdoc	-	ts.st
+orig_without_restore	ts.st:ts.st ts.rawtlt:ts.rawtlt ts.st.mdoc:ts.st.mdoc	-	-orig -views 2 ts.st
+restore	s1_ts.rawtlt:ts.rawtlt s1_ts.st:ts.st s1_ts.st.mdoc:ts.st.mdoc s1_ts_allviews0.rawtlt:ts_allviews0.rawtlt s1_ts_allviews0.st:ts_allviews0.st s1_ts_allviews0.st.mdoc:ts_allviews0.st.mdoc s1_ts_cutviews0.info:ts_cutviews0.info s1_ts_cutviews0.rawtlt:ts_cutviews0.rawtlt s1_ts_cutviews0.st:ts_cutviews0.st s1_ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc	-	-restore ts.st
+restore_delete	s1_ts.rawtlt:ts.rawtlt s1_ts.st:ts.st s1_ts.st.mdoc:ts.st.mdoc s1_ts_allviews0.rawtlt:ts_allviews0.rawtlt s1_ts_allviews0.st:ts_allviews0.st s1_ts_allviews0.st.mdoc:ts_allviews0.st.mdoc s1_ts_cutviews0.info:ts_cutviews0.info s1_ts_cutviews0.rawtlt:ts_cutviews0.rawtlt s1_ts_cutviews0.st:ts_cutviews0.st s1_ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc	-	-restore -del ts.st
+second_iteration	s1_ts.rawtlt:ts.rawtlt s1_ts.st:ts.st s1_ts.st.mdoc:ts.st.mdoc s1_ts_allviews0.rawtlt:ts_allviews0.rawtlt s1_ts_allviews0.st:ts_allviews0.st s1_ts_allviews0.st.mdoc:ts_allviews0.st.mdoc s1_ts_cutviews0.info:ts_cutviews0.info s1_ts_cutviews0.rawtlt:ts_cutviews0.rawtlt s1_ts_cutviews0.st:ts_cutviews0.st s1_ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc	-	-views 1 ts.st
+restore_second	s5_ts.rawtlt:ts.rawtlt s5_ts.st:ts.st s5_ts.st.mdoc:ts.st.mdoc s5_ts_allviews0.rawtlt:ts_allviews0.rawtlt s5_ts_allviews0.st:ts_allviews0.st s5_ts_allviews0.st.mdoc:ts_allviews0.st.mdoc s5_ts_allviews1.rawtlt:ts_allviews1.rawtlt s5_ts_allviews1.st:ts_allviews1.st s5_ts_allviews1.st.mdoc:ts_allviews1.st.mdoc s5_ts_cutviews0.info:ts_cutviews0.info s5_ts_cutviews0.rawtlt:ts_cutviews0.rawtlt s5_ts_cutviews0.st:ts_cutviews0.st s5_ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc s5_ts_cutviews1.info:ts_cutviews1.info s5_ts_cutviews1.rawtlt:ts_cutviews1.rawtlt s5_ts_cutviews1.st:ts_cutviews1.st s5_ts_cutviews1.st.mdoc:ts_cutviews1.st.mdoc	-	-restore ts.st
+restore_montage	s2_mp.pl:mp.pl s2_mp.st:mp.st s2_mp_allviews0.pl:mp_allviews0.pl s2_mp_allviews0.st:mp_allviews0.st s2_mp_cutviews0.info:mp_cutviews0.info s2_mp_cutviews0.pl:mp_cutviews0.pl s2_mp_cutviews0.st:mp_cutviews0.st	-	-restore -mont mp.st
+restore_header_montage	s4_mt.st:mt.st s4_mt_allviews0.st:mt_allviews0.st s4_mt_cutviews0.info:mt_cutviews0.info s4_mt_cutviews0.st:mt_cutviews0.st	-	-restore mt.st
+restore_deleted	s3_plain.st:plain.st s3_plain_cutviews0.info:plain_cutviews0.info s3_plain_cutviews0.st:plain_cutviews0.st	-	-restore plain.st
+altstack	s1_ts.rawtlt:ts.rawtlt s1_ts.st:ts.st s1_ts.st.mdoc:ts.st.mdoc s1_ts_allviews0.rawtlt:ts_allviews0.rawtlt s1_ts_allviews0.st:ts_allviews0.st s1_ts_allviews0.st.mdoc:ts_allviews0.st.mdoc s1_ts_cutviews0.info:ts_cutviews0.info s1_ts_cutviews0.rawtlt:ts_cutviews0.rawtlt s1_ts_cutviews0.st:ts_cutviews0.st s1_ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc plain.st:alt.st	-	-altstack alt.st ts.st
+altstack_two	s5_ts.rawtlt:ts.rawtlt s5_ts.st:ts.st s5_ts.st.mdoc:ts.st.mdoc s5_ts_allviews0.rawtlt:ts_allviews0.rawtlt s5_ts_allviews0.st:ts_allviews0.st s5_ts_allviews0.st.mdoc:ts_allviews0.st.mdoc s5_ts_allviews1.rawtlt:ts_allviews1.rawtlt s5_ts_allviews1.st:ts_allviews1.st s5_ts_allviews1.st.mdoc:ts_allviews1.st.mdoc s5_ts_cutviews0.info:ts_cutviews0.info s5_ts_cutviews0.rawtlt:ts_cutviews0.rawtlt s5_ts_cutviews0.st:ts_cutviews0.st s5_ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc s5_ts_cutviews1.info:ts_cutviews1.info s5_ts_cutviews1.rawtlt:ts_cutviews1.rawtlt s5_ts_cutviews1.st:ts_cutviews1.st s5_ts_cutviews1.st.mdoc:ts_cutviews1.st.mdoc plain.st:alt.st	-	-altstack alt.st ts.st
+altstack_with_views	s1_ts.rawtlt:ts.rawtlt s1_ts.st:ts.st s1_ts.st.mdoc:ts.st.mdoc s1_ts_allviews0.rawtlt:ts_allviews0.rawtlt s1_ts_allviews0.st:ts_allviews0.st s1_ts_allviews0.st.mdoc:ts_allviews0.st.mdoc s1_ts_cutviews0.info:ts_cutviews0.info s1_ts_cutviews0.rawtlt:ts_cutviews0.rawtlt s1_ts_cutviews0.st:ts_cutviews0.st s1_ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc plain.st:alt.st	-	-altstack alt.st -views 2 ts.st
+pid	ts.st:ts.st ts.rawtlt:ts.rawtlt ts.st.mdoc:ts.st.mdoc	-	-PID -views 2 ts.st
+missing_stack	-	-	-views 2 none.st

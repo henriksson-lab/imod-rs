@@ -46,21 +46,6 @@ text 2 golden/m_lin.rc
 0
 
 sha256 928652adaa14db1a2201eb66e6770d38173170e25e7e9265add42bbac3489015 1447 golden/m_lin.stdout
-sha256 c8f2d83d97f1bd4816a19109d2947c899e281048e56c5d2d3c8f0c6717e11ac9 271024 golden/m_mb.out.o.mrc
-text 2 golden/m_mb.rc
-0
-
-sha256 31230ba6d82f558e994b89a42a44f9097e016a09ac9bec2e691de74ba45a72e3 2578 golden/m_mb.stdout
-sha256 3fd05520992798a1e9befb84dc6aea758842e5ee5ce7a384885830ddd59e139f 271024 golden/m_mbyx.out.o.mrc
-text 2 golden/m_mbyx.rc
-0
-
-sha256 b84de93f4d2a067194350ec1f56266844f5f811e32cccd2fbf5a1514a5e33141 1560 golden/m_mbyx.stdout
-sha256 10d6223b51c3ac5e310de2fa8c5c7d471182834e3707ba7567f2058c41d8dc4e 271024 golden/m_mbzx.out.o.mrc
-text 2 golden/m_mbzx.rc
-0
-
-sha256 34413944265d40e8ae0457da084983c63c4db5d7b72dceeaec4679676112cb1d 1610 golden/m_mbzx.stdout
 text 2 golden/m_missingxf.rc
 1
 

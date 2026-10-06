@@ -1,0 +1,161 @@
+# imod-rs native golden manifest for fixtures/imodextract; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh imodextract; do not edit by hand.
+sha256 8bbee3699e3ead1ad3c55f9dc11e0a7c19113d6b365c0bf6f457af0b3eff759b 1899 golden/backup.out.grp.mod
+sha256 0b2bd83c16a11ec4164b6b1e60dc791a4e272fc86d608a1f8bbb84d66a9a9e25 4937 golden/backup.out.grp.mod~
+text 2 golden/backup.rc
+0
+
+text 0 golden/backup.stdout
+
+text 2 golden/bad_dir.rc
+1
+
+text 52 golden/bad_dir.stdout
+ERROR: imodextract -  Opening new model nodir/o.mod
+
+text 2 golden/bad_list.rc
+1
+
+text 42 golden/bad_list.stdout
+ERROR: imodextract -  Parsing object list
+
+text 2 golden/bad_option.rc
+1
+
+text 40 golden/bad_option.stdout
+ERROR: imodextract -  Invalid option -x
+
+text 2 golden/dash_only.rc
+1
+
+text 39 golden/dash_only.stdout
+ERROR: imodextract -  Invalid option -
+
+sha256 825c541271b716df7927e9a4782dc4bfa7417260e72033c16f099211129b82ef 3875 golden/delete.out.o.mod
+text 2 golden/delete.rc
+0
+
+text 0 golden/delete.stdout
+
+text 2 golden/delete_all.rc
+1
+
+text 76 golden/delete_all.stdout
+ERROR: imodextract -  No objects are left after deleting the specified ones
+
+sha256 65ecd12583658d3005fa63a6c8ff985e6f4ceb14c2ba9ffbb9db3612abdeca7a 3251 golden/delete_groups.out.o.mod
+text 2 golden/delete_groups.rc
+0
+
+text 0 golden/delete_groups.stdout
+
+sha256 06d7726a738c85cae97d7a1043115d9f83a23fc8f73c2b9b4a7cba3c8ef14a6f 2129 golden/group.out.o.mod
+text 2 golden/group.rc
+0
+
+text 0 golden/group.stdout
+
+text 2 golden/group_bad.rc
+1
+
+text 52 golden/group_bad.stdout
+ERROR: imodextract -  Invalid object group number 5
+
+sha256 75d42ece2d708dbe9028d282a45d06f5f400237732e14d17f629f9229ecaa6c3 3432 golden/group_delete.out.o.mod
+text 2 golden/group_delete.rc
+0
+
+text 0 golden/group_delete.stdout
+
+sha256 99839592e29dac0eae3fe02349c4568a0a859e0f142e4cac414c4eddfcb19799 620 golden/group_empty.out.o.mod
+text 2 golden/group_empty.rc
+0
+
+text 0 golden/group_empty.stdout
+
+sha256 2d8c5c426f8b4be3c1227a1e651a27389cd15fb2f28ff16c222308bfaacf4c27 3380 golden/groups_1_4.out.o.mod
+text 2 golden/groups_1_4.rc
+0
+
+text 0 golden/groups_1_4.stdout
+
+text 2 golden/no_groups.rc
+1
+
+text 53 golden/no_groups.stdout
+ERROR: imodextract -  The model has no object groups
+
+text 2 golden/no_model.rc
+1
+
+text 48 golden/no_model.stdout
+ERROR: imodextract -  Reading model nothere.mod
+
+text 2 golden/noargs.rc
+3
+
+text 259 golden/noargs.stdout
+Usage: imodextract [-g|-d] listOfObjects inputModel outputModel
+       The list of objects can include ranges, e.g. 1-3,6,9,13-15
+  Options:
+  -g   The list has object group numbers instead of object numbers
+  -d   Delete the list of objects or object groups
+
+sha256 bb7451b0152066bbfee83436f30cf4000b5fc7b5353a5839b9827b8020749db9 1255 golden/one.out.o.mod
+text 2 golden/one.rc
+0
+
+text 0 golden/one.stdout
+
+sha256 208e56df432caca6ff9b2cb0f758ff3be56201948dc5f481e0d626aeeec4a332 876 golden/plain.out.o.mod
+text 2 golden/plain.rc
+0
+
+text 0 golden/plain.stdout
+
+sha256 e65ab6996fca41ab7b008a94488f9c3aa718b4062690bf4a7297e68ff9c365bb 3404 golden/range.out.o.mod
+text 2 golden/range.rc
+0
+
+text 0 golden/range.stdout
+
+sha256 9661d042998bd1532ed0b0c5fcd64880c195c6ecbba70bbec47d55f8644dfb63 3372 golden/reorder_dup.out.o.mod
+text 2 golden/reorder_dup.rc
+0
+
+text 0 golden/reorder_dup.stdout
+
+text 2 golden/slash_list.rc
+1
+
+text 42 golden/slash_list.stdout
+ERROR: imodextract -  Parsing object list
+
+text 2 golden/too_big.rc
+1
+
+text 46 golden/too_big.stdout
+ERROR: imodextract -  Invalid object number 8
+
+text 2 golden/two_args.rc
+3
+
+text 259 golden/two_args.stdout
+Usage: imodextract [-g|-d] listOfObjects inputModel outputModel
+       The list of objects can include ranges, e.g. 1-3,6,9,13-15
+  Options:
+  -g   The list has object group numbers instead of object numbers
+  -d   Delete the list of objects or object groups
+
+sha256 c4070ef61ab91cb3fa07a7d9f5bc3b51ddaac3fe5fb1a6579befdaa702531fa7 2262 golden/views.out.o.mod
+text 2 golden/views.rc
+0
+
+text 0 golden/views.stdout
+
+text 2 golden/zero.rc
+1
+
+text 46 golden/zero.stdout
+ERROR: imodextract -  Invalid object number 0
+

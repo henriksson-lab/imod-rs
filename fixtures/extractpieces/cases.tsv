@@ -1,0 +1,12 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+ep_header	pc.st o1.pl	-
+ep_mdoc	-mdoc bm.st o2.pl	-
+ep_other_short	-other short.mdoc -output o3.pl	-
+ep_other_full	-other bm.st.mdoc -output o4.pl	-
+ep_mdoc_missing	-mdoc pc.st o5.pl	-
+ep_both	-mdoc -other x o6	-
+ep_none	s.mrc o7.pl	-
+ep_fallback	bm.st o8.pl	-
+ep_other_nofile	-other nofile -output o9.pl	-
+ep_help	-help	-
+ep_noout	pc.st	-

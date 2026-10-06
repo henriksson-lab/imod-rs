@@ -1,0 +1,28 @@
+Inputs of the genhstplt golden suite (authored 2026-10-06).
+
+d.txt, t.txt, c.txt are the onegenplot suite's data files.  The others were
+written with Python's random module (seeded) as follows:
+
+  random.seed(5)
+  ty.txt: 36 rows "t x y z", t = 1 + i % 3, x = uniform(0,10) + t,
+          y = gauss(5,2) * t, z = uniform(1,4), formats %d %.3f %.3f %.3f
+  g.txt:  "# a header line", then 30 rows "%.2f,%.4f,%.4f,%d" of
+          x = 0.5 i, 2 + 0.3 x + gauss(0,0.4), 10 - 0.2 x + gauss(0,1),
+          randint(2,9)
+  h.txt:  200 rows gauss(50,10), %.4f
+  neg.txt: 25 rows "%.3f %.3f" of i - 12, (i-12)^2 * 0.01 - 0.5 +
+          uniform(-0.1,0.1)
+  random.seed(9)
+  sym.txt: for t = 1..21, k = 0..1: "t, t + 0.3 k, (7 t) mod 11 + k,
+          uniform(0,1)", %d %.3f %.3f %.3f
+
+<case>.in are the answers to genhstplt's prompts, one per line, each
+checked against the program's prompts: onegen is what onegenplot sends for
+"-hue 1,red d.txt -png out.png"; types, ps, hist, hist2/hist3 and sym go
+through the screen plots, terminal plots, histograms (bins, kernel, log),
+averages, box plots, error bars, ratios, selections, linear combinations,
+column/type conversion, colors, keys, contrast, Y/X limits, PNG and TIFF
+saves and the PostScript plots (gmeta.ps) with labels, lines, text and the
+symbols; nograph is onegen without the PNG save (for -nograph); wait ends in
+-8 (wait for the window to close).  hist2 types values out to a file, which
+native cannot do (BUGS.md, bshst); hist3 is hist2 typing them to stdout.

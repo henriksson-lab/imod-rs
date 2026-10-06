@@ -1,0 +1,54 @@
+# imod-rs native golden manifest for fixtures/maxjoinsize; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh maxjoinsize; do not edit by hand.
+text 2 golden/mj_args.rc
+1
+
+text 52 golden/mj_args.stdout
+
+ERROR: MAXJOINSIZE - THERE MUST BE THREE ARGUMENTS
+
+text 2 golden/mj_badnum.rc
+1
+
+text 63 golden/mj_badnum.stdout
+
+ERROR: MAXJOINSIZE - READING NUMBER OF FILES OR LINES TO SKIP
+
+text 2 golden/mj_nofile.rc
+1
+
+text 56 golden/mj_nofile.stdout
+
+ERROR: MAXJOINSIZE - OPENING OR READING TRANSFORM FILE
+
+text 2 golden/mj_usage.rc
+0
+
+text 287 golden/mj_usage.stdout
+ Usage: maxjoinsize number_of_sections lines_to_skip root_name
+  Computes size and offsets needed to contain all data from joined tomograms
+  It use transforms in root_name.tomoxg and gets image filenames from
+  root_name.info, skipping the given number of lines to get to the filenames
+
+text 2 golden/mj_warp.rc
+0
+
+text 82 golden/mj_warp.stdout
+Maximum size required:       50       30
+Offset needed to center:       2       2
+
+text 2 golden/mj_wrongnum.rc
+1
+
+text 104 golden/mj_wrongnum.stdout
+ERROR: iiOpen - Opening file 0 0 0 (No such file or directory)
+
+ERROR: iiuOpen - Could not open '0 0 0'
+
+text 2 golden/mj_xforms.rc
+0
+
+text 82 golden/mj_xforms.stdout
+Maximum size required:       52       46
+Offset needed to center:       3       5
+

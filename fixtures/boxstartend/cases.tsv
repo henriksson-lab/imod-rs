@@ -1,0 +1,8 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+bx_starts	-image v.mrc -model bx.mod -output o.mrc -box 10	-
+bx_ends_lists	-image v.mrc -model bx.mod -output o.mrc -box 12 -which 1 -slices 1,1 -array a.pl -true t.pl	-
+bx_series	-image v.mrc -model bx.mod -series sr -box 8 -which -1 -slices 1,0	-
+bx_objects	-image v.mrc -model bx.mod -output o.mrc -box 10 -objects 2 -xminmax 10,50	-
+bx_taper_bad	-image v.mrc -model bx.mod -output o.mrc -box 10 -slices 1,1 -TaperAtFill 2,0	-
+bx_volume_taper	-image v.mrc -model bx.mod -output o.mrc -volume 10,8,3 -TaperAtFill 2,1	-
+bx_interactive	-	v.mrc\n\nbx.mod\n0\n/\n/\n\n0\n10\n1,1\n0\no.mrc\n\n\n

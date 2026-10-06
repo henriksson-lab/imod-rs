@@ -45,7 +45,8 @@ esac
 # (The tests listed are those whose goldens live in fixtures/<suite>.  Some
 # suites also read another's *inputs* -- trimvol and findcontrast read
 # densmatch's, mrcinfo reads mrcx's, refinematch findwarp's, warpvol
-# matchvol's mb.mrc, findsection imodtrans's multi.mod -- so after changing a
+# matchvol's vf/vs.mrc, several pyscript suites boxstartend's v.mrc or
+# reducefiltvol's g.ali -- so after changing a
 # suite's inputs, regenerate those suites too.)
 case $suite in
   xftransforms) tests="xftoxg_cli xfproduct_cli" ;;

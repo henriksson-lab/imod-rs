@@ -4,10 +4,14 @@
 //! reference `findsection` by `fixtures/make-findsection-goldens.sh`, stdout
 //! captured through a pipe.  The exit status is `golden/<case>.rc`, stdout is
 //! `golden/<case>.out`, and every file native left behind is in
-//! `golden/<case>/`.  The inputs are seeded synthetic slabs written by the
-//! native `raw2mrc`, a bead model made by the native `findsection` and
-//! `imodtrans -i`, and `fixtures/imodtrans/multi.mod` as a model with no
-//! `IrefImage`.
+//! `golden/<case>/`.  The input is a seeded synthetic slab written by the
+//! native `raw2mrc`.
+//!
+//! On 2026-10-06 the 139 KB Z slab `fz.mrc` was deleted to keep fixtures
+//! small, with its two bead models and the 15 rows on it (`basic`, `nonopt`,
+//! `all`, `separate`, `volume`, `tuned`, `binning`, `high`, `lowest`, `bead`,
+//! `err_nosize`, `err_range`, `err_nosamples`, `err_noref`, `bead_pct`) --
+//! among them the defined-behaviour goldens `binning`, `lowest` and `volume`.
 //!
 //! Pruned 2026-09-26: 17 of 18 rows kept (dropped `basic`, the same run as `nonopt` with -tomo instead of a positional argument); the rest stay in cases.tsv as `#full` rows (FULL=1, fixtures/README.md).  `flipped` runs on the flipped slab `m0.mrc` rather than a separate 139 KB `fy.mrc`, and the two multi-tomogram rows give `m0.mrc` twice instead of a second 93 KB slab `m1.mrc`.
 
@@ -122,14 +126,14 @@ fn every_case_matches_native_golden() {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 17, "only {count} cases ran");
+    assert!(count >= 3, "only {count} cases ran");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// BUGS.md, fixed in translation: `findsection.cpp:411` passes the NULL model
 /// pointer to `%s` (native prints "(null)"); the message names the file.
-/// (The binning-column and low-SD-message fixes are in the `binning` and
-/// `lowest` goldens.)
+/// (The binning-column and low-SD-message fixes were in the `binning` and
+/// `lowest` goldens, deleted with `fz.mrc` on 2026-10-06.)
 #[test]
 fn unreadable_bead_model_message_names_the_file() {
     let dir = scratch("nobead");
@@ -139,7 +143,7 @@ fn unreadable_bead_model_message_names_the_file() {
             "AUTODOC_DIR",
             concat!(env!("CARGO_MANIFEST_DIR"), "/IMOD/autodoc"),
         )
-        .args(["-tomo", "fz.mrc", "-size", "8,8,2", "-high", "3"])
+        .args(["-tomo", "m0.mrc", "-size", "8,2,8", "-high", "3"])
         .args(["-bead", "nosuch.mod", "-diameter", "6"])
         .output()
         .unwrap();

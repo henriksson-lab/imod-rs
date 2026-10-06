@@ -1,0 +1,153 @@
+# imod-rs native golden manifest for fixtures/flattenwarp; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh flattenwarp; do not edit by hand.
+sha256 e24329eff5e11cf2957e4d9656b9b0bf9aa2fa4e8dc60da22e65e13f65c37175 223927 golden/fw_bnd.out.w.xf
+text 2 golden/fw_bnd.rc
+0
+
+text 312 golden/fw_bnd.stdout
+Minimum spacing between contours is 20
+Setting target spacings in X and Y to 4.4 and 7
+Mean Z height is 35.1
+5941 rows of data, 2074 variables (0 tied to neighbors)
+Solution for dx: condition # 1588.1057, 305 iterations
+Solution for dy: condition # 1585.0805, 304 iterations
+2074 warping transformations written
+
+sha256 8aaef92c95a326f4a879466c764056b0529e609a4f649a600dc470bb053c6eda 30132 golden/fw_bnd_lambda.out.mid.mod
+sha256 f54ff9c7f44ace2ae9a2bf69c04458440af6164452eb511a8b3611120d101f77 224002 golden/fw_bnd_lambda.out.w.xf
+text 2 golden/fw_bnd_lambda.rc
+0
+
+text 390 golden/fw_bnd_lambda.stdout
+Fitting thin plate spline, n = 264, log lambda = 0.50: Mean deviation = 0.026
+Minimum spacing between contours is 20
+Setting target spacings in X and Y to 4.4 and 7
+Mean Z height is 35.1
+5941 rows of data, 2074 variables (0 tied to neighbors)
+Solution for dx: condition # 1591.0920, 306 iterations
+Solution for dy: condition # 1585.0405, 304 iterations
+2074 warping transformations written
+
+sha256 43287f26a7ae4a7a06dd718a165fdeb3c901b25cb32c0c172dd854ab28fef5e2 59516 golden/fw_bnd_lambdas.out.mid.mod
+text 2 golden/fw_bnd_lambdas.rc
+0
+
+text 234 golden/fw_bnd_lambdas.stdout
+Fitting thin plate spline, n = 264, log lambda = 0.00: Mean deviation = 0.013
+Fitting thin plate spline, n = 264, log lambda = 1.00: Mean deviation = 0.051
+Fitting thin plate spline, n = 264, log lambda = 2.00: Mean deviation = 0.259
+
+sha256 f2f148790945f5f29dcd7953769401e0d2cc182e3be06b00257d8b9cb882c99c 15440 golden/fw_bnd_patch_mid.out.mid.mod
+sha256 4fa523667532b2ded6c1a7ec9e6dbcb02bced0d8395db13688cdace1de387f9b 55272 golden/fw_bnd_patch_mid.out.p.txt
+sha256 e24329eff5e11cf2957e4d9656b9b0bf9aa2fa4e8dc60da22e65e13f65c37175 223927 golden/fw_bnd_patch_mid.out.w.xf
+text 2 golden/fw_bnd_patch_mid.rc
+0
+
+text 312 golden/fw_bnd_patch_mid.stdout
+Minimum spacing between contours is 20
+Setting target spacings in X and Y to 4.4 and 7
+Mean Z height is 35.1
+5941 rows of data, 2074 variables (0 tied to neighbors)
+Solution for dx: condition # 1588.1057, 305 iterations
+Solution for dy: condition # 1585.0805, 304 iterations
+2074 warping transformations written
+
+text 2 golden/fw_flip_onecont.rc
+1
+
+sha256 7701fe5c43e78b754ccc645d9ef7a9fe79b84932f2531de77c04d22615b7f5ee 1812 golden/fw_flip_onecont.stdout
+text 2 golden/fw_lambdas_nomid.rc
+1
+
+text 108 golden/fw_lambdas_nomid.stdout
+ERROR: flattenwarp - You must enter an output model file for smoothed contours if entering multiple lambdas
+
+text 2 golden/fw_nooutput.rc
+0
+
+sha256 da0cc31bb3cece87d31726002f8662f343470116606213c39b47f129caa9a3d9 1602 golden/fw_nooutput.stdout
+sha256 89f4d55b843bd82c8c47c38f789994c294a7b91d22559108cb28c93c0dc86145 234412 golden/fw_one_bin.out.w.xf
+text 2 golden/fw_one_bin.rc
+0
+
+text 312 golden/fw_one_bin.stdout
+Minimum spacing between contours is 20
+Setting target spacings in X and Y to 4.4 and 7
+Mean Z height is 35.1
+6139 rows of data, 2142 variables (0 tied to neighbors)
+Solution for dx: condition # 1604.3734, 310 iterations
+Solution for dy: condition # 1606.9656, 311 iterations
+2142 warping transformations written
+
+sha256 c4a37f336550132350b254fb76cf0c91f95382887a1be01931920281e17e542f 117356 golden/fw_scat.out.m.mod
+sha256 030f57f15ba488147519c1903c20ecee921ebfe124ec38f4ac2b5e4458350021 19504 golden/fw_scat.out.p.txt
+sha256 b070efbd9a5ec86df50d117f4b1598672030503017289207db5f22cb7a2149a2 78582 golden/fw_scat.out.w.xf
+text 2 golden/fw_scat.rc
+0
+
+text 443 golden/fw_scat.stdout
+Setting grid spacing to 9.0 based on mean distance between points
+Fitting thin plate spline to obj 1, log lambda = 1.00: Mean deviation = 0.389
+Fitting thin plate spline to obj 2, log lambda = 1.00: Mean deviation = 0.367
+Mean Z height is 36.3
+2017 rows of data, 727 variables (0 tied to neighbors)
+Solution for dx: condition # 639.9336, 172 iterations
+Solution for dy: condition # 639.2019, 172 iterations
+727 warping transformations written
+
+sha256 67698610d49c198fdf1cdfdc07c1a59877a999f5b3763ff3ca9dfbd82814538e 228704 golden/fw_scat_lambdas_show.out.m.mod
+text 2 golden/fw_scat_lambdas_show.rc
+0
+
+text 378 golden/fw_scat_lambdas_show.stdout
+Setting grid spacing to 9.0 based on mean distance between points
+Fitting thin plate spline to obj 1, log lambda = 0.00: Mean deviation = 0.169
+Fitting thin plate spline to obj 2, log lambda = 0.00: Mean deviation = 0.147
+Fitting thin plate spline to obj 1, log lambda = 2.00: Mean deviation = 1.139
+Fitting thin plate spline to obj 2, log lambda = 2.00: Mean deviation = 1.148
+
+sha256 4f11c78808f90c6728c9e5c3bfcb89b068d2a58aa3d7c4c65856a77f9273834e 6743 golden/fw_scat_noflip.out.w.xf
+text 2 golden/fw_scat_noflip.rc
+0
+
+text 370 golden/fw_scat_noflip.stdout
+Fitting thin plate spline to obj 1, log lambda = 1.00: Mean deviation = 0.389
+Fitting thin plate spline to obj 2, log lambda = 1.00: Mean deviation = 0.367
+Mean Z height is 36.6
+139 rows of data, 62 variables (0 tied to neighbors)
+Solution for dx: condition # 86.4570, 47 iterations
+Solution for dy: condition # 86.6065, 47 iterations
+62 warping transformations written
+
+text 2 golden/fw_scat_nolambda.rc
+1
+
+text 83 golden/fw_scat_nolambda.stdout
+ERROR: flattenwarp - You must specify a lambda for smoothing with scattered points
+
+sha256 c4a37f336550132350b254fb76cf0c91f95382887a1be01931920281e17e542f 117356 golden/fw_scat_restore.out.m.mod
+sha256 b070efbd9a5ec86df50d117f4b1598672030503017289207db5f22cb7a2149a2 78582 golden/fw_scat_restore.out.w.xf
+text 2 golden/fw_scat_restore.rc
+0
+
+text 443 golden/fw_scat_restore.stdout
+Setting grid spacing to 9.0 based on mean distance between points
+Fitting thin plate spline to obj 1, log lambda = 1.00: Mean deviation = 0.389
+Fitting thin plate spline to obj 2, log lambda = 1.00: Mean deviation = 0.367
+Mean Z height is 36.3
+2017 rows of data, 727 variables (0 tied to neighbors)
+Solution for dx: condition # 639.9336, 172 iterations
+Solution for dy: condition # 639.2019, 172 iterations
+727 warping transformations written
+
+sha256 3fe8050c004c24aeb76440f0171670be9538353b6770479ac7b99e17bdadf31e 19460 golden/fw_spacing.out.w.xf
+text 2 golden/fw_spacing.rc
+0
+
+text 218 golden/fw_spacing.stdout
+Mean Z height is 35.1
+463 rows of data, 180 variables (0 tied to neighbors)
+Solution for dx: condition # 210.8471, 84 iterations
+Solution for dy: condition # 210.6466, 84 iterations
+180 warping transformations written
+

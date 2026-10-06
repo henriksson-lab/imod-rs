@@ -1,0 +1,32 @@
+# imod-rs native golden manifest for fixtures/startprocess; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh startprocess; do not edit by hand.
+text 0 golden/baddir.files
+
+text 58 golden/baddir.out
+ERROR: startprocess - Changing working directory to nodir
+
+text 2 golden/baddir.rc
+1
+
+text 0 golden/nocmd.files
+
+text 132 golden/nocmd.out
+ERROR: startprocess - Starting background process nonexistent_cmd_xyz  - [Errno 2] No such file or directory: 'nonexistent_cmd_xyz'
+
+text 2 golden/nocmd.rc
+1
+
+text 0 golden/nocommand.files
+
+text 98 golden/nocommand.out
+ERROR: startprocess - Starting background process -o  - [Errno 2] No such file or directory: '-o'
+
+text 2 golden/nocommand.rc
+1
+
+text 0 golden/usage.files
+
+sha256 8fc56dabc3586a72c9d4be9c92d56b6839ce1d40503bf3129f3eaeae3104a7ba 610 golden/usage.out
+text 2 golden/usage.rc
+0
+

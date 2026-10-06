@@ -1,0 +1,83 @@
+# imod-rs native golden manifest for fixtures/squeezevol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh squeezevol; do not edit by hand.
+text 12 golden/binvol.files
+o.mrc
+v.mrc
+
+sha256 56c5438b1bb0fc0255a376474da6a735e57701d306c76e5ac15ff40822074ff0 1235 golden/binvol.out
+text 2 golden/binvol.rc
+1
+
+text 0 golden/binvol/o.mrc
+
+text 12 golden/binxy.files
+o.mrc
+v.mrc
+
+sha256 b90878ea5750526379435e2456b9a9e6019f43f71c0fc4c6609735d0faa91c41 1235 golden/binxy.out
+text 2 golden/binxy.rc
+1
+
+text 0 golden/binxy/o.mrc
+
+text 6 golden/both.files
+v.mrc
+
+text 73 golden/both.out
+ERROR: squeezevol - You can enter either -factor or -expand but not both
+
+text 2 golden/both.rc
+1
+
+text 12 golden/expand.files
+o.mrc
+v.mrc
+
+sha256 8e1e2a79f940463462f6c29dcaeff31166b6087161179317cef59942d8fc46f0 1555 golden/expand.out
+text 2 golden/expand.rc
+0
+
+sha256 fb13cd1ab3e704f024f3acc2cc9b466bf73985cb29771c137030a99e646f3542 42496 golden/expand/o.mrc
+text 12 golden/linear.files
+o.mrc
+v.mrc
+
+sha256 a8a162d202081f2c5d6a429cafd2aea4ff805a4f9150bbce2028fb67f5c6e459 1235 golden/linear.out
+text 2 golden/linear.rc
+1
+
+text 0 golden/linear/o.mrc
+
+text 0 golden/nofile.files
+
+text 53 golden/nofile.out
+ERROR: squeezevol - input file nofile does not exist
+
+text 2 golden/nofile.rc
+1
+
+text 6 golden/onearg.files
+v.mrc
+
+sha256 0197619ca41fd44716a85d2815575a9d8b5f1ddfd56632d6aeb5808e84e5e82f 1145 golden/onearg.out
+text 2 golden/onearg.rc
+0
+
+text 12 golden/size.files
+o.mrc
+v.mrc
+
+sha256 8630fd58efd52667967db7101b9dcf032a2a90ad035afc2a8c49b5e67d13e174 1547 golden/size.out
+text 2 golden/size.rc
+0
+
+sha256 ad2a72e7b8f3916177c669b97b532a390af517be42278be9508c4edfd3649790 1792 golden/size/o.mrc
+text 12 golden/unequal.files
+o.mrc
+v.mrc
+
+sha256 a4107ade9872405fedf71cef949c188a68d6a54c5ab35b1ea1a8d5d863ccead9 1071 golden/unequal.out
+text 2 golden/unequal.rc
+0
+
+sha256 415a4c8b64750d308eb62a4cd6a5e52b9f3b470f98d844383dce4516f168f4d4 3072 golden/unequal/o.mrc

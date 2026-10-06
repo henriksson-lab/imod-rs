@@ -1,0 +1,82 @@
+# imod-rs native golden manifest for fixtures/copyheader; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh copyheader; do not edit by hand.
+text 19 golden/backup.files
+o.mrc
+o.mrc~
+v.mrc
+
+text 0 golden/backup.out
+
+text 2 golden/backup.rc
+0
+
+sha256 f31ba2e9748a49b9e22d5cab6e9337d29e3a37b5cc84fa20cd496ed08f750ea1 1024 golden/backup/o.mrc
+sha256 faa11ba9aec56cfbe8be800f840ffd0f325021059d10fc67f24f6bfa029a3b99 1534 golden/backup/o.mrc~
+text 18 golden/extended.files
+o.mrc
+seri_all.st
+
+text 0 golden/extended.out
+
+text 2 golden/extended.rc
+0
+
+sha256 0258cabf34b7da6542b84c4c9ada4c0f87e71135273dacee528e0e0a2893d0bb 1262 golden/extended/o.mrc
+text 21 golden/labels.files
+o.mrc
+plain_bidir.st
+
+text 0 golden/labels.out
+
+text 2 golden/labels.rc
+0
+
+sha256 863a1a6f9cdafd25fd69a264d12e8b8df086c1620e9875fae32ba5aa5268bfb8 1024 golden/labels/o.mrc
+text 0 golden/noargs.files
+
+text 106 golden/noargs.out
+Usage: copyheader inputFile outputFile
+    Copies standard and extended header of inputFile to outputFile
+
+text 2 golden/noargs.rc
+0
+
+text 0 golden/nonexist.files
+
+text 55 golden/nonexist.out
+ERROR: copyheader - Input file nonexist does not exist
+
+text 2 golden/nonexist.rc
+1
+
+text 6 golden/onearg.files
+v.mrc
+
+text 106 golden/onearg.out
+Usage: copyheader inputFile outputFile
+    Copies standard and extended header of inputFile to outputFile
+
+text 2 golden/onearg.rc
+0
+
+text 12 golden/plain.files
+o.mrc
+v.mrc
+
+text 0 golden/plain.out
+
+text 2 golden/plain.rc
+0
+
+sha256 f31ba2e9748a49b9e22d5cab6e9337d29e3a37b5cc84fa20cd496ed08f750ea1 1024 golden/plain/o.mrc
+text 13 golden/same.files
+v.mrc
+v.mrc~
+
+text 0 golden/same.out
+
+text 2 golden/same.rc
+0
+
+sha256 f31ba2e9748a49b9e22d5cab6e9337d29e3a37b5cc84fa20cd496ed08f750ea1 1024 golden/same/v.mrc
+sha256 165ebded8b731a9634624d4ebf433f9f7172fb379016e557b4e7c19cc8b3d6c9 62464 golden/same/v.mrc~

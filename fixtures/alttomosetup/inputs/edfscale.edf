@@ -1,0 +1,17 @@
+Setup.DatasetName=g
+Setup.Post.Trimvol.XMin=3
+Setup.Post.Trimvol.XMax=40
+Setup.Post.Trimvol.YMin=1
+Setup.Post.Trimvol.YMax=30
+Setup.Post.Trimvol.ScaleXMin=10
+Setup.Post.Trimvol.ScaleXMax=20
+Setup.Post.Trimvol.ZMin=2
+Setup.Post.Trimvol.ZMax=8
+Setup.Post.Trimvol.ScaleYMin=5
+Setup.Post.Trimvol.ScaleYMax=25
+Setup.Post.Trimvol.SectionScaleMin=3
+Setup.Post.Trimvol.SectionScaleMax=6
+Setup.Post.Trimvol.ConvertToBytes=true
+Setup.Post.Trimvol.FixedScaling=false
+Setup.TrimvolFlipped=true
+Setup.Post.Trimvol.SwapYZ=true

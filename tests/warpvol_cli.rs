@@ -8,17 +8,18 @@
 //! `.stdout` the standard output and `.out.<file>` each file the run created
 //! or changed.  Inputs: seeded float, short and byte volumes written by the
 //! native raw2mrc, 3x4 transform files and findwarp-format warp files
-//! (`fixtures/matchvol/make-inputs.sh warpvol`).  The byte volume `mb.mrc`
-//! with `-memory` limits forces several cubes, scratch files and the
-//! recomposition pass.  The three volumes are `fixtures/matchvol`'s, shared
-//! rather than stored twice.
+//! (`fixtures/matchvol/make-inputs.sh warpvol`).  The two volumes are
+//! `fixtures/matchvol`'s, shared rather than stored twice.  The 270 KB byte
+//! volume `mb.mrc`, whose `-memory` runs (`w_mb`, `w_mbdef`) forced several
+//! cubes, scratch files and the recomposition pass, was deleted with those
+//! cases on 2026-10-06 to keep fixtures small.
 //! Exit status, standard output and every output file must match byte for
 //! byte, except the `hh:mm:ss` time and the date of a `dd-Mmm-yy  hh:mm:ss`
 //! stamp in an MRC label, the time-derived digits of scratch file names
 //! (`<input>.mat<hhmmss>N`, `.wrp<hhmmss>N`) and the verbose timing lines,
 //! which differ between runs.
 //!
-//! Pruned 2026-09-26: 21 of 23 rows kept (dropped: -filled with -patch together, and the interactive size entry); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
+//! Pruned 2026-09-26: 21 of 23 rows kept (19 after the 2026-10-06 `mb.mrc` cut) (dropped: -filled with -patch together, and the interactive size entry); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
 
 mod common;
 
@@ -51,7 +52,7 @@ fn inputs() -> BTreeMap<String, Vec<u8>> {
         }
         map.insert(name, std::fs::read(&path).unwrap());
     }
-    for name in ["vf.mrc", "vs.mrc", "mb.mrc"] {
+    for name in ["vf.mrc", "vs.mrc"] {
         let shared = fixture_dir().join("../matchvol").join(name);
         map.insert(name.to_owned(), std::fs::read(shared).unwrap());
     }
@@ -179,7 +180,7 @@ fn every_case_matches_native_golden() {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 20, "only {count} cases read");
+    assert!(count >= 19, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 

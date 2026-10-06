@@ -1,0 +1,96 @@
+# imod-rs native golden manifest for fixtures/nad_eed_3d; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh nad_eed_3d; do not edit by hand.
+text 2 golden/ne_badmode.rc
+1
+
+text 112 golden/ne_badmode.stdout
+
+Program nad_eed_3d
+        started at: Mon Oct  5 11:20:41 2026
+ERROR: nad_eed_3d - Output mode 9 not allowed
+
+
+text 2 golden/ne_badnum.rc
+1
+
+text 136 golden/ne_badnum.stdout
+
+Program nad_eed_3d
+        started at: Mon Oct  5 11:20:41 2026
+ERROR: nad_eed_3d - Option -k must be followed by a number, not by abc
+
+text 2 golden/ne_badopt.rc
+1
+
+text 103 golden/ne_badopt.stdout
+
+Program nad_eed_3d
+        started at: Mon Oct  5 11:20:41 2026
+ERROR: nad_eed_3d - Invalid option -x
+
+sha256 ddcf684f28a06d016c4be5a2e4a170a0472511f4852d7794c4e6543f6273df58 16384 golden/ne_fast.out.o.mrc
+text 2 golden/ne_fast.rc
+0
+
+sha256 e59e92a8e484724f9adb7bf7e2d43e10ed83cc2444a986e84bbaca345168cb23 623 golden/ne_fast.stdout
+sha256 47d2c82400191748e74c9165df3e40f3dde1a19a93f5bb10b4046f0ba69fa6d3 16384 golden/ne_float.out.o.mrc
+text 2 golden/ne_float.rc
+0
+
+sha256 75d5fbbf5621fecab200b12e25f6123e1f90a7791b6ba6ce0c1f07975827e016 776 golden/ne_float.stdout
+sha256 33668d3cbd61daa42b8f7c44bc5b4bcd8b201993a78a5985ab377973e20a4287 16384 golden/ne_iter_ext.out.o-001.ext
+sha256 11c68f90d63a0d664dec4ca73114ba95c25bfb29a4653d599b08b6231751afc7 16384 golden/ne_iter_ext.out.o-003.ext
+text 2 golden/ne_iter_ext.rc
+0
+
+sha256 5c68e50cd4c79c5828e0f57a3f6e6ff1d3036a76920ab552c899165391f29dec 821 golden/ne_iter_ext.stdout
+sha256 33668d3cbd61daa42b8f7c44bc5b4bcd8b201993a78a5985ab377973e20a4287 16384 golden/ne_iter_noext.out.o-001
+sha256 7ee9b775769efd3a418f9e5b1f53b7e863a278584490744c44ceb7f7c533f0de 16384 golden/ne_iter_noext.out.o-002
+text 2 golden/ne_iter_noext.rc
+0
+
+sha256 d298b3e0febc30d6356c51269adfb2a3c8dc10e2ba5a9a7fd778a1b33090b3b6 660 golden/ne_iter_noext.stdout
+sha256 3145b1c0988a7373e85de36f16ac709d03493cadafe1a76a9b135e273b5a2f7a 4864 golden/ne_mode_time.out.o.mrc
+text 2 golden/ne_mode_time.rc
+0
+
+sha256 796ec46fb26e88905545dd9b4be8262618674cfe02bddcab1895ffde34550837 623 golden/ne_mode_time.stdout
+text 2 golden/ne_nofile.rc
+1
+
+text 173 golden/ne_nofile.stdout
+
+Program nad_eed_3d
+        started at: Mon Oct  5 11:20:41 2026
+input file:          nofile
+output file:         o.mrc
+ERROR: nad_eed_3d - Could not open input file nofile
+
+sha256 e5e236652e6077ca3c25b4862ef3f35398f76eb850863e55bf054a49cae17ef9 4864 golden/ne_one_slice.out.o.mrc
+text 2 golden/ne_one_slice.rc
+0
+
+sha256 d5d4492382156bdbd9b6598c175e44a802fbef4f48ba012ed89c84a00dc62b2f 929 golden/ne_one_slice.stdout
+sha256 76254f9f954274aa7780e9ec54e24a66b53ab7361509959e4692e49be2f82a78 8704 golden/ne_short.out.o.mrc
+text 2 golden/ne_short.rc
+0
+
+sha256 0ee4cd904b0cdf2836a96e76cb50793d1ce22314ed998945a336153d7a23c2a7 623 golden/ne_short.stdout
+sha256 4ae450a92a73dbad71b2dbea3b0eed255f5c268754e0eb7a486bc88a2d277fc9 16384 golden/ne_sigma.out.o.mrc
+text 2 golden/ne_sigma.rc
+0
+
+sha256 c017e1f3500cded4be051ffc93855fd068ec44553e397e78a89a182b4b98b5d8 929 golden/ne_sigma.stdout
+text 2 golden/ne_trailing.rc
+1
+
+text 137 golden/ne_trailing.stdout
+
+Program nad_eed_3d
+        started at: Mon Oct  5 11:20:41 2026
+ERROR: nad_eed_3d - Command line should end with input and output files
+
+text 2 golden/ne_usage.rc
+1
+
+sha256 19a8f6fb5e3c08f865e6de7aa5093695df30af7cd6590d5f23195d5b9d51f96a 587 golden/ne_usage.stdout

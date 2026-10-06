@@ -1,0 +1,7 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+noargs	-	-	-
+badarg	-	-	x
+status	-	-	-s 1
+nopid	-	-	999999
+tree_nopid	-	-	-t 999999
+verbose_two	-	-	-v 999999 999998

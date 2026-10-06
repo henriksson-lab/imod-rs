@@ -1,0 +1,15 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+archive	../../boxstartend/v.mrc:st.mrc st_orig.mrc:st_orig.mrc	-	st.mrc
+archive_delete	../../boxstartend/v.mrc:st.mrc st_orig.mrc:st_orig.mrc	-	-d st.mrc
+archive_backup	../../boxstartend/v.mrc:st.mrc st_orig.mrc:st_orig.mrc st_xray.mrc.gz:st_xray.mrc.gz	-	st.mrc
+archive_xray_exists	../../boxstartend/v.mrc:st.mrc st_orig.mrc:st_orig.mrc ../../boxstartend/v.mrc:st_xray.mrc	-	st.mrc
+no_orig	../../boxstartend/v.mrc:st.mrc	-	st.mrc
+restore	../../boxstartend/v.mrc:st.mrc st_xray.mrc.gz:st_xray.mrc.gz	-	-r st.mrc
+restore_one_level	../../boxstartend/v.mrc:st.mrc st_xray.mrc.gz:st_xray.mrc.gz	-	-r -n 1 st.mrc
+restore_backup	../../boxstartend/v.mrc:st.mrc st_xray.mrc.gz:st_xray.mrc.gz ../../boxstartend/v.mrc:st_xray.mrc.gz.old	-	-r st.mrc
+restore_no_gz	../../boxstartend/v.mrc:st.mrc	-	-r st.mrc
+restore_too_many_levels	../../boxstartend/v.mrc:st.mrc st_xray.mrc.gz:st_xray.mrc.gz	-	-r -n 2 st.mrc
+help	-	-	-h
+noargs	-	-	-
+nonexist	-	-	nonexist.mrc
+restore_bad_gz	../../boxstartend/v.mrc:st.mrc st_orig.mrc:st_xray.mrc.gz	-	-r st.mrc

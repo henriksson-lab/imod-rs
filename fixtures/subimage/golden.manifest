@@ -1,0 +1,61 @@
+# imod-rs native golden manifest for fixtures/subimage; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh subimage; do not edit by hand.
+text 2 golden/si_ambiguous.rc
+1
+
+text 138 golden/si_ambiguous.stdout
+ERROR: SUBIMAGE - An option specified by "a" is ambiguous between option asections -  ASectionList  and option afile -  AFileSubtractFrom
+
+sha256 f2afe665b06180ff37872230d5a868bebeef0ac9bc847a0282840e830ca10651 13312 golden/si_basic.out.d.mrc
+text 2 golden/si_basic.rc
+0
+
+sha256 250fac9af35aa3a9650a158c0078abc16301503f33938a591eb474c9467b3b93 2316 golden/si_basic.stdout
+text 2 golden/si_default_b.rc
+0
+
+sha256 7b434a917c78a1e3241f57cbabd6257552bcb5268ae1e5e6c7d7a5ac1c4e910e 2279 golden/si_default_b.stdout
+sha256 f2afe665b06180ff37872230d5a868bebeef0ac9bc847a0282840e830ca10651 13312 golden/si_interactive_all.out.d.mrc
+text 2 golden/si_interactive_all.rc
+0
+
+sha256 c16651eb3c18221680e0d56848865068c30bfb919c71f7b72fd1e5ab15fb277f 2694 golden/si_interactive_all.stdout
+text 2 golden/si_limits.rc
+1
+
+sha256 381aec7e9f67d13a1efa4e5d1a24eb7e5748263d99a6b477a6bb3e55e15c93ad 2389 golden/si_limits.stdout
+sha256 bf5d184acb51e69bf6f1c8b46d6c7800f988895b26fff289d141014f09fb3f35 7168 golden/si_mode12.out.d.mrc
+text 2 golden/si_mode12.rc
+0
+
+sha256 250fac9af35aa3a9650a158c0078abc16301503f33938a591eb474c9467b3b93 2316 golden/si_mode12.stdout
+sha256 f2afe665b06180ff37872230d5a868bebeef0ac9bc847a0282840e830ca10651 13312 golden/si_positional.out.d.mrc
+text 2 golden/si_positional.rc
+0
+
+sha256 250fac9af35aa3a9650a158c0078abc16301503f33938a591eb474c9467b3b93 2316 golden/si_positional.stdout
+text 2 golden/si_size.rc
+1
+
+sha256 05a489fb75067f3f64f4f1248402f16a5944f21cdc39e85a50732539ec750897 1928 golden/si_size.stdout
+text 2 golden/si_stats.rc
+0
+
+sha256 9f07f0890743b18d74cd459409bb02240d278bc5a61f0845f3fff3ef2d4eaedd 2279 golden/si_stats.stdout
+text 394 golden/si_subarea_text.out.t.txt
+ Section      Min            Max            Mean           S.D.
+    0       -73.2816        82.4201        -2.4971        27.5032
+    1       -75.8308        89.4603         0.3717        28.8702
+    2       -77.9054        81.1070        -0.1049        28.3722
+ all        -77.9054        89.4603        -0.7434        28.2611
+ range frac 1.226009       1.407849       0.011699       0.444748
+
+text 2 golden/si_subarea_text.rc
+0
+
+sha256 bda873bcc70680698c07497fe7c2807491f9d7d0795490b7954d1cf2b015cd5b 2316 golden/si_subarea_text.stdout
+sha256 13635f6a6b2e8a9724bdb9c7510b18463dfa7147af73a895dc65dfc635cc179a 7168 golden/si_zero_thresh.out.d.mrc
+text 2 golden/si_zero_thresh.rc
+0
+
+sha256 f25477b72dd1ec74ce54a6973abb7027f79f0661185840b0b4eafc95c8a122c5 2316 golden/si_zero_thresh.stdout

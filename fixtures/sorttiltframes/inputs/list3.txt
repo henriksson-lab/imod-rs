@@ -1,0 +1,8 @@
+f_-15.00_a.tif
+f_0.00_a.tif
+f_-30.0_a.tif
+f_-7.50_a.tif
+f_-22.50_a.tif
+f_-7.52_b.tif
+nothing.tif
+f_1.0_2.0_c.tif

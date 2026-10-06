@@ -1,18 +1,12 @@
-//! Native-golden coverage for `makejoincom` (`IMOD/pysrc/makejoincom`, translated in
+//! Tests for `makejoincom` (`IMOD/pysrc/makejoincom`, translated in
 //! `src/imod/pysrc/makejoincom.rs`).
 //!
-//! Every row of `fixtures/makejoincom/cases.tsv` was run through the native Python
-//! script by `fixtures/make-makejoincom-goldens.sh` (`make-pyscript-goldens.py`); see
-//! `tests/pysetup_common` for what is compared.
+//! The native-golden suite (20 cases on `t1/t2/t3.rec`) was deleted on
+//! 2026-10-06 to keep fixtures small: the same 370 KB of tomograms were also
+//! stored for `finishjoin`, which keeps them.  The defined-behaviour test
+//! below reads `fixtures/finishjoin/inputs`.
 
 mod common;
-mod pysetup_common;
-
-#[test]
-fn makejoincom_matches_native_goldens() {
-    let failures = pysetup_common::run_cases("makejoincom");
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
-}
 
 /// Fixed in translation (BUGS.md, `makejoincom`): tomograms entered with
 /// `-input` are read (native raises a TypeError on the first one).  Defined
@@ -21,7 +15,7 @@ fn makejoincom_matches_native_goldens() {
 #[test]
 fn input_option_gives_the_non_option_result() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let inputs = root.join("fixtures/makejoincom/inputs");
+    let inputs = root.join("fixtures/finishjoin/inputs");
     let work = std::env::temp_dir().join(format!("imod-rs-makejoincom-{}", std::process::id()));
     let run = |args: &str| {
         let _ = std::fs::remove_dir_all(&work);

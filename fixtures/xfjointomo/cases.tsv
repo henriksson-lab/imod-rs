@@ -1,0 +1,11 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+xj_sizes	-input j1.mod -foutput f.xf -goutput g.xf -sizes 10,12,8	-
+xj_zvalues_gap	-input j1.mod -foutput f.xf -goutput g.xf -zvalues 10,22 -gap 0,2,0.5	-
+xj_slice	-input j1.mod -foutput f.xf -slice -join 256,200,30 -sizes 10,12,8	-
+xj_rottrans	-input j1.mod -foutput f.xf -goutput g.xf -sizes 10,12,8 -rottrans -binning 2 -offset 3,-4 -refsec 2	-
+xj_transonly	-input j1.mod -foutput f.xf -goutput g.xf -sizes 10,12,8 -transonly -points 4,3 -objects 1 -boundaries 2	-
+xj_magrot	-input j1.mod -foutput f.xf -goutput g.xf -sizes 10,12,8 -magrot	-
+xj_points_only	-input j1.mod -foutput f.xf -goutput g.xf -sizes 10,12,8 -objects 2	-
+xj_noboundaries	-input j1.mod -foutput f.xf -goutput g.xf	-
+xj_edit	-input j1.mod -foutput fprev.xf -goutput g.xf -sizes 10,12,8 -edit -boundaries 1 -rottrans	-
+xj_edit_mismatch	-input j1.mod -foutput fprev.xf -goutput g.xf -sizes 10,10 -edit	-

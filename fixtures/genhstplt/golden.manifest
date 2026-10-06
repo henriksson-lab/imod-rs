@@ -1,0 +1,72 @@
+# imod-rs native golden manifest for fixtures/genhstplt; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh genhstplt; do not edit by hand.
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/colsx.out.colsx.png
+sha256 df22dba63a4e4219143f1ac704dddddc4210823174738fd10cc9b907ae052727 9492 golden/colsx.out.genhstplt.calls
+text 2 golden/colsx.rc
+0
+
+sha256 875cae167916392f0d3126f58ac66e0718699784bd36fc14cdd50115a789829e 5647 golden/colsx.stdout
+sha256 ef48878b950ddae7807e01f2e686c4039223f1f219f0b5d2dd3caf2ed978cb6f 28098 golden/hist.out.genhstplt.calls
+sha256 ab3617f86ac6e878c03dd810deab87a39b3a9565a25605c901773ed92cd500d5 39702 golden/hist.out.gmeta.ps
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/hist.out.hist.png
+text 2 golden/hist.rc
+0
+
+sha256 dfb94ea2ecb17738c79609c0a10b6aae16103de040b13e6fc4b8f5540a2857f3 11563 golden/hist.stdout
+sha256 ecb0c38b123e92ac595f2950d7875e00100ec50bf7fa4ae2f038feca17331d2e 22242 golden/hist3.out.genhstplt.calls
+sha256 bc060a1d0f5206bccc890d9be2589a9e28ef03ff456686641cdbd8f3c3eb395b 40651 golden/hist3.out.gmeta.ps
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/hist3.out.hist2.png
+text 2 golden/hist3.rc
+0
+
+sha256 cf2935fa1402639f7b6cc8fd8e8ac9d5495f920a479380c4d9894c1ddae1acd0 9497 golden/hist3.stdout
+sha256 62696f1f71de370da7bb7668212e49dc663da37669acd4cc42e80b8a861f5ff4 9421 golden/neg.out.genhstplt.calls
+sha256 34cb7ea600278f152bdab161275851cfee849054a07ed65c4d866c877ad95628 5237 golden/neg.out.gmeta.ps
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/neg.out.neg.png
+text 2 golden/neg.rc
+0
+
+sha256 f5595a26397bc78e5cff73d535d23f5a0c981da4b63c1cd3405991483e79cf49 7583 golden/neg.stdout
+sha256 6d9c8c0c0bb6146e81aecb4de93ddcc165f824d81d2a8116a04f2c8d51049dff 2620 golden/nograph.out.genhstplt.calls
+text 2 golden/nograph.rc
+0
+
+sha256 8cf1be8b723c254fc67e76f93225edaea4cff9e0f25a40e9252e8e183e340be9 5670 golden/nograph.stdout
+sha256 b654063da2d3e5ba31afc2e9484e2bb980c351361fb68bc265e239fe61b35672 3660 golden/onegen.out.genhstplt.calls
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/onegen.out.out.png
+text 2 golden/onegen.rc
+0
+
+sha256 5e01eec35e21a6605f3a33831a514841bb0c7ceaf95943704703ae2df2bd7068 6348 golden/onegen.stdout
+sha256 e3422990e80237172b4b3b412897037bef61ff9a724f20110e1fbb06aa43272b 12255 golden/ps.out.genhstplt.calls
+sha256 06baa11a07b0fd1e58490afc33014e0d9e460c930b0090ce789c3c9a424ad14c 17843 golden/ps.out.gmeta.ps
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/ps.out.ps.png
+text 2 golden/ps.rc
+0
+
+sha256 1d84c715b0fc8262feeefefb05ca6dcb9c3d2ffecf3664049ed19a87b91acf93 10262 golden/ps.stdout
+sha256 b654063da2d3e5ba31afc2e9484e2bb980c351361fb68bc265e239fe61b35672 3660 golden/size.out.genhstplt.calls
+sha256 fddd8cca12f4fa4db16e8654c640c3672d0aaadc0f905ec3f3a0152d81a8e1c9 28 golden/size.out.out.png
+text 2 golden/size.rc
+0
+
+sha256 5e01eec35e21a6605f3a33831a514841bb0c7ceaf95943704703ae2df2bd7068 6348 golden/size.stdout
+sha256 0841f96617a9f54dbdd7264d85cf782baa1939aaf428dcb86e496b90585ee5c1 11519 golden/sym.out.genhstplt.calls
+sha256 aa319972318c4fcfaaed4f19d6f74eed0a39c23bd4013d0b22790138bb2416c0 8935 golden/sym.out.gmeta.ps
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/sym.out.sym.png
+text 2 golden/sym.rc
+0
+
+sha256 d3404a635cec7198cb76f903563ac9970cba6ac7300a470eb71331b020c24ef2 10980 golden/sym.stdout
+sha256 6aea065a8ef076d41a218e61a8a6ac74f6ef13c3444af0dd228b1b175de20e1d 57154 golden/types.out.genhstplt.calls
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/types.out.types.png
+sha256 a3abf8df643bf3c69e9a53199eb6d7ff352ffe03055d38b5d63b6d0662053f2a 34 golden/types.out.types.tif
+text 2 golden/types.rc
+0
+
+sha256 567084301aa158f58537af029e5ef8cf400186cd852aaa9aa6217a601e5ea008 29699 golden/types.stdout
+sha256 70959963db1fffd563d941155e48d848a0b45c7632bbf7a7d6c033e086f8a6d5 2599 golden/wait.out.genhstplt.calls
+text 2 golden/wait.rc
+0
+
+sha256 8cf1be8b723c254fc67e76f93225edaea4cff9e0f25a40e9252e8e183e340be9 5670 golden/wait.stdout

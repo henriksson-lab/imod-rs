@@ -1,0 +1,43 @@
+# imod-rs native golden manifest for fixtures/cryoposition; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh cryoposition; do not edit by hand.
+text 60 golden/no_root.files
+eraser.com
+g.rawtlt
+g.tlt
+g.xf
+newst.com
+tilt.com
+track.com
+
+sha256 ff3d6c2d4e6bfe7f3ee23ecef7bb392bb78f6f547fe51c68c0692e827ed0bba1 2025 golden/no_root.out
+text 2 golden/no_root.rc
+0
+
+text 60 golden/no_thickness.files
+eraser.com
+g.rawtlt
+g.tlt
+g.xf
+newst.com
+tilt.com
+track.com
+
+sha256 ff3d6c2d4e6bfe7f3ee23ecef7bb392bb78f6f547fe51c68c0692e827ed0bba1 2025 golden/no_thickness.out
+text 2 golden/no_thickness.rc
+0
+
+text 60 golden/wrong_root.files
+eraser.com
+g.rawtlt
+g.tlt
+g.xf
+newst.com
+tilt.com
+track.com
+
+text 56 golden/wrong_root.out
+ERROR: cryoposition - The raw stack x.st does not exist
+
+text 2 golden/wrong_root.rc
+1
+

@@ -4,6 +4,11 @@
 //! Every row of `fixtures/ctf3dsetup/cases.tsv` was run through the native Python
 //! script by `fixtures/make-ctf3dsetup-goldens.sh` (`make-pyscript-goldens.py`); see
 //! `tests/pysetup_common` for what is compared.
+//!
+//! Pruned 2026-10-06 (manifest size): `par3`, `raw`, `adjust`, `rawerase` and
+//! `filt_erase2` stay in cases.tsv as `#full` rows (their options are covered
+//! by `procs1`/`boundary`, `raw1`, `adjust_shift`, `rawerase_warn`/`_par` and
+//! `filt_erase1`; `-perproc` is reached only under FULL=1 now).
 
 mod common;
 mod pysetup_common;

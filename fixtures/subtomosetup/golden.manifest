@@ -1,0 +1,2004 @@
+# imod-rs native golden manifest for fixtures/subtomosetup; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh subtomosetup; do not edit by hand.
+text 738 golden/adjust_invert.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-005.com
+tilt-sub-006.com
+tilt-sub-007.com
+tilt-sub-008.com
+tilt-sub-009.com
+tilt-sub-010.com
+tilt-sub-011-sync.com
+tilt-sub-012.com
+tilt-sub-013.com
+tilt-sub-014-sync.com
+tilt-sub-015-sync.com
+tilt-sub-016.com
+tilt-sub-017.com
+tilt-sub-018.com
+tilt-sub-019.com
+tilt-sub-020.com
+tilt-sub-021.com
+tilt-sub-022.com
+tilt-sub-023.com
+tilt-sub-024.com
+tilt-sub-025-sync.com
+tilt-sub-026.com
+tilt-sub-027-sync.com
+tilt-sub-bound-001.info
+tilt-sub-bound-015.info
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 04d147f57a9b314031818e20113eec8f9b3666ce5452abaf782f23c7b4811960 634 golden/adjust_invert.out
+text 2 golden/adjust_invert.rc
+0
+
+sha256 0707b8db61575db11ed0478c8ee950b80fdb37a809fe7ad968855859a055b2c3 844 golden/adjust_invert/tilt-sub-001-sync.com
+sha256 880a8e633520f8a0bd9989f700cbe937200260340f27a1fed6feaac43cfd6b36 877 golden/adjust_invert/tilt-sub-002.com
+sha256 0c7eea04be80332d648b15fa5a9bab7669422ff071d03fb5661b2a1566162d58 877 golden/adjust_invert/tilt-sub-003.com
+sha256 47e656b738f13a58ed9729fb96a6d3f90ef07e4438301256087bffe2137ad7ab 877 golden/adjust_invert/tilt-sub-004.com
+sha256 11fdfd7271e91fd1f58b2ab6c7ce40a46488d06de3cbfd26e1a28177c3a83985 877 golden/adjust_invert/tilt-sub-005.com
+sha256 bc31715c84731dd8f795c99bf9c353b528361dff341a50e27b76be1a6a991a9c 877 golden/adjust_invert/tilt-sub-006.com
+sha256 06477007feeb334dcc1f720d7fd7f75bf669b69cc8af6743a2808d2bdc108532 877 golden/adjust_invert/tilt-sub-007.com
+sha256 1fec333a8c47825b251874021d2c15b135f2c5071c2864bb128bde915f81efd1 877 golden/adjust_invert/tilt-sub-008.com
+sha256 2d37fb0eed9d33eed3b819a60c8be3731ec930cbc3607aaabb0aa7097d5dd447 877 golden/adjust_invert/tilt-sub-009.com
+sha256 0fa1d8c0f9d6f9b6638fb807e9b0ee2d56d679c73dbcf6276c250bc977e46089 877 golden/adjust_invert/tilt-sub-010.com
+text 197 golden/adjust_invert/tilt-sub-011-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-001.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 2 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-001.info"
+
+sha256 b9689cdda938c10d47219e3b674cdd63883840f29680bee46b7ee746410d15ca 673 golden/adjust_invert/tilt-sub-012.com
+sha256 591a0622b31ebd5e4d1c73b66c7bf15dd47a28c5083bbae7d1dd74f2da42ec3c 674 golden/adjust_invert/tilt-sub-013.com
+text 29 golden/adjust_invert/tilt-sub-014-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+sha256 0d40b545284740e0419573fd2acbdc251b46d1c8eaa386c81fb4fc18cf6acc03 844 golden/adjust_invert/tilt-sub-015-sync.com
+sha256 51393ca3a80edbabce63128e070a868e2e868b6f3a014dd29702a0f660f94f9c 877 golden/adjust_invert/tilt-sub-016.com
+sha256 9bd2186560c4f5ee886c00bfd69458f80f48fd8916036533daafb27c7f402196 877 golden/adjust_invert/tilt-sub-017.com
+sha256 819d641ad897cfdbea037c404c62c3190a1e3e22beded6dbf8fc6e96cbe7d116 877 golden/adjust_invert/tilt-sub-018.com
+sha256 0baf15ee99b52e3a50a379a1bceec5ec254b1214af8dd07a1dc3bf569321a0ef 877 golden/adjust_invert/tilt-sub-019.com
+sha256 da018bf154f847da0f828504b2b9db8a1ecd8f7e52de2505c07e1e1b17c32a3b 877 golden/adjust_invert/tilt-sub-020.com
+sha256 e389e17937c2565aae7a79de3ea257fa207f1a76cc883970d6aa250d2104c697 877 golden/adjust_invert/tilt-sub-021.com
+sha256 cdc0b34801b5d613104c91ce2e98ea8ba28a34e72998da907d8d12b4dd58578e 877 golden/adjust_invert/tilt-sub-022.com
+sha256 30346b93e174d103f41703e770e2b6ea387be00cf98a89ef95ac39c3f2d3a3df 877 golden/adjust_invert/tilt-sub-023.com
+sha256 2d357965309349a6a548677c4e2e34f4929d22478be6ed8b6b6424b3851eec75 877 golden/adjust_invert/tilt-sub-024.com
+text 198 golden/adjust_invert/tilt-sub-025-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-015.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 16 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-015.info"
+
+sha256 a16a31cdb2d03ff798641e5b4401d4becfa06ad7151cf12d030898e5c1cef834 672 golden/adjust_invert/tilt-sub-026.com
+text 29 golden/adjust_invert/tilt-sub-027-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+text 320 golden/adjust_invert/tilt-sub-bound-001.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 320 golden/adjust_invert/tilt-sub-bound-015.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 137 golden/adjust_invert/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+$b3dremove ctfcorrection.tmp.com
+
+text 738 golden/adjust_shift.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-005.com
+tilt-sub-006.com
+tilt-sub-007.com
+tilt-sub-008.com
+tilt-sub-009.com
+tilt-sub-010.com
+tilt-sub-011-sync.com
+tilt-sub-012.com
+tilt-sub-013.com
+tilt-sub-014-sync.com
+tilt-sub-015-sync.com
+tilt-sub-016.com
+tilt-sub-017.com
+tilt-sub-018.com
+tilt-sub-019.com
+tilt-sub-020.com
+tilt-sub-021.com
+tilt-sub-022.com
+tilt-sub-023.com
+tilt-sub-024.com
+tilt-sub-025-sync.com
+tilt-sub-026.com
+tilt-sub-027-sync.com
+tilt-sub-bound-001.info
+tilt-sub-bound-015.info
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 04d147f57a9b314031818e20113eec8f9b3666ce5452abaf782f23c7b4811960 634 golden/adjust_shift.out
+text 2 golden/adjust_shift.rc
+0
+
+sha256 619d8ea615132c05c8895861d42e365538d6640ca8604a05283407ddf8e2c914 845 golden/adjust_shift/tilt-sub-001-sync.com
+sha256 22856b654c0d9c03ebca817651dba694baccac73e2f2881a075d2f15f3388d4f 878 golden/adjust_shift/tilt-sub-002.com
+sha256 28d9ef5af16cb5a90530714cea0ddb82c4d63b3d14f831bc7616110a369f3068 878 golden/adjust_shift/tilt-sub-003.com
+sha256 5d5253c5f46f10a3325cf32848d9c6072375461f7a0dcc37ec7d8f48f9569813 878 golden/adjust_shift/tilt-sub-004.com
+sha256 34133159cb9a65dfb5d33a35a16130343b43dd84baabbcf14d417cc0384baa37 878 golden/adjust_shift/tilt-sub-005.com
+sha256 0cf5db7b3c471e37c9300c79bdf0e93d9411b0a584401e97f01c123250eb3d68 878 golden/adjust_shift/tilt-sub-006.com
+sha256 3f4be8b9303e9a755bba34a438ae63e66f17654c13be6a595e96f2c0ab71e1aa 878 golden/adjust_shift/tilt-sub-007.com
+sha256 99354a4af90565f2f1b18c6fb3017d1cddd46991dcd51fa8a445e0f596130971 878 golden/adjust_shift/tilt-sub-008.com
+sha256 cdcb11f6076ecb493a8974d1a085841311ee151c7ec9e3055ae5cc6a9e4b25a0 878 golden/adjust_shift/tilt-sub-009.com
+sha256 84527240463f72973bc3d1bcfdf040cfd4d1ee547fab46f26a9635235a60a15f 878 golden/adjust_shift/tilt-sub-010.com
+text 197 golden/adjust_shift/tilt-sub-011-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-001.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 2 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-001.info"
+
+sha256 b9689cdda938c10d47219e3b674cdd63883840f29680bee46b7ee746410d15ca 673 golden/adjust_shift/tilt-sub-012.com
+sha256 591a0622b31ebd5e4d1c73b66c7bf15dd47a28c5083bbae7d1dd74f2da42ec3c 674 golden/adjust_shift/tilt-sub-013.com
+text 29 golden/adjust_shift/tilt-sub-014-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+sha256 5280628943d261a83477750a7b0da11d58757e2a31b587de830815d3319fec40 845 golden/adjust_shift/tilt-sub-015-sync.com
+sha256 b90744ec66278d8bb7e3f9f102bdaaf0baef347654c3d9473e9c081ee830f0e3 878 golden/adjust_shift/tilt-sub-016.com
+sha256 e31eafcd849a259aa284bb9df213ad91263a62de478992bd8775d8dbf3b5de5a 878 golden/adjust_shift/tilt-sub-017.com
+sha256 528b9384228a43a481918aebd556727227fdd902d9eb7fc2b051cca1869c1e9c 878 golden/adjust_shift/tilt-sub-018.com
+sha256 562bc1789ad8f893907c167a21bddc5fa448575bdc2dd466fd3552e23bbb009f 878 golden/adjust_shift/tilt-sub-019.com
+sha256 72dc1bdf9ed5fa3dca83e2a68640b762e5119cbea65b5d9e4032bae51fcd3d39 878 golden/adjust_shift/tilt-sub-020.com
+sha256 d470896dad31972f37b4807822ba4677092ef60750017c547deb165db1800a50 878 golden/adjust_shift/tilt-sub-021.com
+sha256 ea6e2eaf106830bc1163273123e6ef84bd7393e44236002111c3d517519f3fed 878 golden/adjust_shift/tilt-sub-022.com
+sha256 bd22e4eb70cd72a43103cc6a41b3f1b69a7bcbe363b4ec7c12b5a08503ba219c 878 golden/adjust_shift/tilt-sub-023.com
+sha256 fc35b15e87951edaf797c8fd437b32d0cc14388e430e11440ef72a2a965e21c6 878 golden/adjust_shift/tilt-sub-024.com
+text 198 golden/adjust_shift/tilt-sub-025-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-015.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 16 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-015.info"
+
+sha256 a16a31cdb2d03ff798641e5b4401d4becfa06ad7151cf12d030898e5c1cef834 672 golden/adjust_shift/tilt-sub-026.com
+text 29 golden/adjust_shift/tilt-sub-027-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+text 320 golden/adjust_shift/tilt-sub-bound-001.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 320 golden/adjust_shift/tilt-sub-bound-015.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 137 golden/adjust_shift/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+$b3dremove ctfcorrection.tmp.com
+
+text 252 golden/basic.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 433b6dd243cb993b2bd1ced5734259b9a26083fe9785f1bea10c94b5a8d316e4 568 golden/basic.out
+text 2 golden/basic.rc
+0
+
+sha256 f3ee403f2ca896e4548d36f7eb4b9f626f5f229ce6b750a07307a22619debbd5 660 golden/basic/tilt-sub-001.com
+sha256 dd9ff631353343a257ac412636cd9099a4c46268397ef93a0c8df224209266c8 661 golden/basic/tilt-sub-002.com
+sha256 798c68078dc9c7e7983158c14706c28e7f244a9ac0391cb7f8ddbbacf6848bf7 662 golden/basic/tilt-sub-003.com
+text 104 golden/basic/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 274 golden/binali.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 ec59635ee7bd899e20249906dd4d1c80dc521e19fe30b48aae820bbd05c5be56 568 golden/binali.out
+text 2 golden/binali.rc
+0
+
+text 90 golden/binali/tilt-sub-001-sync.com
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	2
+
+sha256 6d315545cb1545f0cff696fb2c166e03e9bc460045bebd28757bfe6d5e92a2dc 660 golden/binali/tilt-sub-002.com
+sha256 29db2d95c1acbd9e574b0d94b5a658a04a58d85aee5f7a0df64c9139fbbfe871 661 golden/binali/tilt-sub-003.com
+sha256 db160165e015a3317437bdd5b069431643cc28638959f9383e87d3b34a75c705 662 golden/binali/tilt-sub-004.com
+text 104 golden/binali/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 181 golden/both_levels.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+
+text 82 golden/both_levels.out
+ERROR: subtomosetup - You cannot enter both a number of Z levels and their extent
+
+text 2 golden/both_levels.rc
+1
+
+text 755 golden/flip_zlevels.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-005.com
+tilt-sub-006.com
+tilt-sub-007.com
+tilt-sub-008.com
+tilt-sub-009.com
+tilt-sub-010.com
+tilt-sub-011-sync.com
+tilt-sub-012.com
+tilt-sub-013.com
+tilt-sub-014-sync.com
+tilt-sub-015-sync.com
+tilt-sub-016.com
+tilt-sub-017.com
+tilt-sub-018.com
+tilt-sub-019.com
+tilt-sub-020.com
+tilt-sub-021.com
+tilt-sub-022.com
+tilt-sub-023.com
+tilt-sub-024.com
+tilt-sub-025-sync.com
+tilt-sub-026.com
+tilt-sub-027.com
+tilt-sub-028-sync.com
+tilt-sub-bound-001.info
+tilt-sub-bound-015.info
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+text 186 golden/flip_zlevels.out
+CTF corrections will be computed at 2 levels that are 2 nm thick
+Created 29 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/flip_zlevels.rc
+0
+
+sha256 6000bb0de4a352326f8cc4601d8ef06a2a7be30918c4f41859e21ed1d989864c 844 golden/flip_zlevels/tilt-sub-001-sync.com
+sha256 b990f5973f6799296b023b9073f6b85c82d9f3fc05fec9196e96772c4fbd6873 877 golden/flip_zlevels/tilt-sub-002.com
+sha256 e6dbb936b4182cf8e895f1e2b7ede6aa70924fdcf02d4103e646299793a53276 877 golden/flip_zlevels/tilt-sub-003.com
+sha256 1443ccb44cb9bf6a76ce62e47671be1071adf309a04e73be50a908a138287082 877 golden/flip_zlevels/tilt-sub-004.com
+sha256 56c6b8c3db33722c59bc795085935386eb05ff19985ea6140b9b098e8e7e939b 877 golden/flip_zlevels/tilt-sub-005.com
+sha256 8ab1e56720c5f1f57a029e26b997f5ae0ac3dab8e811284a43358f6e41d4acb9 877 golden/flip_zlevels/tilt-sub-006.com
+sha256 f8ab7811da18e2c9cf5402aeabae05c95540784ec6ab5a7a2aa4a2996d757b70 877 golden/flip_zlevels/tilt-sub-007.com
+sha256 a7b91d1e4da87d151914d841c7141201397cadd0f695aee9720f64819c9a3d4d 877 golden/flip_zlevels/tilt-sub-008.com
+sha256 14d43f8a6f0e80469ae5d414422d52bff0c23e857508cfb65ebc15a1225c1f2e 877 golden/flip_zlevels/tilt-sub-009.com
+sha256 8dd9dc72c2442423ef9df264bff6b163dc21407e802cbf65fd95670d43745905 877 golden/flip_zlevels/tilt-sub-010.com
+text 197 golden/flip_zlevels/tilt-sub-011-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-001.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 2 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-001.info"
+
+sha256 993bf5a82c729b7759d978df862e5e189472e9f93820fa4ca134f82b9e7711f5 659 golden/flip_zlevels/tilt-sub-012.com
+sha256 5e8c0efbb15e3083c97c18655db8581df59678fb839aba11e521a664ec43a623 660 golden/flip_zlevels/tilt-sub-013.com
+text 29 golden/flip_zlevels/tilt-sub-014-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+sha256 7f4c0636be6806eec93fd667a641932169721e93c686e353a74333bf541fe5b8 844 golden/flip_zlevels/tilt-sub-015-sync.com
+sha256 5e3eb02890bba52e778f466971973d01a8332ea5bd902833de06a24d1669f49f 877 golden/flip_zlevels/tilt-sub-016.com
+sha256 8c6f50313fa0c878de85c3a1ebcc5988ea0a1414d2ccbb59bcc0df5594f8e37b 877 golden/flip_zlevels/tilt-sub-017.com
+sha256 38d7468384e0df89bed7255fa32ad2f1a176a5fc96b2eebcac2ed19bb4535225 877 golden/flip_zlevels/tilt-sub-018.com
+sha256 860465bfaef30b76c608e38a633d369ff178128d0ebeda9580a05682d59438c4 877 golden/flip_zlevels/tilt-sub-019.com
+sha256 911119918fa637cea901570f2cc689e6cda7668e35ef38beb1b9f9ffed5802ab 877 golden/flip_zlevels/tilt-sub-020.com
+sha256 e5f96044c921bdfc861a30dae265bf442ab729fcfa7efb83a019aaaaf665862a 877 golden/flip_zlevels/tilt-sub-021.com
+sha256 02984fb6930dbbf5a6f719cc91e8bb8ac42e45dd1135585e11d824d4702f49bf 877 golden/flip_zlevels/tilt-sub-022.com
+sha256 eca421e005a33766f9d0346946f5ff46fee42502ced1ef5ca93195e78969833a 877 golden/flip_zlevels/tilt-sub-023.com
+sha256 6130bf7ec3ffb0eb655c2415bf7d0470d4e9c7720fe71787f03715a5dd416c36 877 golden/flip_zlevels/tilt-sub-024.com
+text 198 golden/flip_zlevels/tilt-sub-025-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-015.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 16 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-015.info"
+
+sha256 481895b3764b50bbbca078283e5d4fceaca195dc5ef9e8d91e0c8433efc70638 658 golden/flip_zlevels/tilt-sub-026.com
+sha256 ca57ac5fa012555cd48fa36ab1b66cfb7463814d2ba1067e2abd7c5de60ef4e6 658 golden/flip_zlevels/tilt-sub-027.com
+text 29 golden/flip_zlevels/tilt-sub-028-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+text 320 golden/flip_zlevels/tilt-sub-bound-001.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 320 golden/flip_zlevels/tilt-sub-bound-015.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 137 golden/flip_zlevels/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+$b3dremove ctfcorrection.tmp.com
+
+text 252 golden/gpu1_runs.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 433b6dd243cb993b2bd1ced5734259b9a26083fe9785f1bea10c94b5a8d316e4 568 golden/gpu1_runs.out
+text 2 golden/gpu1_runs.rc
+0
+
+sha256 1080a662c19f368a58519f8128f7ce4740067281a701c10b3aaa8b8976ff428c 669 golden/gpu1_runs/tilt-sub-001.com
+sha256 ad086618ab206cd2f507fdd1fb13e53e83feae8ab3133cb230b993974659bb9d 670 golden/gpu1_runs/tilt-sub-002.com
+sha256 143c350f00487bfdb02142fdaa7b0f5982c5dca0daa3472fd74c9fc026bb9386 671 golden/gpu1_runs/tilt-sub-003.com
+text 104 golden/gpu1_runs/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 384 golden/gpu2.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002.com
+tilt-sub-003-sync.com
+tilt-sub-004-sync.com
+tilt-sub-005.com
+tilt-sub-006-sync.com
+tilt-sub-007-sync.com
+tilt-sub-008.com
+tilt-sub-009-sync.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 57df924eeb4a08012c86f63e2e624d86571ae63f0f6313b5e3362073cf5e14aa 634 golden/gpu2.out
+text 2 golden/gpu2.rc
+0
+
+sha256 1ff9201e20cd95e7c1e02a4bfa4d71e95c853b28fa1bc95a40c7d326a0b02432 796 golden/gpu2/tilt-sub-001-sync.com
+sha256 6401ac4fd5b176fc985273a06e52689df37a288cc9278a0a8abd338cd47dadaf 684 golden/gpu2/tilt-sub-002.com
+text 29 golden/gpu2/tilt-sub-003-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+sha256 30455a2ecf532b4eb191d637a8bf92b1770bb3c6f191fe38575f56aaa29c945a 796 golden/gpu2/tilt-sub-004-sync.com
+sha256 d80c4ed05b84a828ef0604784ad0793727e488a3fb557730a28b8c831a6939cf 683 golden/gpu2/tilt-sub-005.com
+text 29 golden/gpu2/tilt-sub-006-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+sha256 439e0865687bed24db136c3ccebd66a8d18f6598e9f70c4be0c47f727364ce12 796 golden/gpu2/tilt-sub-007-sync.com
+sha256 f33b4cd127b068e8c69244a4db4fe52e09a9bb741de379089c1d88fabb905b95 682 golden/gpu2/tilt-sub-008.com
+text 29 golden/gpu2/tilt-sub-009-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+text 104 golden/gpu2/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 252 golden/model.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 433b6dd243cb993b2bd1ced5734259b9a26083fe9785f1bea10c94b5a8d316e4 568 golden/model.out
+text 2 golden/model.rc
+0
+
+sha256 f3ee403f2ca896e4548d36f7eb4b9f626f5f229ce6b750a07307a22619debbd5 660 golden/model/tilt-sub-001.com
+sha256 dd9ff631353343a257ac412636cd9099a4c46268397ef93a0c8df224209266c8 661 golden/model/tilt-sub-002.com
+sha256 798c68078dc9c7e7983158c14706c28e7f244a9ac0391cb7f8ddbbacf6848bf7 662 golden/model/tilt-sub-003.com
+text 104 golden/model/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 269 golden/model_skip.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+text 330 golden/model_skip.out
+WARNING: subtomosetup - Point # 1 is near the edge of the aligned stack in Y and requires 1 blank slices
+WARNING: subtomosetup - Point # 3 is near the edge of the aligned stack in Y and requires 2 blank slices
+Created 5 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/model_skip.rc
+0
+
+sha256 2505fb8ae555411c5987f314701a638a7a1226f4e3983983a998daf8f05764fc 658 golden/model_skip/tilt-sub-001.com
+sha256 26358cbe380a01550d47c6c835b28ef42fb22560e80e48428d23c2183c27d88a 590 golden/model_skip/tilt-sub-002.com
+sha256 c4745422e3e62a6802f39603b8c98df5fe5cc71df95e79aa844813de31b46055 659 golden/model_skip/tilt-sub-003.com
+sha256 8133caee4128646aeb56e3c4018e3c1cae006443239878fcaaa73fccad9c3272 591 golden/model_skip/tilt-sub-004.com
+text 104 golden/model_skip/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 181 golden/nocenter.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+
+text 76 golden/nocenter.out
+ERROR: subtomosetup - The center position file, nothere.txt, does not exist
+
+text 2 golden/nocenter.rc
+1
+
+text 181 golden/noreorient.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+
+text 137 golden/noreorient.out
+ERROR: subtomosetup - You must enter -reorient to indicate reorientation type, because header angles are not consistent with known types
+
+text 2 golden/noreorient.rc
+1
+
+text 181 golden/noroot.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+
+text 50 golden/noroot.out
+ERROR: subtomosetup - A root name must be entered
+
+text 2 golden/noroot.rc
+1
+
+text 181 golden/nosize.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+
+text 77 golden/nosize.out
+ERROR: subtomosetup - Positive sizes must be entered for the reconstructions
+
+text 2 golden/nosize.rc
+1
+
+text 278 golden/objects.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+pts3.mod
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 0a842aeea4fd19eba1d8d4c7af2f41b8d16762f74d7b99cb071d43a5f613908a 540 golden/objects.out
+text 2 golden/objects.rc
+0
+
+sha256 f3ee403f2ca896e4548d36f7eb4b9f626f5f229ce6b750a07307a22619debbd5 660 golden/objects/tilt-sub-001.com
+sha256 dd9ff631353343a257ac412636cd9099a4c46268397ef93a0c8df224209266c8 661 golden/objects/tilt-sub-002.com
+sha256 798c68078dc9c7e7983158c14706c28e7f244a9ac0391cb7f8ddbbacf6848bf7 662 golden/objects/tilt-sub-003.com
+sha256 5fc441fa13e0a6ee6f3bf0e750058dc8deaaf2658d10953719d76e2d01f9f9f5 662 golden/objects/tilt-sub-004.com
+text 104 golden/objects/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 190 golden/objects_one.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+pts3.mod
+tilt.com
+track.com
+v.mrc
+
+text 218 golden/objects_one.out
+WARNING: subtomosetup - Point # 1 is skipped; it requires too many Y slices outside the reconstructable range for this aligned stack
+ERROR: subtomosetup - There are no points to do because all points are being skipped
+
+text 2 golden/objects_one.rc
+1
+
+text 252 golden/proc0_gpu.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 433b6dd243cb993b2bd1ced5734259b9a26083fe9785f1bea10c94b5a8d316e4 568 golden/proc0_gpu.out
+text 2 golden/proc0_gpu.rc
+0
+
+sha256 1080a662c19f368a58519f8128f7ce4740067281a701c10b3aaa8b8976ff428c 669 golden/proc0_gpu/tilt-sub-001.com
+sha256 ad086618ab206cd2f507fdd1fb13e53e83feae8ab3133cb230b993974659bb9d 670 golden/proc0_gpu/tilt-sub-002.com
+sha256 143c350f00487bfdb02142fdaa7b0f5982c5dca0daa3472fd74c9fc026bb9386 671 golden/proc0_gpu/tilt-sub-003.com
+text 104 golden/proc0_gpu/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 296 golden/proc3_erase_filter.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002-sync.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-005.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 623ee7ac383ca7f315759fcac6f00f090c4a8cf6e7c750f7eb010f540c9bb2b5 568 golden/proc3_erase_filter.out
+text 2 golden/proc3_erase_filter.rc
+0
+
+text 139 golden/proc3_erase_filter/tilt-sub-001-sync.com
+# Command file to run mtffilter
+$mtffilter -StandardInput
+InputFile	g.ali
+OutputFile	g_filt_tmp.ali
+PixelSize	1.0
+DoseWeightingFile	b.dose
+
+text 265 golden/proc3_erase_filter/tilt-sub-002-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	g_filt_tmp.ali
+OutputFile	g_erase_tmp.ali
+ModelFile	b_erase.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "g_erase_tmp.ali" "g_filt_tmp.ali"
+
+sha256 5b7e564fb6b23512e403db92a4e8c2daa86bb8a8331f85d925ed9dcff7c88cb7 669 golden/proc3_erase_filter/tilt-sub-003.com
+sha256 d2ec4fc8982637fb1947b2032cfb7fb5d289f0549d39e5df4f984e07eaa821ad 670 golden/proc3_erase_filter/tilt-sub-004.com
+sha256 ee9bdce65c67ce487d91d7d0c981a7681192798f6164fd1796f846b5df8807c7 671 golden/proc3_erase_filter/tilt-sub-005.com
+text 131 golden/proc3_erase_filter/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+$b3dremove  g_filt_tmp.ali
+
+text 181 golden/proc_runs.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+
+text 60 golden/proc_runs.out
+ERROR: subtomosetup - You cannot enter both -proc and -runs
+
+text 2 golden/proc_runs.rc
+1
+
+text 252 golden/raw.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 433b6dd243cb993b2bd1ced5734259b9a26083fe9785f1bea10c94b5a8d316e4 568 golden/raw.out
+text 2 golden/raw.rc
+0
+
+sha256 66e264e7358c9917ec33eb9de084f9d6949b614118400d664dd892267935b790 704 golden/raw/tilt-sub-001.com
+sha256 4d773880dd608672adfed98fcd1c6b68cc58562137d9f9d6074ee627194de9b4 705 golden/raw/tilt-sub-002.com
+sha256 71aed67dd0c90a96cc20490de4e2b304431d849eae00e1041895b67ce65a026c 706 golden/raw/tilt-sub-003.com
+text 104 golden/raw/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 815 golden/raw_flip_erase.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+b_erase_raw.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-005.com
+tilt-sub-006.com
+tilt-sub-007.com
+tilt-sub-008.com
+tilt-sub-009.com
+tilt-sub-010.com
+tilt-sub-011-sync.com
+tilt-sub-012-sync.com
+tilt-sub-013.com
+tilt-sub-014.com
+tilt-sub-015-sync.com
+tilt-sub-016-sync.com
+tilt-sub-017.com
+tilt-sub-018.com
+tilt-sub-019.com
+tilt-sub-020.com
+tilt-sub-021.com
+tilt-sub-022.com
+tilt-sub-023.com
+tilt-sub-024.com
+tilt-sub-025.com
+tilt-sub-026-sync.com
+tilt-sub-027-sync.com
+tilt-sub-028.com
+tilt-sub-029.com
+tilt-sub-030-sync.com
+tilt-sub-bound-001.info
+tilt-sub-bound-016.info
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+text 186 golden/raw_flip_erase.out
+CTF corrections will be computed at 2 levels that are 1 nm thick
+Created 31 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/raw_flip_erase.rc
+0
+
+sha256 e5acaf2cda594fa29e33210011cf3c281d04d5d5e4cf3a2b3029d7c42f86c92f 584 golden/raw_flip_erase/b_erase_raw.fid
+sha256 cbf2891a25d0e76324a823387fb250e7bdfa1ee4efcb2c4117fe81d9e61d0aa2 848 golden/raw_flip_erase/tilt-sub-001-sync.com
+sha256 f8877489f4b28215b623bf254847535e6b31fafaca3ddf20aa4c867e6eeafcc1 881 golden/raw_flip_erase/tilt-sub-002.com
+sha256 241dcbba23b40bc12f0f0c9bc8eff951cfbc48db78dfec8e454b349b13201a58 881 golden/raw_flip_erase/tilt-sub-003.com
+sha256 b4fa09eaf0342e714532cda1f2eea04ac28df6cec3aed2ec76695bf1d6ffe1cd 881 golden/raw_flip_erase/tilt-sub-004.com
+sha256 e8eedcb2c989b6e7051ffeba94b62ce7b4d42d18840817a41d6146a9b83ba6d2 881 golden/raw_flip_erase/tilt-sub-005.com
+sha256 e9f5c76de04366a09016be1643ac02df135eed8d3cdde4931860969246596754 881 golden/raw_flip_erase/tilt-sub-006.com
+sha256 2476aa065833ef6b4ed2f3137a12efde0a18f57196054aa339eb799d40df6ae2 881 golden/raw_flip_erase/tilt-sub-007.com
+sha256 cc4e332fe494e18a144f655774ec4bb05567d1dbc1c2bd0317a8e3ff96401bb1 881 golden/raw_flip_erase/tilt-sub-008.com
+sha256 ff16e2299d00fc90134a61c7c00b6b10b6dae175b1f30750044ce7ca8fa8db88 881 golden/raw_flip_erase/tilt-sub-009.com
+sha256 bf0f9873038f64129493fc1458845234893db4cdda79c78e1fcefda4000639a3 881 golden/raw_flip_erase/tilt-sub-010.com
+text 197 golden/raw_flip_erase/tilt-sub-011-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-001.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 2 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-001.info"
+
+text 299 golden/raw_flip_erase/tilt-sub-012-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	b_ctfcorr_ali.mrc
+OutputFile	b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase_raw.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "b_ctfcorr_ali_erase_tmp.mrc" "b_ctfcorr_ali.mrc"
+
+sha256 09efad662bc7efb95e0bbf5691baabc50aa5ae23c3e243fbfa24adf520f4332a 704 golden/raw_flip_erase/tilt-sub-013.com
+sha256 1d39d0ac9876a4232c256fa51602bc947d2c5c85ad0c2454923ee4d08cee6ad1 705 golden/raw_flip_erase/tilt-sub-014.com
+text 29 golden/raw_flip_erase/tilt-sub-015-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+sha256 9105550154690cec2b025afd8cb63f394540271bfc1d47cd041bb9b1e63e1ee9 848 golden/raw_flip_erase/tilt-sub-016-sync.com
+sha256 dc9ad2ba414f512e362a0895918f9be2a79d9ed1b0acb6d07cc6f205aa95ce2d 881 golden/raw_flip_erase/tilt-sub-017.com
+sha256 941bd5e2e1d48f32bb0337e39c27b831957510e563e64820faed9fb6ac65d1cb 881 golden/raw_flip_erase/tilt-sub-018.com
+sha256 7167826b692cb66685618ff4ba2bcdc3ca2a030a2aca5d37565c36061361f7db 881 golden/raw_flip_erase/tilt-sub-019.com
+sha256 41c72db41873b1239ad2f29136728e8134333681d3363509c08b6d4a20b70194 881 golden/raw_flip_erase/tilt-sub-020.com
+sha256 59df9f95b36deffeed82542182892bec3780c527bac4827c6f60ee0cf733c9b9 881 golden/raw_flip_erase/tilt-sub-021.com
+sha256 db2964bf6c0a33000dbb1c2b07d55318de1fbcd099a84298de34ba96e1e162f4 881 golden/raw_flip_erase/tilt-sub-022.com
+sha256 d819f198fb257111cd8aef43e9735b7f84fed5611ff80f4f0cae62a0ed851b82 881 golden/raw_flip_erase/tilt-sub-023.com
+sha256 ee58c78575739da08cc60aa3aa8fda05f74f89dd3e72bdb7b8330d287bd0d933 881 golden/raw_flip_erase/tilt-sub-024.com
+sha256 f6beb7f72ae17f43da07c1488bd500257a57188c32b8ae3423b0ac57a84e510d 881 golden/raw_flip_erase/tilt-sub-025.com
+text 198 golden/raw_flip_erase/tilt-sub-026-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-016.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 17 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-016.info"
+
+text 299 golden/raw_flip_erase/tilt-sub-027-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	b_ctfcorr_ali.mrc
+OutputFile	b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase_raw.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "b_ctfcorr_ali_erase_tmp.mrc" "b_ctfcorr_ali.mrc"
+
+sha256 6697e5250a52e87275aa06d5fdd442e32b1b0a85ac39025a33ce930ac44d4856 703 golden/raw_flip_erase/tilt-sub-028.com
+sha256 7bb27e7d11d49687cc3a34553959e174fc8625bae91dd2251b98aad9d25bd813 703 golden/raw_flip_erase/tilt-sub-029.com
+text 29 golden/raw_flip_erase/tilt-sub-030-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+text 320 golden/raw_flip_erase/tilt-sub-bound-001.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 320 golden/raw_flip_erase/tilt-sub-bound-016.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 165 golden/raw_flip_erase/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+$b3dremove  b_erase_raw.fid
+$b3dremove ctfcorrection.tmp.com
+
+text 842 golden/raw_reduce.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+b_erase_raw.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001-sync.com
+tilt-sub-002-sync.com
+tilt-sub-003-sync.com
+tilt-sub-004.com
+tilt-sub-005.com
+tilt-sub-006.com
+tilt-sub-007.com
+tilt-sub-008.com
+tilt-sub-009.com
+tilt-sub-010.com
+tilt-sub-011.com
+tilt-sub-012.com
+tilt-sub-013-sync.com
+tilt-sub-014-sync.com
+tilt-sub-015.com
+tilt-sub-016.com
+tilt-sub-017-sync.com
+tilt-sub-018-sync.com
+tilt-sub-019.com
+tilt-sub-020.com
+tilt-sub-021.com
+tilt-sub-022.com
+tilt-sub-023.com
+tilt-sub-024.com
+tilt-sub-025.com
+tilt-sub-026.com
+tilt-sub-027.com
+tilt-sub-028-sync.com
+tilt-sub-029-sync.com
+tilt-sub-030.com
+tilt-sub-031-sync.com
+tilt-sub-bound-003.info
+tilt-sub-bound-018.info
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+
+sha256 b832c95599088ab63506137a580d9eba0a7d651d5ec3e82152d52acfe45dbb54 634 golden/raw_reduce.out
+text 2 golden/raw_reduce.rc
+0
+
+sha256 e5acaf2cda594fa29e33210011cf3c281d04d5d5e4cf3a2b3029d7c42f86c92f 584 golden/raw_reduce/b_erase_raw.fid
+text 54 golden/raw_reduce/tilt-sub-001-sync.com
+$newstack -ftreduce 2 g.st b_ctfcorr_ali_red2_tmp.mrc
+
+text 172 golden/raw_reduce/tilt-sub-002-sync.com
+# Command file to run mtffilter
+$mtffilter -StandardInput
+InputFile	b_ctfcorr_ali_red2_tmp.mrc
+OutputFile	b_ctfcorr_ali_filt_tmp.mrc
+PixelSize	1.5
+DoseWeightingFile	b.dose
+
+sha256 557d779950a427c9f00b77673f2dbbbed06f8524bdba3bff8c899223c7f69ae3 870 golden/raw_reduce/tilt-sub-003-sync.com
+sha256 fbe5e3da3635a123d5e11d7e9dd8bbdf53528c2003b94287f5daf59ac2b87381 903 golden/raw_reduce/tilt-sub-004.com
+sha256 4ee03ebdaaef7d65165e2f2d23ce1c4f1b60bed16f368f729eccab7ef4b664f9 903 golden/raw_reduce/tilt-sub-005.com
+sha256 2f3bc6b0410a48f415f41b7050fdacd68d63d63fd36a9eed0399b6f0e580b570 903 golden/raw_reduce/tilt-sub-006.com
+sha256 9ad31b2a07106008d8cbfb3c36e98207e3eefaded9d9604c91ffe767448d7542 903 golden/raw_reduce/tilt-sub-007.com
+sha256 9a1ebfabdddef7916278c48518259caa92a8b476a154b2bfee9ae7b9652296f6 903 golden/raw_reduce/tilt-sub-008.com
+sha256 2d4a54cfe39488de6e68645561f0df6da8dde98df6b7167351347616bdd2ab83 903 golden/raw_reduce/tilt-sub-009.com
+sha256 315b6d2930a429a2e552c5215d37e783ae3c8dcdca24453ef86d66510bd1d15e 903 golden/raw_reduce/tilt-sub-010.com
+sha256 1160777055814a0a1b4f8818a907a2da1e4498857c54d0719eb61a4308495f51 903 golden/raw_reduce/tilt-sub-011.com
+sha256 fd52805fd3332f19ead4a3473e9e78fc4ae15a8455583a3f5edeb9d24df62117 903 golden/raw_reduce/tilt-sub-012.com
+text 197 golden/raw_reduce/tilt-sub-013-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-003.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 4 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-003.info"
+
+text 299 golden/raw_reduce/tilt-sub-014-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	b_ctfcorr_ali.mrc
+OutputFile	b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase_raw.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "b_ctfcorr_ali_erase_tmp.mrc" "b_ctfcorr_ali.mrc"
+
+sha256 dd5ce23780103f268960e9acead5e88d93c9f7dab2def85582590f725fc37272 718 golden/raw_reduce/tilt-sub-015.com
+sha256 a4b8700be09439afd10031306e7738e67621f134c6c5b6699c6af761df87b16c 719 golden/raw_reduce/tilt-sub-016.com
+text 29 golden/raw_reduce/tilt-sub-017-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+sha256 1b8461a8de7dd5936ee3123bf4f43d5742fe7e8c9e642efd5af0f2913e9203b3 870 golden/raw_reduce/tilt-sub-018-sync.com
+sha256 96f47b0befc16b82c74d48237549690c3f8839a4df5caf904e9c1fb8e0225f6a 903 golden/raw_reduce/tilt-sub-019.com
+sha256 4aeae9b67ebac12fa7f2c14b6d5bf531379303f1c0d8ead0811953ee86812bac 903 golden/raw_reduce/tilt-sub-020.com
+sha256 7359c56de50e0387cd72d0c7774a86320f50ea12a55a98f0ac87bca2921fc651 903 golden/raw_reduce/tilt-sub-021.com
+sha256 43e122c6eed84566756abcf1ec9c4ae5570115d069067ce835e9ef0a3fa2ded6 903 golden/raw_reduce/tilt-sub-022.com
+sha256 42a154d628a0c960541c086d82b9c7a45dbd9b0b486e95e266553e90e0dddd70 903 golden/raw_reduce/tilt-sub-023.com
+sha256 d2a8fc3dd722297b8cdb502911ef85e5cf7450113eba1393e529d0b0aa5d1242 903 golden/raw_reduce/tilt-sub-024.com
+sha256 2e010d1ba1715f441d4fd890ad7ec8c709dcfd6dfe3f28acacf4220c0b132eda 903 golden/raw_reduce/tilt-sub-025.com
+sha256 980e707e68a81f6d4f7306e848da632d12f202a745fe292fc4f39f15d0601c4a 903 golden/raw_reduce/tilt-sub-026.com
+sha256 fca857f6d670a431c919a3da9c3b5ae197a1c5236e00edebd040e8ef3dc96e5c 903 golden/raw_reduce/tilt-sub-027.com
+text 198 golden/raw_reduce/tilt-sub-028-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-018.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 19 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-018.info"
+
+text 299 golden/raw_reduce/tilt-sub-029-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	b_ctfcorr_ali.mrc
+OutputFile	b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase_raw.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "b_ctfcorr_ali_erase_tmp.mrc" "b_ctfcorr_ali.mrc"
+
+sha256 e4d5be8599ef827a37a479fd873b9d5279d47e2d9e27eec92c2b7263c5e17675 717 golden/raw_reduce/tilt-sub-030.com
+text 29 golden/raw_reduce/tilt-sub-031-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+text 320 golden/raw_reduce/tilt-sub-bound-003.info
+1 0 24 11 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 320 golden/raw_reduce/tilt-sub-bound-018.info
+1 0 24 11 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 219 golden/raw_reduce/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+$b3dremove  b_ctfcorr_ali_red2_tmp.mrc b_ctfcorr_ali_filt_tmp.mrc b_erase_raw.fid
+$b3dremove ctfcorrection.tmp.com
+
+text 602 golden/rotx_dirs.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+cc/tilt-sub-001-sync.com
+cc/tilt-sub-002.com
+cc/tilt-sub-003.com
+cc/tilt-sub-004.com
+cc/tilt-sub-005.com
+cc/tilt-sub-006.com
+cc/tilt-sub-007.com
+cc/tilt-sub-008.com
+cc/tilt-sub-009.com
+cc/tilt-sub-010.com
+cc/tilt-sub-011-sync.com
+cc/tilt-sub-012.com
+cc/tilt-sub-013.com
+cc/tilt-sub-014.com
+cc/tilt-sub-015.com
+cc/tilt-sub-016-sync.com
+cc/tilt-sub-017-sync.com
+cc/tilt-sub-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+out/g-vol1.pt
+pts.mod
+pts.txt
+tilt-sub-bound-001.info
+tilt.com
+track.com
+v.mrc
+
+text 399 golden/rotx_dirs.out
+Using specified reorientation even though header angles indicate  rotation around X
+WARNING: subtomosetup - The Z extent of 5 nm will result in only one Z level because the range of center positions is 3 nm
+CTF corrections will be computed at 1 levels that are 3 nm thick
+Created 18 command files for 4 subtomograms; run them with:
+    "subm cc/tilt-sub*.com"   or   "processchunks ... cc/tilt-sub"
+
+text 2 golden/rotx_dirs.rc
+0
+
+sha256 cedd3eaee03c6b51c95502a78f3e8e25fbc57be608274db5cc67f35181086362 842 golden/rotx_dirs/cc/tilt-sub-001-sync.com
+sha256 9843e15e3d84238701e7286a02cbc4ab3ee26552dc17a200c4fbe53ec07df00d 875 golden/rotx_dirs/cc/tilt-sub-002.com
+sha256 a8a02c2a2415aa3d7a529f47b0988f81d5264ff1941c24f34dbab990d981da98 875 golden/rotx_dirs/cc/tilt-sub-003.com
+sha256 ead89b7e791a487069710406354c79c795c9d7cef9c0147a532ca954a466abf2 875 golden/rotx_dirs/cc/tilt-sub-004.com
+sha256 2d45922ba6461ac3871bd8066caa2dcbc2756385d5f67c9e4f6d7584cfd6f7a7 875 golden/rotx_dirs/cc/tilt-sub-005.com
+sha256 81567813cc457a47acebf3dd777e3c03392cc5ea1987f3b71aed3db7fa72b4fe 875 golden/rotx_dirs/cc/tilt-sub-006.com
+sha256 c39cd75f96858ef91771238024e9885779897624a0f30ab79d041f61c3cf69d0 875 golden/rotx_dirs/cc/tilt-sub-007.com
+sha256 4520b5db293f3a04c36b0acb01b42e70b0636d7a8f5a935d27c888b710a55380 875 golden/rotx_dirs/cc/tilt-sub-008.com
+sha256 4b9106086e70c523fa3d68beb5ba7bdd83ae11d44f6b8e7995c63eaefa34ac71 875 golden/rotx_dirs/cc/tilt-sub-009.com
+sha256 4377f571e72a4de9cc760b16f6fe3f56cd7cad15fd85189bccbea49450c3a21a 875 golden/rotx_dirs/cc/tilt-sub-010.com
+text 201 golden/rotx_dirs/cc/tilt-sub-011-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "tilt-sub-bound-001.info"
+$collectmmm pixels= "tilt-sub" 9 "b_ctfcorr_ali.mrc" 2 "cc"
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "tilt-sub-bound-001.info"
+
+sha256 a974f53aec4dbbafab4f39e979058852f55f04c1d86220b60e3639c578f70769 671 golden/rotx_dirs/cc/tilt-sub-012.com
+sha256 951b37fe9946ebd942ed7035ccaa9a71a96dfc88fc459be5ca2755501ea23105 672 golden/rotx_dirs/cc/tilt-sub-013.com
+sha256 5c8ce85c47632a646302238d9b95ef11248344ea95002825dfaf2c2a92beabe9 671 golden/rotx_dirs/cc/tilt-sub-014.com
+sha256 19e2a84457a77b1fe458bcf26db4ff2f0e88daecb02705e4d7a0fa5db70c9947 673 golden/rotx_dirs/cc/tilt-sub-015.com
+text 29 golden/rotx_dirs/cc/tilt-sub-016-sync.com
+$b3dremove b_ctfcorr_ali.mrc
+
+text 365 golden/rotx_dirs/cc/tilt-sub-017-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$newstack -StandardInput
+OutputFile out/g-vol1.mrc
+InputFile out/g-1.mrc
+InputFile out/g-2.mrc
+InputFile out/g-3.mrc
+InputFile out/g-4.mrc
+$alterheader -volstack 12 "out/g-vol1.mrc"
+$point2model -scat -time -sphere 3 -image "out/g-vol1.mrc" "out/g-vol1.pt" "out/g-vol1.mod"
+$b3dremove "out/g-vol1.pt"
+$b3dremove -g "out/g-[0-9]*.mrc"
+
+text 146 golden/rotx_dirs/cc/tilt-sub-finish.com
+$b3dremove -g "cc/tilt-sub-[0-9][0-9][0-9]*.com*" "cc/tilt-sub-[0-9][0-9][0-9]*.log*" "cc/tilt-sub-finish*.com*"
+$b3dremove ctfcorrection.tmp.com
+
+text 72 golden/rotx_dirs/out/g-vol1.pt
+1 1 8.0 5.0 5.5 1
+1 2 8.0 5.0 5.5 2
+1 3 8.0 5.0 5.5 3
+1 4 8.0 5.0 5.5 4
+
+text 320 golden/rotx_dirs/tilt-sub-bound-001.info
+1 0 48 21 9
+b_ctfcorr_ali-001.cbound
+-1 0 0 -1
+b_ctfcorr_ali-002.cbound
+1 0 1 -1
+b_ctfcorr_ali-003.cbound
+2 0 2 -1
+b_ctfcorr_ali-004.cbound
+3 0 3 -1
+b_ctfcorr_ali-005.cbound
+4 0 4 -1
+b_ctfcorr_ali-006.cbound
+5 0 5 -1
+b_ctfcorr_ali-007.cbound
+6 0 6 -1
+b_ctfcorr_ali-008.cbound
+7 0 7 -1
+b_ctfcorr_ali-009.cbound
+8 0 -1 -1
+
+text 181 golden/stackvols3.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+
+text 64 golden/stackvols3.out
+ERROR: subtomosetup - The volume stack entry must be at least 5
+
+text 2 golden/stackvols3.rc
+1
+
+text 279 golden/v0_90.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+v0_90.mrc
+
+text 231 golden/v0_90.out
+Assuming reorientation by swapping Y and Z because of Y and Z dimensions, even though there is no flipyz title
+Created 5 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/v0_90.rc
+0
+
+sha256 2cd3b2ab4036c58a2a161b6345db1cf6aa5a3d7d8ef67ab3e939e259515cff72 646 golden/v0_90/tilt-sub-001.com
+sha256 e13ada599953592c62e5dd90e69be8c80bef69a617d0b35b7a069e0f080990d1 647 golden/v0_90/tilt-sub-002.com
+sha256 9222cd32899cccae3bff15a8058cb53388e02d9273204e2f3cfe579f1a81b940 646 golden/v0_90/tilt-sub-003.com
+sha256 1035698340a7406ca5cb3734a31cf2c6a1e756a93e2a8066c2c6548f33ea05d7 648 golden/v0_90/tilt-sub-004.com
+text 104 golden/v0_90/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 262 golden/v0_90_r0.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+v0_90.mrc
+
+sha256 433b6dd243cb993b2bd1ced5734259b9a26083fe9785f1bea10c94b5a8d316e4 568 golden/v0_90_r0.out
+text 2 golden/v0_90_r0.rc
+0
+
+sha256 f3ee403f2ca896e4548d36f7eb4b9f626f5f229ce6b750a07307a22619debbd5 660 golden/v0_90_r0/tilt-sub-001.com
+sha256 dd9ff631353343a257ac412636cd9099a4c46268397ef93a0c8df224209266c8 661 golden/v0_90_r0/tilt-sub-002.com
+sha256 798c68078dc9c7e7983158c14706c28e7f244a9ac0391cb7f8ddbbacf6848bf7 662 golden/v0_90_r0/tilt-sub-003.com
+text 104 golden/v0_90_r0/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 279 golden/v0_90_rm1.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+v0_90.mrc
+
+text 204 golden/v0_90_rm1.out
+Using specified reorientation even though header angles indicate  rotation around X
+Created 5 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/v0_90_rm1.rc
+0
+
+sha256 39bc52f40108f58ecffc80b2a45f8b1d579359ace5bba4860176492f2d1114ab 643 golden/v0_90_rm1/tilt-sub-001.com
+sha256 ff6ea2dd722b937a3d4b984c0dcc541fbc06e8742cd20ec33a895e912d38581f 644 golden/v0_90_rm1/tilt-sub-002.com
+sha256 4945abd02f1a4a8f5bea936a8686ecadd6afb65398bead73c09bf7b5c355660f 643 golden/v0_90_rm1/tilt-sub-003.com
+sha256 9d727b5b1122e81af3e5bc5c206bb3beeb9689344f6344a434e5285e88e23747 645 golden/v0_90_rm1/tilt-sub-004.com
+text 104 golden/v0_90_rm1/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 277 golden/v90.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+v90.mrc
+
+text 120 golden/v90.out
+Created 5 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/v90.rc
+0
+
+sha256 39bc52f40108f58ecffc80b2a45f8b1d579359ace5bba4860176492f2d1114ab 643 golden/v90/tilt-sub-001.com
+sha256 ff6ea2dd722b937a3d4b984c0dcc541fbc06e8742cd20ec33a895e912d38581f 644 golden/v90/tilt-sub-002.com
+sha256 4945abd02f1a4a8f5bea936a8686ecadd6afb65398bead73c09bf7b5c355660f 643 golden/v90/tilt-sub-003.com
+sha256 9d727b5b1122e81af3e5bc5c206bb3beeb9689344f6344a434e5285e88e23747 645 golden/v90/tilt-sub-004.com
+text 104 golden/v90/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 260 golden/v90_r0.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+v90.mrc
+
+sha256 ef987a3d29e52e8a78faa32dd30349d5fb5287a37f20eb6550e4c194ec686904 653 golden/v90_r0.out
+text 2 golden/v90_r0.rc
+0
+
+sha256 f3ee403f2ca896e4548d36f7eb4b9f626f5f229ce6b750a07307a22619debbd5 660 golden/v90_r0/tilt-sub-001.com
+sha256 dd9ff631353343a257ac412636cd9099a4c46268397ef93a0c8df224209266c8 661 golden/v90_r0/tilt-sub-002.com
+sha256 798c68078dc9c7e7983158c14706c28e7f244a9ac0391cb7f8ddbbacf6848bf7 662 golden/v90_r0/tilt-sub-003.com
+text 104 golden/v90_r0/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 277 golden/v90_rm1.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+v90.mrc
+
+text 120 golden/v90_rm1.out
+Created 5 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/v90_rm1.rc
+0
+
+sha256 39bc52f40108f58ecffc80b2a45f8b1d579359ace5bba4860176492f2d1114ab 643 golden/v90_rm1/tilt-sub-001.com
+sha256 ff6ea2dd722b937a3d4b984c0dcc541fbc06e8742cd20ec33a895e912d38581f 644 golden/v90_rm1/tilt-sub-002.com
+sha256 4945abd02f1a4a8f5bea936a8686ecadd6afb65398bead73c09bf7b5c355660f 643 golden/v90_rm1/tilt-sub-003.com
+sha256 9d727b5b1122e81af3e5bc5c206bb3beeb9689344f6344a434e5285e88e23747 645 golden/v90_rm1/tilt-sub-004.com
+text 104 golden/v90_rm1/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 188 golden/vf_auto.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+vf.mrc
+
+text 137 golden/vf_auto.out
+ERROR: subtomosetup - You must enter -reorient to indicate reorientation type, because header angles are not consistent with known types
+
+text 2 golden/vf_auto.rc
+1
+
+text 276 golden/vf_rotx.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+vf.mrc
+
+text 280 golden/vf_rotx.out
+Using specified reorientation even though title indicates rotation around X
+Using specified reorientation even though header angles indicate  rotation around X
+Created 5 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/vf_rotx.rc
+0
+
+sha256 39bc52f40108f58ecffc80b2a45f8b1d579359ace5bba4860176492f2d1114ab 643 golden/vf_rotx/tilt-sub-001.com
+sha256 ff6ea2dd722b937a3d4b984c0dcc541fbc06e8742cd20ec33a895e912d38581f 644 golden/vf_rotx/tilt-sub-002.com
+sha256 4945abd02f1a4a8f5bea936a8686ecadd6afb65398bead73c09bf7b5c355660f 643 golden/vf_rotx/tilt-sub-003.com
+sha256 9d727b5b1122e81af3e5bc5c206bb3beeb9689344f6344a434e5285e88e23747 645 golden/vf_rotx/tilt-sub-004.com
+text 104 golden/vf_rotx/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 189 golden/vft.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+vft.mrc
+
+text 137 golden/vft.out
+ERROR: subtomosetup - You must enter -reorient to indicate reorientation type, because header angles are not consistent with known types
+
+text 2 golden/vft.rc
+1
+
+text 260 golden/vft_r0.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+vft.mrc
+
+sha256 433b6dd243cb993b2bd1ced5734259b9a26083fe9785f1bea10c94b5a8d316e4 568 golden/vft_r0.out
+text 2 golden/vft_r0.rc
+0
+
+sha256 f3ee403f2ca896e4548d36f7eb4b9f626f5f229ce6b750a07307a22619debbd5 660 golden/vft_r0/tilt-sub-001.com
+sha256 dd9ff631353343a257ac412636cd9099a4c46268397ef93a0c8df224209266c8 661 golden/vft_r0/tilt-sub-002.com
+sha256 798c68078dc9c7e7983158c14706c28e7f244a9ac0391cb7f8ddbbacf6848bf7 662 golden/vft_r0/tilt-sub-003.com
+text 104 golden/vft_r0/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 277 golden/vft_rm1.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt-sub-001.com
+tilt-sub-002.com
+tilt-sub-003.com
+tilt-sub-004.com
+tilt-sub-finish.com
+tilt.com
+track.com
+v.mrc
+vft.mrc
+
+text 280 golden/vft_rm1.out
+Using specified reorientation even though title indicates rotation around X
+Using specified reorientation even though header angles indicate  rotation around X
+Created 5 command files for 4 subtomograms; run them with:
+    "subm tilt-sub*.com"   or   "processchunks ... tilt-sub"
+
+text 2 golden/vft_rm1.rc
+0
+
+sha256 39bc52f40108f58ecffc80b2a45f8b1d579359ace5bba4860176492f2d1114ab 643 golden/vft_rm1/tilt-sub-001.com
+sha256 ff6ea2dd722b937a3d4b984c0dcc541fbc06e8742cd20ec33a895e912d38581f 644 golden/vft_rm1/tilt-sub-002.com
+sha256 4945abd02f1a4a8f5bea936a8686ecadd6afb65398bead73c09bf7b5c355660f 643 golden/vft_rm1/tilt-sub-003.com
+sha256 9d727b5b1122e81af3e5bc5c206bb3beeb9689344f6344a434e5285e88e23747 645 golden/vft_rm1/tilt-sub-004.com
+text 104 golden/vft_rm1/tilt-sub-finish.com
+$b3dremove -g "tilt-sub-[0-9][0-9][0-9]*.com*" "tilt-sub-[0-9][0-9][0-9]*.log*" "tilt-sub-finish*.com*"
+
+text 188 golden/vr_auto.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+vr.mrc
+
+text 137 golden/vr_auto.out
+ERROR: subtomosetup - You must enter -reorient to indicate reorientation type, because header angles are not consistent with known types
+
+text 2 golden/vr_auto.rc
+1
+
+text 188 golden/vr_flip.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+pts.mod
+pts.txt
+tilt.com
+track.com
+v.mrc
+vr.mrc
+
+sha256 fd4712b82fb708a6d4abf3fc1b29af6881d6d5560167f1afa23760c74a819a3d 695 golden/vr_flip.out
+text 2 golden/vr_flip.rc
+1
+

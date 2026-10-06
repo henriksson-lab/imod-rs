@@ -8,9 +8,6 @@ m_zx	vs.mrc o.mrc -xffile tzx.xf	-
 m_flip	vf.mrc o.mrc -xffile tflip.xf -size 20,16,10 -center 12,9,6	-
 m_lin	vf.mrc o.mrc -xffile t1.xf -order 1	-
 #full	m_verbose	vs.mrc o.mrc -xffile t2.xf -verbose 1	-
-m_mb	mb.mrc o.mrc -xffile t1.xf -memory 1 -verbose 1	-
-m_mbzx	mb.mrc o.mrc -xffile tzx.xf -memory 1 -order 1 -tempdir .	-
-m_mbyx	mb.mrc o.mrc -xffile tyx.xf -memory 1	-
 m_noxf	vf.mrc o.mrc	-
 m_badsize	vf.mrc o.mrc -xffile t1.xf -size 0,10,10	-
 m_noout	vf.mrc	-

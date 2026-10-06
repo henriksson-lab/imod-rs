@@ -1,0 +1,25 @@
+# imod-rs native golden manifest for fixtures/avgstack; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh avgstack; do not edit by hand.
+sha256 5a45748feb16dd5ca7f12e406d25665d969ad6a66b2b5b54958487cb3889148a 3104 golden/as_all_short.out.av.mrc
+text 2 golden/as_all_short.rc
+0
+
+sha256 3236f0b3dd7def8e483bebb0003c834ca2d4a853e87a65165c905b2d4a7e028d 1199 golden/as_all_short.stdout
+text 2 golden/as_nofile.rc
+1
+
+text 136 golden/as_nofile.stdout
+  Input file :  Output file : ERROR: iiOpen - Opening file nofile (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nofile'
+
+sha256 ded1de16807ef33d45b6a34c5433990f7e6f3842d6c6179a9c0b323575b4673b 4096 golden/as_range.out.av.mrc
+text 2 golden/as_range.rc
+0
+
+sha256 580302066fada123be6bc6454c11c2545e33ea6e3d91e035362af25d60942a33 1199 golden/as_range.stdout
+sha256 6b674b0faca9404ee2c26579ca1cdc3f659fdade5b5fc8b917fb7c58be8aede3 4096 golden/as_reversed.out.av.mrc
+text 2 golden/as_reversed.rc
+0
+
+sha256 186266753b564bf71d5cb87927e646abaa892db502fec8b9080e29016305d1db 1139 golden/as_reversed.stdout

@@ -1,0 +1,38 @@
+# imod-rs native golden manifest for fixtures/b3dtouch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh b3dtouch; do not edit by hand.
+text 0 golden/baddir.files
+
+text 109 golden/baddir.out
+Error: b3dtouch - Creating a new empty file nodir/x.txt : [Errno 2] No such file or directory: 'nodir/x.txt'
+
+text 2 golden/baddir.rc
+1
+
+text 8 golden/existing.files
+old.txt
+
+text 0 golden/existing.out
+
+text 2 golden/existing.rc
+0
+
+text 8 golden/new.files
+new.txt
+
+text 0 golden/new.out
+
+text 2 golden/new.rc
+0
+
+text 0 golden/new/new.txt
+
+text 0 golden/usage.files
+
+text 126 golden/usage.out
+Usage: b3dtouch filename
+    Updates the modification time of an existing file or creates a new one
+    if it does not exist.
+
+text 2 golden/usage.rc
+0
+

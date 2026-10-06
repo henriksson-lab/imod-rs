@@ -1,0 +1,1535 @@
+# imod-rs native golden manifest for fixtures/alttomosetup; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh alttomosetup; do not edit by hand.
+text 285 golden/alt.files
+alt.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-003.com
+alttomo-004-sync.com
+alttomo-005-sync.com
+alttomo-bound-002.info
+alttomo-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 126 golden/alt.out
+6 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/alt.rc
+0
+
+text 145 golden/alt/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from alt -to g_primts
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 246 golden/alt/alttomo-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 287 golden/alt/alttomo-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-002.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 133 golden/alt/alttomo-004-sync.com
+$fixboundaries "g.rec" "alttomo-bound-002.info"
+$collectmmm pixels= "alttomo" 1 "g.rec" 3
+$b3dremove -g "g-[0-9][0-9][0-9]*.rbound" 
+
+text 48 golden/alt/alttomo-005-sync.com
+$swaptomostacks  -root g -from g_primts -to alt
+
+text 36 golden/alt/alttomo-bound-002.info
+1 0 48 29 1
+g-003.rbound
+-1 0 -1 -1
+
+text 95 golden/alt/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 143 golden/alt_axis.files
+alt.st
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 88 golden/alt_axis.out
+ERROR: alttomosetup - This appears to be a single-axis data set, you cannot enter -axis
+
+text 2 golden/alt_axis.rc
+1
+
+text 515 golden/alt_ctf_erase_filter.files
+alt.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-003.com
+alttomo-004.com
+alttomo-005.com
+alttomo-006.com
+alttomo-007.com
+alttomo-008.com
+alttomo-009.com
+alttomo-010.com
+alttomo-011.com
+alttomo-012-sync.com
+alttomo-013-sync.com
+alttomo-014-sync.com
+alttomo-015.com
+alttomo-016-sync.com
+alttomo-017-sync.com
+alttomo-bound-002.info
+alttomo-bound-014.info
+alttomo-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 127 golden/alt_ctf_erase_filter.out
+18 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/alt_ctf_erase_filter.rc
+0
+
+text 145 golden/alt_ctf_erase_filter/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from alt -to g_primts
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 216 golden/alt_ctf_erase_filter/alttomo-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews -1  -1
+TotalViews 1 9
+UseGPU	-1
+PixelSize	1.0
+$sync
+
+text 248 golden/alt_ctf_erase_filter/alttomo-003.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 1  1
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-004.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 2  2
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-005.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 3  3
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-006.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 4  4
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-007.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 5  5
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-008.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 6  6
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-009.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 7  7
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-010.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 8  8
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 248 golden/alt_ctf_erase_filter/alttomo-011.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	g.ali
+AngleFile	g.tlt
+OutputFileName	g_ctfcorr.ali
+DefocusFile	g.defocus
+StartingEndingViews 9  9
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 182 golden/alt_ctf_erase_filter/alttomo-012-sync.com
+$fixboundaries "g_ctfcorr.ali" "alttomo-bound-002.info"
+$collectmmm pixels= "alttomo" 9 "g_ctfcorr.ali" 3 
+$b3dremove -g "g_ctfcorr-[0-9][0-9][0-9]*.cbound" "alttomo-bound-002.info"
+
+text 429 golden/alt_ctf_erase_filter/alttomo-013-sync.com
+$b3drename g_ctfcorr.ali g.ali
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	g.ali
+OutputFile	g_erase.ali
+ModelFile	b_erase.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename g_erase.ali g.ali
+# Command file to run mtffilter
+$mtffilter -StandardInput
+InputFile	g.ali
+OutputFile	g_filt.ali
+PixelSize	1.0
+DoseWeightingFile	b.dose
+$b3drename g_filt.ali g.ali
+
+text 246 golden/alt_ctf_erase_filter/alttomo-014-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 287 golden/alt_ctf_erase_filter/alttomo-015.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-014.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 134 golden/alt_ctf_erase_filter/alttomo-016-sync.com
+$fixboundaries "g.rec" "alttomo-bound-014.info"
+$collectmmm pixels= "alttomo" 1 "g.rec" 15
+$b3dremove -g "g-[0-9][0-9][0-9]*.rbound" 
+
+text 48 golden/alt_ctf_erase_filter/alttomo-017-sync.com
+$swaptomostacks  -root g -from g_primts -to alt
+
+text 284 golden/alt_ctf_erase_filter/alttomo-bound-002.info
+1 0 48 21 9
+g_ctfcorr-001.cbound
+-1 0 0 -1
+g_ctfcorr-002.cbound
+1 0 1 -1
+g_ctfcorr-003.cbound
+2 0 2 -1
+g_ctfcorr-004.cbound
+3 0 3 -1
+g_ctfcorr-005.cbound
+4 0 4 -1
+g_ctfcorr-006.cbound
+5 0 5 -1
+g_ctfcorr-007.cbound
+6 0 6 -1
+g_ctfcorr-008.cbound
+7 0 7 -1
+g_ctfcorr-009.cbound
+8 0 -1 -1
+
+text 36 golden/alt_ctf_erase_filter/alttomo-bound-014.info
+1 0 48 29 1
+g-015.rbound
+-1 0 -1 -1
+
+text 95 golden/alt_ctf_erase_filter/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 225 golden/alt_ctf_erase_filter1.files
+alt.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-003-sync.com
+alttomo-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 155 golden/alt_ctf_erase_filter1.out
+4 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm alttomo*.com
+
+text 2 golden/alt_ctf_erase_filter1.rc
+0
+
+text 145 golden/alt_ctf_erase_filter1/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from alt -to g_primts
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+sha256 da233421504db219d034aa598a5a1028ee54a69860268371f0603156e14aa9f7 566 golden/alt_ctf_erase_filter1/alttomo-002-sync.com
+text 259 golden/alt_ctf_erase_filter1/alttomo-003-sync.com
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$if (-e ./savework) ./savework
+$swaptomostacks  -root g -from g_primts -to alt
+
+text 95 golden/alt_ctf_erase_filter1/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 143 golden/alt_evenodd.files
+alt.st
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 67 golden/alt_evenodd.out
+ERROR: alttomosetup - You cannot enter both -evenodd and -rootname
+
+text 2 golden/alt_evenodd.rc
+1
+
+text 204 golden/alt_procs1.files
+alt.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 155 golden/alt_procs1.out
+3 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm alttomo*.com
+
+text 2 golden/alt_procs1.rc
+0
+
+text 145 golden/alt_procs1/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from alt -to g_primts
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 259 golden/alt_procs1/alttomo-002-sync.com
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$if (-e ./savework) ./savework
+$swaptomostacks  -root g -from g_primts -to alt
+
+text 95 golden/alt_procs1/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 143 golden/alt_restore.files
+alt.st
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 0 golden/alt_restore.out
+
+text 2 golden/alt_restore.rc
+0
+
+text 210 golden/alt_trim1.files
+alt.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.edf
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 155 golden/alt_trim1.out
+3 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm alttomo*.com
+
+text 2 golden/alt_trim1.rc
+0
+
+text 261 golden/alt_trim1/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from alt -to g_primts
+$ccderaser -StandardInput
+InputFile	g.st
+OutputFile	g_fixed.st
+$b3drename g.st g_orig.st
+$b3drename g_fixed.st g.st
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 310 golden/alt_trim1/alttomo-002-sync.com
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$if (-e ./savework) ./savework
+$trimvol -f -rx -x 3,40 -y 1,30 -z 2,8 g.rec g.rec
+$swaptomostacks  -root g -from g_primts -to alt
+
+text 95 golden/alt_trim1/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 194 golden/badaxis.files
+alta.st
+altb.st
+ctfcorrectiona.com
+ctfcorrectionb.com
+erasera.com
+eraserb.com
+ga.ali
+ga.st
+ga.tlt
+ga.xf
+gb.ali
+gb.st
+gb.tlt
+gb.xf
+newsta.com
+newstb.com
+tilta.com
+tiltb.com
+tracka.com
+trackb.com
+
+text 60 golden/badaxis.out
+ERROR: alttomosetup - Entry for -axis must be a, A, b, or B
+
+text 2 golden/badaxis.rc
+1
+
+text 438 golden/dual_alt.files
+alta.st
+altb.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-003.com
+alttomo-004-sync.com
+alttomo-005-sync.com
+alttomo-006-sync.com
+alttomo-007.com
+alttomo-008-sync.com
+alttomo-009-sync.com
+alttomo-bound-002.info
+alttomo-bound-006.info
+alttomo-finish.com
+ctfcorrectiona.com
+ctfcorrectionb.com
+erasera.com
+eraserb.com
+ga.ali
+ga.st
+ga.tlt
+ga.xf
+gb.ali
+gb.st
+gb.tlt
+gb.xf
+newsta.com
+newstb.com
+tilta.com
+tiltb.com
+tracka.com
+trackb.com
+
+text 127 golden/dual_alt.out
+10 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/dual_alt.rc
+0
+
+text 148 golden/dual_alt/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from alt -to g_primts
+$newstack -StandardInput
+InputFile	ga.st
+OutputFile	ga.ali
+TransformFile	ga.xf
+BinByFactor	1
+
+text 231 golden/dual_alt/alttomo-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections ga.ali
+OutputFile ga.rec
+IMAGEBINNED 1
+TILTFILE ga.tlt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 272 golden/dual_alt/alttomo-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections ga.ali
+OutputFile ga.rec
+IMAGEBINNED 1
+TILTFILE ga.tlt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-002.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 136 golden/dual_alt/alttomo-004-sync.com
+$fixboundaries "ga.rec" "alttomo-bound-002.info"
+$collectmmm pixels= "alttomo" 1 "ga.rec" 3
+$b3dremove -g "ga-[0-9][0-9][0-9]*.rbound" 
+
+text 93 golden/dual_alt/alttomo-005-sync.com
+$newstack -StandardInput
+InputFile	gb.st
+OutputFile	gb.ali
+TransformFile	gb.xf
+BinByFactor	1
+
+text 231 golden/dual_alt/alttomo-006-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections gb.ali
+OutputFile gb.rec
+IMAGEBINNED 1
+TILTFILE gb.tlt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 272 golden/dual_alt/alttomo-007.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections gb.ali
+OutputFile gb.rec
+IMAGEBINNED 1
+TILTFILE gb.tlt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-006.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 136 golden/dual_alt/alttomo-008-sync.com
+$fixboundaries "gb.rec" "alttomo-bound-006.info"
+$collectmmm pixels= "alttomo" 1 "gb.rec" 7
+$b3dremove -g "gb-[0-9][0-9][0-9]*.rbound" 
+
+text 48 golden/dual_alt/alttomo-009-sync.com
+$swaptomostacks  -root g -from g_primts -to alt
+
+text 37 golden/dual_alt/alttomo-bound-002.info
+1 0 48 29 1
+ga-003.rbound
+-1 0 -1 -1
+
+text 37 golden/dual_alt/alttomo-bound-006.info
+1 0 48 29 1
+gb-007.rbound
+-1 0 -1 -1
+
+text 95 golden/dual_alt/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 255 golden/dual_axis_A_procs1.files
+alta.st
+altb.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-finish.com
+ctfcorrectiona.com
+ctfcorrectionb.com
+erasera.com
+eraserb.com
+ga.ali
+ga.st
+ga.tlt
+ga.xf
+gb.ali
+gb.st
+gb.tlt
+gb.xf
+newsta.com
+newstb.com
+tilta.com
+tiltb.com
+tracka.com
+trackb.com
+
+text 155 golden/dual_axis_A_procs1.out
+3 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm alttomo*.com
+
+text 2 golden/dual_axis_A_procs1.rc
+0
+
+text 158 golden/dual_axis_A_procs1/alttomo-001-sync.com
+$swaptomostacks -single -check -root ga -from alta -to g_primtsa
+$newstack -StandardInput
+InputFile	ga.st
+OutputFile	ga.ali
+TransformFile	ga.xf
+BinByFactor	1
+
+text 254 golden/dual_axis_A_procs1/alttomo-002-sync.com
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections ga.ali
+OutputFile ga.rec
+IMAGEBINNED 1
+TILTFILE ga.tlt
+THICKNESS 30
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$if (-e ./savework) ./savework
+$swaptomostacks -single -root ga -from g_primtsa -to alta
+
+text 95 golden/dual_axis_A_procs1/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 566 golden/dual_axis_b_ctf.files
+alta.st
+altb.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-003.com
+alttomo-004.com
+alttomo-005.com
+alttomo-006.com
+alttomo-007.com
+alttomo-008.com
+alttomo-009.com
+alttomo-010.com
+alttomo-011.com
+alttomo-012-sync.com
+alttomo-013-sync.com
+alttomo-014-sync.com
+alttomo-015.com
+alttomo-016-sync.com
+alttomo-017-sync.com
+alttomo-bound-002.info
+alttomo-bound-014.info
+alttomo-finish.com
+ctfcorrectiona.com
+ctfcorrectionb.com
+erasera.com
+eraserb.com
+ga.ali
+ga.st
+ga.tlt
+ga.xf
+gb.ali
+gb.st
+gb.tlt
+gb.xf
+newsta.com
+newstb.com
+tilta.com
+tiltb.com
+tracka.com
+trackb.com
+
+text 127 golden/dual_axis_b_ctf.out
+18 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/dual_axis_b_ctf.rc
+0
+
+text 158 golden/dual_axis_b_ctf/alttomo-001-sync.com
+$swaptomostacks -single -check -root gb -from altb -to g_primtsb
+$newstack -StandardInput
+InputFile	gb.st
+OutputFile	gb.ali
+TransformFile	gb.xf
+BinByFactor	1
+
+text 220 golden/dual_axis_b_ctf/alttomo-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews -1  -1
+TotalViews 1 9
+UseGPU	-1
+PixelSize	1.0
+$sync
+
+text 252 golden/dual_axis_b_ctf/alttomo-003.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 1  1
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-004.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 2  2
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-005.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 3  3
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-006.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 4  4
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-007.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 5  5
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-008.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 6  6
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-009.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 7  7
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-010.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 8  8
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 252 golden/dual_axis_b_ctf/alttomo-011.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+$ctfphaseflip -StandardInput
+InputStack	gb.ali
+AngleFile	gb.tlt
+OutputFileName	gb_ctfcorr.ali
+DefocusFile	gb.defocus
+StartingEndingViews 9  9
+TotalViews 1 9
+BoundaryInfoFile alttomo-bound-002.info
+UseGPU	-1
+PixelSize	1.0
+
+text 185 golden/dual_axis_b_ctf/alttomo-012-sync.com
+$fixboundaries "gb_ctfcorr.ali" "alttomo-bound-002.info"
+$collectmmm pixels= "alttomo" 9 "gb_ctfcorr.ali" 3 
+$b3dremove -g "gb_ctfcorr-[0-9][0-9][0-9]*.cbound" "alttomo-bound-002.info"
+
+text 33 golden/dual_axis_b_ctf/alttomo-013-sync.com
+$b3drename gb_ctfcorr.ali gb.ali
+
+text 231 golden/dual_axis_b_ctf/alttomo-014-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections gb.ali
+OutputFile gb.rec
+IMAGEBINNED 1
+TILTFILE gb.tlt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 272 golden/dual_axis_b_ctf/alttomo-015.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections gb.ali
+OutputFile gb.rec
+IMAGEBINNED 1
+TILTFILE gb.tlt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-014.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 137 golden/dual_axis_b_ctf/alttomo-016-sync.com
+$fixboundaries "gb.rec" "alttomo-bound-014.info"
+$collectmmm pixels= "alttomo" 1 "gb.rec" 15
+$b3dremove -g "gb-[0-9][0-9][0-9]*.rbound" 
+
+text 58 golden/dual_axis_b_ctf/alttomo-017-sync.com
+$swaptomostacks -single -root gb -from g_primtsb -to altb
+
+text 293 golden/dual_axis_b_ctf/alttomo-bound-002.info
+1 0 48 21 9
+gb_ctfcorr-001.cbound
+-1 0 0 -1
+gb_ctfcorr-002.cbound
+1 0 1 -1
+gb_ctfcorr-003.cbound
+2 0 2 -1
+gb_ctfcorr-004.cbound
+3 0 3 -1
+gb_ctfcorr-005.cbound
+4 0 4 -1
+gb_ctfcorr-006.cbound
+5 0 5 -1
+gb_ctfcorr-007.cbound
+6 0 6 -1
+gb_ctfcorr-008.cbound
+7 0 7 -1
+gb_ctfcorr-009.cbound
+8 0 -1 -1
+
+text 37 golden/dual_axis_b_ctf/alttomo-bound-014.info
+1 0 48 29 1
+gb-015.rbound
+-1 0 -1 -1
+
+text 95 golden/dual_axis_b_ctf/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 194 golden/dual_evenodd.files
+alta.st
+altb.st
+ctfcorrectiona.com
+ctfcorrectionb.com
+erasera.com
+eraserb.com
+ga.ali
+ga.st
+ga.tlt
+ga.xf
+gb.ali
+gb.st
+gb.tlt
+gb.xf
+newsta.com
+newstb.com
+tilta.com
+tiltb.com
+tracka.com
+trackb.com
+
+text 90 golden/dual_evenodd.out
+ERROR: alttomosetup - This appears to be a dual-axis data set and you cannot use -evenodd
+
+text 2 golden/dual_evenodd.rc
+1
+
+text 194 golden/dual_trim.files
+alta.st
+altb.st
+ctfcorrectiona.com
+ctfcorrectionb.com
+erasera.com
+eraserb.com
+ga.ali
+ga.st
+ga.tlt
+ga.xf
+gb.ali
+gb.st
+gb.tlt
+gb.xf
+newsta.com
+newstb.com
+tilta.com
+tiltb.com
+tracka.com
+trackb.com
+
+text 86 golden/dual_trim.out
+ERROR: alttomosetup - This appears to be a dual-axis data set, you cannot enter -trim
+
+text 2 golden/dual_trim.rc
+1
+
+text 408 golden/evenodd.files
+alt.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-003.com
+alttomo-004-sync.com
+alttomo-005-sync.com
+alttomo-006-sync.com
+alttomo-007-sync.com
+alttomo-008.com
+alttomo-009-sync.com
+alttomo-010-sync.com
+alttomo-bound-002.info
+alttomo-bound-007.info
+alttomo-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 127 golden/evenodd.out
+11 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/evenodd.rc
+0
+
+text 148 golden/evenodd/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from g_even -to g_primts
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 246 golden/evenodd/alttomo-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 287 golden/evenodd/alttomo-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-002.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 133 golden/evenodd/alttomo-004-sync.com
+$fixboundaries "g.rec" "alttomo-bound-002.info"
+$collectmmm pixels= "alttomo" 1 "g.rec" 3
+$b3dremove -g "g-[0-9][0-9][0-9]*.rbound" 
+
+text 51 golden/evenodd/alttomo-005-sync.com
+$swaptomostacks  -root g -from g_primts -to g_even
+
+text 147 golden/evenodd/alttomo-006-sync.com
+$swaptomostacks  -check -root g -from g_odd -to g_primts
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 246 golden/evenodd/alttomo-007-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 287 golden/evenodd/alttomo-008.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-007.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 133 golden/evenodd/alttomo-009-sync.com
+$fixboundaries "g.rec" "alttomo-bound-007.info"
+$collectmmm pixels= "alttomo" 1 "g.rec" 8
+$b3dremove -g "g-[0-9][0-9][0-9]*.rbound" 
+
+text 50 golden/evenodd/alttomo-010-sync.com
+$swaptomostacks  -root g -from g_primts -to g_odd
+
+text 36 golden/evenodd/alttomo-bound-002.info
+1 0 48 29 1
+g-003.rbound
+-1 0 -1 -1
+
+text 36 golden/evenodd/alttomo-bound-007.info
+1 0 48 29 1
+g-008.rbound
+-1 0 -1 -1
+
+text 95 golden/evenodd/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 414 golden/evenodd_trim.files
+alt.st
+alttomo-001-sync.com
+alttomo-002-sync.com
+alttomo-003.com
+alttomo-004-sync.com
+alttomo-005-sync.com
+alttomo-006-sync.com
+alttomo-007-sync.com
+alttomo-008.com
+alttomo-009-sync.com
+alttomo-010-sync.com
+alttomo-bound-002.info
+alttomo-bound-007.info
+alttomo-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.edf
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 127 golden/evenodd_trim.out
+11 command files created with root name alttomo and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/evenodd_trim.rc
+0
+
+text 282 golden/evenodd_trim/alttomo-001-sync.com
+$swaptomostacks  -check -root g -from g_even -to g_primts
+$ccderaser -StandardInput
+InputFile	g.st
+OutputFile	g_fixed.st
+$b3drename g.st g_orig.st
+$b3drename g_fixed.st g.st
+$archiveorig g.st
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 246 golden/evenodd_trim/alttomo-002-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 287 golden/evenodd_trim/alttomo-003.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-002.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 133 golden/evenodd_trim/alttomo-004-sync.com
+$fixboundaries "g.rec" "alttomo-bound-002.info"
+$collectmmm pixels= "alttomo" 1 "g.rec" 3
+$b3dremove -g "g-[0-9][0-9][0-9]*.rbound" 
+
+text 136 golden/evenodd_trim/alttomo-005-sync.com
+$trimvol -f -rx -x 3,40 -y 1,30 -z 2,8 g.rec g.rec
+$b3dremove g.ali
+$b3dremove g.rec
+$swaptomostacks  -root g -from g_primts -to g_even
+
+text 281 golden/evenodd_trim/alttomo-006-sync.com
+$swaptomostacks  -check -root g -from g_odd -to g_primts
+$ccderaser -StandardInput
+InputFile	g.st
+OutputFile	g_fixed.st
+$b3drename g.st g_orig.st
+$b3drename g_fixed.st g.st
+$archiveorig g.st
+$newstack -StandardInput
+InputFile	g.st
+OutputFile	g.ali
+TransformFile	g.xf
+BinByFactor	1
+
+text 246 golden/evenodd_trim/alttomo-007-sync.com
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE -1 -1
+TOTALSLICES 0 39
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+$sync
+
+text 287 golden/evenodd_trim/alttomo-008.com
+$sync
+$setenv IMOD_OUTPUT_FORMAT MRC
+# Command file to run Tilt
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile g.rec
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SLICE 0 39
+#
+TOTALSLICES 0 39
+BoundaryInfoFile alttomo-bound-007.info
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+
+text 133 golden/evenodd_trim/alttomo-009-sync.com
+$fixboundaries "g.rec" "alttomo-bound-007.info"
+$collectmmm pixels= "alttomo" 1 "g.rec" 8
+$b3dremove -g "g-[0-9][0-9][0-9]*.rbound" 
+
+text 135 golden/evenodd_trim/alttomo-010-sync.com
+$trimvol -f -rx -x 3,40 -y 1,30 -z 2,8 g.rec g.rec
+$b3dremove g.ali
+$b3dremove g.rec
+$swaptomostacks  -root g -from g_primts -to g_odd
+
+text 36 golden/evenodd_trim/alttomo-bound-002.info
+1 0 48 29 1
+g-003.rbound
+-1 0 -1 -1
+
+text 36 golden/evenodd_trim/alttomo-bound-007.info
+1 0 48 29 1
+g-008.rbound
+-1 0 -1 -1
+
+text 95 golden/evenodd_trim/alttomo-finish.com
+$b3dremove -g alttomo-[0-9][0-9][0-9]*.com* alttomo-[0-9][0-9][0-9]*.log* alttomo-finish*.com*
+
+text 143 golden/neither.files
+alt.st
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 66 golden/neither.out
+ERROR: alttomosetup - You must enter either -evenodd or -rootname
+
+text 2 golden/neither.rc
+1
+
+text 9 golden/nonstandard.files
+tilt.com
+
+text 114 golden/nonstandard.out
+ERROR: alttomosetup - There are non-standard files in the directory and not all of the data set can be determined
+
+text 2 golden/nonstandard.rc
+1
+
+text 143 golden/trim_noedf.files
+alt.st
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+g_even.st
+g_odd.st
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+
+text 54 golden/trim_noedf.out
+ERROR: alttomosetup - Etomo file g.edf dose not exist
+
+text 2 golden/trim_noedf.rc
+1
+

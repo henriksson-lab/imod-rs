@@ -3,8 +3,10 @@
 //! in translation (2026-09-26)").  Native cannot be the reference for these
 //! cases -- it crashes, hangs, reads unset memory or computes the wrong thing
 //! -- so each test asserts the defined behaviour directly.  Cases the fixes do
-//! not touch stay covered by the native goldens in `tilt_cli`, `tiltalign_cli`,
-//! `beadtrack_cli` and `tiltxcorr_cli`.
+//! not touch stay covered by the native goldens in `tilt_cli` and
+//! `tiltalign_cli` (`beadtrack_cli` and `tiltxcorr_cli` were deleted with their
+//! inputs on 2026-10-06 to keep fixtures small, and with them
+//! `tiltxcorr_takes_the_output_file_positionally`, which ran on `tx.st`).
 
 mod common;
 
@@ -296,7 +298,16 @@ fn tiltalign_fixed_xyz_rejects_extra_points_only() {
 /// error where the name belongs and `(null)` after it.
 #[test]
 fn beadtrack_seed_error_names_the_file() {
-    let dir = scratch("beadtrack", "bt-seed");
+    // Any MRC serves as the image: the error comes before the tilt angles are
+    // read.  (The beadtrack suite's `t1.mrc` was deleted on 2026-10-06.)
+    let dir = std::env::temp_dir().join(format!("imod-rs-fixedtomo-{}-bt-seed", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/fixtures/newstack-mixed-small.mrc"),
+        dir.join("t1.mrc"),
+    )
+    .unwrap();
     let input = "ImageFile\tt1.mrc\nInputSeedModel\tnone.seed\nOutputModel\tt1.fid\n\
                  TiltFile\tt1.rawtlt\nRotationAngle\t4\nBeadDiameter\t9\n";
     std::fs::write(dir.join("p.in"), input).unwrap();
@@ -317,28 +328,4 @@ fn beadtrack_seed_error_names_the_file() {
     assert!(all.contains("Reading seed model file none.seed: "), "{all}");
     assert!(!all.contains("(null)"), "{all}");
     let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// `PipGetInOutFile("OutputFile", 2, ...)` asked for a third non-option
-/// argument, so `tiltxcorr in out` failed with "No output file specified".
-/// Defined: the second non-option argument is the output, and the run equals
-/// the one naming both files by option.
-#[test]
-fn tiltxcorr_takes_the_output_file_positionally() {
-    let pos = scratch("tiltxcorr", "tx-pos");
-    let opt = scratch("tiltxcorr", "tx-opt");
-    let mut a = common::imod_cmd("tiltxcorr");
-    a.args("-tiltfile tx.tlt -rotation -6 tx.st o.xf".split_whitespace());
-    let mut b = common::imod_cmd("tiltxcorr");
-    b.args("-input tx.st -output o.xf -tiltfile tx.tlt -rotation -6".split_whitespace());
-    let a = run(a, &pos, Duration::from_secs(120));
-    let b = run(b, &opt, Duration::from_secs(120));
-    assert_eq!(a.status.code(), Some(0), "{}", text(&a.stdout));
-    assert_eq!(b.status.code(), Some(0), "{}", text(&b.stdout));
-    assert_eq!(
-        std::fs::read(pos.join("o.xf")).unwrap(),
-        std::fs::read(opt.join("o.xf")).unwrap()
-    );
-    let _ = std::fs::remove_dir_all(&pos);
-    let _ = std::fs::remove_dir_all(&opt);
 }

@@ -1,0 +1,6 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+empty	-	-	-
+dataset	tilt.com:tilt.com b.st:b.st align.com:align.com eraser.com:eraser.com newst.com:newst.com	-	-
+subdir	tilt.com:ds/tilt.com b.st:ds/b.st align.com:ds/align.com	-	ds
+help	-	-	-h
+nodir	-	-	nodir

@@ -1,0 +1,126 @@
+# imod-rs native golden manifest for fixtures/model2point; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh model2point; do not edit by hand.
+sha256 39a727e6720f8df1737bf424dda2028e0bb2222346fe8a7db9a6cc7e6551dfaa 1702 golden/mp_basic.out.p.txt
+text 2 golden/mp_basic.rc
+0
+
+text 73 golden/mp_basic.stdout
+
+ FORMATTED  new  file opened: p.txt
+          46  points output to file
+
+sha256 2c477a8aee14d6aa63798045f31ee9e87d915f45117d31f820e72ecf38c2f353 3060 golden/mp_cont_values.out.p.txt
+text 2 golden/mp_cont_values.rc
+0
+
+text 73 golden/mp_cont_values.stdout
+
+ FORMATTED  new  file opened: p.txt
+          60  points output to file
+
+sha256 e4c2c257af384861de216cacd5b37c8754910939c72b8203a3b9012665e345d7 1978 golden/mp_contour_zero.out.p.txt
+text 2 golden/mp_contour_zero.rc
+0
+
+text 73 golden/mp_contour_zero.stdout
+
+ FORMATTED  new  file opened: p.txt
+          46  points output to file
+
+sha256 39a727e6720f8df1737bf424dda2028e0bb2222346fe8a7db9a6cc7e6551dfaa 1702 golden/mp_float.out.p.txt
+text 2 golden/mp_float.rc
+0
+
+text 111 golden/mp_float.stdout
+
+ FORMATTED  new  file opened: p.txt
+ The -float entry is no longer needed
+          46  points output to file
+
+text 0 golden/mp_float_integer.out.p.txt
+
+text 2 golden/mp_float_integer.rc
+1
+
+text 102 golden/mp_float_integer.stdout
+
+ FORMATTED  new  file opened: p.txt
+
+ERROR: MODEL2POINT - You cannot enter both -float and -integers
+
+sha256 1c1a5c498bb0d4ef3906cc34153a5e35f9e61dcab315596cfda4ee80650bd11b 1012 golden/mp_integer.out.p.txt
+text 2 golden/mp_integer.rc
+0
+
+text 73 golden/mp_integer.stdout
+
+ FORMATTED  new  file opened: p.txt
+          46  points output to file
+
+text 0 golden/mp_mesh1.out.p.txt
+
+text 2 golden/mp_mesh1.rc
+0
+
+text 73 golden/mp_mesh1.stdout
+
+ FORMATTED  new  file opened: p.txt
+           0  points output to file
+
+text 430 golden/mp_mesh2_fail.out.p.txt
+     1       42.51       37.51        1.00
+     1       41.93        7.24        1.00
+     1       42.00       10.81        9.54
+     1       51.81       39.36       11.97
+     1       52.51       38.96       11.98
+     1       55.38       25.62       11.28
+     1       21.67        6.21        9.20
+     1       45.09       36.38       12.53
+     1       46.42       25.37       11.88
+     1       52.77       21.74       12.02
+
+text 2 golden/mp_mesh2_fail.rc
+1
+
+text 103 golden/mp_mesh2_fail.stdout
+
+ FORMATTED  new  file opened: p.txt
+
+ERROR: MODEL2POINT - Finding array size needed for mesh vertices
+
+sha256 ccc67431b9ec218a98b2b2f5dd5ab0db70f6e00f8a9235da0a9d0b09b297ac78 2254 golden/mp_object.out.p.txt
+text 2 golden/mp_object.rc
+0
+
+text 73 golden/mp_object.stdout
+
+ FORMATTED  new  file opened: p.txt
+          46  points output to file
+
+sha256 2da3253be0bed4b5512eaf6de1d2e958dbb620d4222af6af5db4926c3839cbfa 3900 golden/mp_point_values.out.p.txt
+text 2 golden/mp_point_values.rc
+0
+
+text 73 golden/mp_point_values.stdout
+
+ FORMATTED  new  file opened: p.txt
+          60  points output to file
+
+sha256 8af799bbb1388e47ad31ee2e935933ad55742459a8fe3556c3d4b0493f5862a0 1702 golden/mp_scaled_zcoord.out.p.txt
+text 2 golden/mp_scaled_zcoord.rc
+0
+
+text 73 golden/mp_scaled_zcoord.stdout
+
+ FORMATTED  new  file opened: p.txt
+          46  points output to file
+
+sha256 b2c67b9c3a1723156d1f7606313ac2bd9c1a87f455909abfaaaf3abd7471bd62 8832 golden/mp_sizes_times.out.p.txt
+text 2 golden/mp_sizes_times.rc
+0
+
+text 73 golden/mp_sizes_times.stdout
+
+ FORMATTED  new  file opened: p.txt
+         180  points output to file
+

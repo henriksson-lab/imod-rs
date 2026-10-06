@@ -1,0 +1,384 @@
+# imod-rs native golden manifest for fixtures/splitbatch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh splitbatch; do not edit by hand.
+text 43 golden/b1.files
+b1-001.com
+b1-002.com
+b1-finish.com
+b1.com
+
+text 273 golden/b1.out
+3 command files created with root name b1 to be run with:
+   "processchunks -M # localhost:4,server2:2 b1"
+ where # is the maximum # of files to run in parallel
+To stop all processing, use "echo Q > batch.cmds"
+   echo F instead of Q to finish current sets before quitting
+
+text 2 golden/b1.rc
+0
+
+text 230 golden/b1/b1-001.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b1
+SingleOnFirstCPU
+DirectiveFile  d1.adoc
+CurrentLocation /data/a
+DeliverToDirectory /data/out1
+RootName ts1
+
+text 230 golden/b1/b1-002.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b1
+SingleOnFirstCPU
+DirectiveFile  d2.adoc
+CurrentLocation /data/b
+DeliverToDirectory /data/out2
+RootName ts2
+
+text 55 golden/b1/b1-finish.com
+$b3dremove -g b1-[0-9][0-9][0-9]*.com* b1-finish*.com*
+
+text 8 golden/b10.files
+b10.com
+
+text 74 golden/b10.out
+ERROR: splitbatch - A machine name cannot be followed by two : or # signs
+
+text 2 golden/b10.rc
+1
+
+text 7 golden/b1_maxgpu0.files
+b1.com
+
+text 73 golden/b1_maxgpu0.out
+ERROR: splitbatch - The maximum number of GPUs to use must be at least 1
+
+text 2 golden/b1_maxgpu0.rc
+1
+
+text 43 golden/b1_root_maxgpu.files
+b1-001.com
+b1-002.com
+b1-finish.com
+b1.com
+
+text 273 golden/b1_root_maxgpu.out
+3 command files created with root name b1 to be run with:
+   "processchunks -M # localhost:4,server2:2 b1"
+ where # is the maximum # of files to run in parallel
+To stop all processing, use "echo Q > batch.cmds"
+   echo F instead of Q to finish current sets before quitting
+
+text 2 golden/b1_root_maxgpu.rc
+0
+
+text 230 golden/b1_root_maxgpu/b1-001.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b1
+SingleOnFirstCPU
+DirectiveFile  d1.adoc
+CurrentLocation /data/a
+DeliverToDirectory /data/out1
+RootName ts1
+
+text 230 golden/b1_root_maxgpu/b1-002.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b1
+SingleOnFirstCPU
+DirectiveFile  d2.adoc
+CurrentLocation /data/b
+DeliverToDirectory /data/out2
+RootName ts2
+
+text 55 golden/b1_root_maxgpu/b1-finish.com
+$b3dremove -g b1-[0-9][0-9][0-9]*.com* b1-finish*.com*
+
+text 43 golden/b2.files
+b2-001.com
+b2-002.com
+b2-finish.com
+b2.com
+
+text 271 golden/b2.out
+3 command files created with root name b2 to be run with:
+   "processchunks -M # localhost,localhost b2"
+ where # is the maximum # of files to run in parallel
+To stop all processing, use "echo Q > batch.cmds"
+   echo F instead of Q to finish current sets before quitting
+
+text 2 golden/b2.rc
+0
+
+text 272 golden/b2/b2-001.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b2
+GPUMachineList 1
+MaxGPUsInParallelBatch 4
+SingleOnFirstCPU
+DirectiveFile  d1.adoc
+CurrentLocation /data/a
+DeliverToDirectory /data/out1
+RootName ts1
+
+text 272 golden/b2/b2-002.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b2
+GPUMachineList 1
+MaxGPUsInParallelBatch 4
+SingleOnFirstCPU
+DirectiveFile  d2.adoc
+CurrentLocation /data/b
+DeliverToDirectory /data/out2
+RootName ts2
+
+text 55 golden/b2/b2-finish.com
+$b3dremove -g b2-[0-9][0-9][0-9]*.com* b2-finish*.com*
+
+text 7 golden/b3.files
+b3.com
+
+text 72 golden/b3.out
+ERROR: splitbatch - The CPUMachineList entry only contains a single CPU
+
+text 2 golden/b3.rc
+1
+
+text 43 golden/b4.files
+b4-001.com
+b4-002.com
+b4-finish.com
+b4.com
+
+text 256 golden/b4.out
+3 command files created with root name b4 to be run with:
+   "processchunks -M # None b4"
+ where # is the maximum # of files to run in parallel
+To stop all processing, use "echo Q > batch.cmds"
+   echo F instead of Q to finish current sets before quitting
+
+text 2 golden/b4.rc
+0
+
+text 265 golden/b4/b4-001.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+QueueCommand qsub
+MaxJobsOnQueue 4
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b4
+SingleOnFirstCPU
+DirectiveFile  d1.adoc
+CurrentLocation /data/a
+DeliverToDirectory /data/out1
+RootName ts1
+
+text 265 golden/b4/b4-002.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+QueueCommand qsub
+MaxJobsOnQueue 4
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b4
+SingleOnFirstCPU
+DirectiveFile  d2.adoc
+CurrentLocation /data/b
+DeliverToDirectory /data/out2
+RootName ts2
+
+text 55 golden/b4/b4-finish.com
+$b3dremove -g b4-[0-9][0-9][0-9]*.com* b4-finish*.com*
+
+text 7 golden/b5.files
+b5.com
+
+text 89 golden/b5.out
+ERROR: splitbatch - Command file must have a MaxJobsOnQueue entry if it has QueueCommand
+
+text 2 golden/b5.rc
+1
+
+text 43 golden/b6.files
+b6-001.com
+b6-002.com
+b6-finish.com
+b6.com
+
+text 256 golden/b6.out
+3 command files created with root name b6 to be run with:
+   "processchunks -M # None b6"
+ where # is the maximum # of files to run in parallel
+To stop all processing, use "echo Q > batch.cmds"
+   echo F instead of Q to finish current sets before quitting
+
+text 2 golden/b6.rc
+0
+
+text 271 golden/b6/b6-001.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CoresPerClusterJob 4
+GPUsPerClusterJob 1
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b6
+SingleOnFirstCPU
+DirectiveFile  d1.adoc
+CurrentLocation /data/a
+DeliverToDirectory /data/out1
+RootName ts1
+
+text 271 golden/b6/b6-002.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CoresPerClusterJob 4
+GPUsPerClusterJob 1
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b6
+SingleOnFirstCPU
+DirectiveFile  d2.adoc
+CurrentLocation /data/b
+DeliverToDirectory /data/out2
+RootName ts2
+
+text 55 golden/b6/b6-finish.com
+$b3dremove -g b6-[0-9][0-9][0-9]*.com* b6-finish*.com*
+
+text 43 golden/b7.files
+b7-001.com
+b7-002.com
+b7-finish.com
+b7.com
+
+text 273 golden/b7.out
+3 command files created with root name b7 to be run with:
+   "processchunks -M # localhost:4,server2:2 b7"
+ where # is the maximum # of files to run in parallel
+To stop all processing, use "echo Q > batch.cmds"
+   echo F instead of Q to finish current sets before quitting
+
+text 2 golden/b7.rc
+0
+
+text 230 golden/b7/b7-001.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b7
+SingleOnFirstCPU
+DirectiveFile  d1.adoc
+CurrentLocation /data/a
+DeliverToDirectory /data/out1
+RootName ts1
+
+text 230 golden/b7/b7-002.com
+$batchruntomo -StandardInput
+NamingStyle 1
+MakeSubDirectory
+CheckFile batch.cmds
+EmailAddress x@y
+ParallelBatchRootName b7
+SingleOnFirstCPU
+DirectiveFile  d2.adoc
+CurrentLocation /data/b
+DeliverToDirectory /data/out1
+RootName ts2
+
+text 55 golden/b7/b7-finish.com
+$b3dremove -g b7-[0-9][0-9][0-9]*.com* b7-finish*.com*
+
+text 21 golden/b8.files
+b8-finish.com
+b8.com
+
+text 273 golden/b8.out
+1 command files created with root name b8 to be run with:
+   "processchunks -M # localhost:4,server2:2 b8"
+ where # is the maximum # of files to run in parallel
+To stop all processing, use "echo Q > batch.cmds"
+   echo F instead of Q to finish current sets before quitting
+
+text 2 golden/b8.rc
+0
+
+text 55 golden/b8/b8-finish.com
+$b3dremove -g b8-[0-9][0-9][0-9]*.com* b8-finish*.com*
+
+text 7 golden/b9.files
+b9.com
+
+text 79 golden/b9.out
+ERROR: splitbatch - Failed to convert value after : or # to integer in host1:x
+
+text 2 golden/b9.rc
+1
+
+text 0 golden/help.files
+
+text 340 golden/help.out
+Usage: splitbatch [Options]
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -comfile (-c)  OR  -CommandFile   File
+    Command file for running Batchruntomo (required)
+ -maxgpu (-m)  OR  -MaxGPUsForOneJob   Int
+    Maximum # of GPUs that one batch run would use (default 4)
+ -help (-h)  OR  -usage
+
+text 2 golden/help.rc
+0
+
+text 0 golden/noargs.files
+
+text 340 golden/noargs.out
+Usage: splitbatch [Options]
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -comfile (-c)  OR  -CommandFile   File
+    Command file for running Batchruntomo (required)
+ -maxgpu (-m)  OR  -MaxGPUsForOneJob   Int
+    Maximum # of GPUs that one batch run would use (default 4)
+ -help (-h)  OR  -usage
+
+text 2 golden/noargs.rc
+0
+
+text 0 golden/nonexist.files
+
+text 61 golden/nonexist.out
+ERROR: splitbatch - Command file nonexist.com does not exist
+
+text 2 golden/nonexist.rc
+1
+

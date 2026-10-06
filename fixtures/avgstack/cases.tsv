@@ -1,0 +1,5 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+as_range	-	v.mrc\nav.mrc\n1,3\n
+as_all_short	-	s.mrc\nav.mrc\n/\n
+as_reversed	-	v.mrc\nav.mrc\n3,1\n
+as_nofile	-	nofile\nav.mrc\n/\n

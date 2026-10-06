@@ -1,0 +1,5 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+help	-	-	-h
+bad_minutes	-	-	x
+bad_gpu	-	-	0.01 -1
+bad_gpu_text	-	-	-l 0.01 y

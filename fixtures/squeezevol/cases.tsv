@@ -1,0 +1,10 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+binvol	v.mrc:v.mrc	-	-f 2 v.mrc o.mrc
+linear	v.mrc:v.mrc	-	-f 1.5 -l v.mrc o.mrc
+expand	v.mrc:v.mrc	-	-e 1.5 v.mrc o.mrc
+unequal	v.mrc:v.mrc	-	-x 2 -y 3 -z 1 v.mrc o.mrc
+size	v.mrc:v.mrc	-	-f 2 -iz 3 v.mrc o.mrc
+both	v.mrc:v.mrc	-	-f 2 -e 2 v.mrc o.mrc
+onearg	v.mrc:v.mrc	-	v.mrc
+nofile	-	-	nofile o.mrc
+binxy	v.mrc:v.mrc	-	-x 2 -y 2 -z 1 v.mrc o.mrc

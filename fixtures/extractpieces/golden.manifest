@@ -1,0 +1,149 @@
+# imod-rs native golden manifest for fixtures/extractpieces; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh extractpieces; do not edit by hand.
+text 2 golden/ep_both.rc
+1
+
+text 63 golden/ep_both.stdout
+
+ERROR: EXTRACTPIECES - You cannot enter both -mdoc and -other
+
+text 468 golden/ep_fallback.out.o8.pl
+        0        0      0
+       44        0      0
+       88        0      0
+        0       40      0
+       44       40      0
+       88       40      0
+        0       80      0
+       44       80      0
+       88       80      0
+        0        0      1
+       44        0      1
+       88        0      1
+        0       40      1
+       44       40      1
+       88       40      1
+        0       80      1
+       44       80      1
+       88       80      1
+
+text 2 golden/ep_fallback.rc
+0
+
+sha256 f65e33c9da51b7fea6bd06a0b1b2af26a576e7ffc25774b0d43f6fbf978fb98a 1170 golden/ep_fallback.stdout
+text 468 golden/ep_header.out.o1.pl
+        0        0      0
+       44        0      0
+       88        0      0
+        0       40      0
+       44       40      0
+       88       40      0
+        0       80      0
+       44       80      0
+       88       80      0
+        0        0      1
+       44        0      1
+       88        0      1
+        0       40      1
+       44       40      1
+       88       40      1
+        0       80      1
+       44       80      1
+       88       80      1
+
+text 2 golden/ep_header.rc
+0
+
+sha256 1d95830c034a8fd120a5beaa533475b12bdd2931ac2456a4d86d43c48356ad73 1056 golden/ep_header.stdout
+text 2 golden/ep_help.rc
+0
+
+sha256 885872f78cb95b27eeac102afc029980df29073b19d28368e4247006b2248837 549 golden/ep_help.stdout
+text 468 golden/ep_mdoc.out.o2.pl
+        0        0      0
+       44        0      0
+       88        0      0
+        0       40      0
+       44       40      0
+       88       40      0
+        0       80      0
+       44       80      0
+       88       80      0
+        0        0      1
+       44        0      1
+       88        0      1
+        0       40      1
+       44       40      1
+       88       40      1
+        0       80      1
+       44       80      1
+       88       80      1
+
+text 2 golden/ep_mdoc.rc
+0
+
+sha256 b664c1f956e6fe708e51361263bede2491e5a45dfae80ed59ada145b81bccee6 1056 golden/ep_mdoc.stdout
+text 2 golden/ep_mdoc_missing.rc
+0
+
+sha256 991eb48c08e214ae1e35ae345bc64c4b287d4a634278742ef5177175a8d06f6f 1006 golden/ep_mdoc_missing.stdout
+text 2 golden/ep_none.rc
+0
+
+sha256 e4d33de6586a468189f4f939033eccd286250e760f631fd2d7b7b33398705677 1023 golden/ep_none.stdout
+text 2 golden/ep_noout.rc
+1
+
+text 49 golden/ep_noout.stdout
+
+ERROR: EXTRACTPIECES - No output file specified
+
+text 468 golden/ep_other_full.out.o4.pl
+        0        0      0
+       44        0      0
+       88        0      0
+        0       40      0
+       44       40      0
+       88       40      0
+        0       80      0
+       44       80      0
+       88       80      0
+        0        0      1
+       44        0      1
+       88        0      1
+        0       40      1
+       44       40      1
+       88       40      1
+        0       80      1
+       44       80      1
+       88       80      1
+
+text 2 golden/ep_other_full.rc
+0
+
+text 84 golden/ep_other_full.stdout
+
+ FORMATTED  new  file opened: o4.pl
+          18  piece coordinates output to file
+
+text 2 golden/ep_other_nofile.rc
+0
+
+text 34 golden/ep_other_nofile.stdout
+ The metadata file does not exist
+
+text 130 golden/ep_other_short.out.o3.pl
+        0        0      0
+       44        0      0
+       88        0      0
+        0       40      0
+       44       40      0
+
+text 2 golden/ep_other_short.rc
+0
+
+text 84 golden/ep_other_short.stdout
+
+ FORMATTED  new  file opened: o3.pl
+           5  piece coordinates output to file
+

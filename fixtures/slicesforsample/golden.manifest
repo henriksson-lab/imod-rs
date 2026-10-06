@@ -1,0 +1,45 @@
+# imod-rs native golden manifest for fixtures/slicesforsample; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh slicesforsample; do not edit by hand.
+text 0 golden/args.files
+
+text 112 golden/args.out
+ERROR: slicesforsample - Need 5 params: current lines, Y offset, ali Y size, raw Y size, and tilt com file name
+
+text 2 golden/args.rc
+1
+
+text 9 golden/badint.files
+tilt.com
+
+text 75 golden/badint.out
+ERROR: slicesforsample - Error converting one of the parameters to integer
+
+text 2 golden/badint.rc
+1
+
+text 9 golden/enough.files
+tilt.com
+
+text 2 golden/enough.out
+0
+
+text 2 golden/enough.rc
+0
+
+text 9 golden/more.files
+tilt.com
+
+text 2 golden/more.out
+0
+
+text 2 golden/more.rc
+0
+
+text 0 golden/nocom.files
+
+text 2 golden/nocom.out
+0
+
+text 2 golden/nocom.rc
+0
+

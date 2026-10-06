@@ -1,0 +1,1 @@
+setupset.systemTemplate = nofile.adoc

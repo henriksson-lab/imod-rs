@@ -1,0 +1,33 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+ed_pl	m.st o.st -plin m.pl -plout o.pl	-
+ed_header	mh.st o.st	-
+ed_bin2	mh.st o.st -bin 2	-
+ed_bin3_shift	mh.st o.st -bin 3 -shift	-
+ed_renumber	mh.st o.st -renumber -secs 1	-
+ed_fromone	mh.st o.st -renumber -fromone -secs 2	-
+ed_float_range	mh.st o.st -float 1	-
+ed_float_mean	mh.st o.st -float 2 -mode 0	-
+ed_scale_range	mh.st o.st -float -1 -mode 0	-
+ed_float_input	f.st o.st -plin m.pl -plout o.pl -mode 1	-
+ed_to_bytes	m.st o.st -plin m.pl -plout o.pl -mode 0	-
+ed_xframes	m.st o.st -plin m.pl -plout o.pl -xframes 2,3	-
+ed_yminmax_shift	m.st o.st -plin m.pl -plout o.pl -yminmax 10,20 -shift	-
+ed_exclude	m.st o.st -plin m.pl -plout o.pl -exclude ex.mod	-
+ed_mdoc	mm.st o.st -mdoc	-
+ed_mdoc_float_shift	mm.st o.st -mdoc -bin 2 -shift -float 1	-
+ed_mdoc_renumber	mm.st o.st -mdoc -renumber -secs 1	-
+ed_two_in	-imin m.st -imin m.st -plin m.pl -plin n2.pl -imout o1.st -imout o2.st -imout o3.st -numout 1,2,1 -plout o1.pl -plout o2.pl -plout o3.pl -secs 0,1 -secs 1,0 -renumber	-
+ed_two_in_header	-imin mh.st -imin mh.st -imout o1.st -renumber	-
+ed_per_section	-imin mh.st -imout a.st -imout b.st	-
+ed_err_noinput	m.st	-
+ed_err_badsec	mh.st o.st -secs 5	-
+ed_err_bin	mh.st o.st -bin 40	-
+ed_err_xboth	m.st o.st -plin m.pl -plout o.pl -xminmax 0,10 -xframes 1,2	-
+ed_err_frames	m.st o.st -plin m.pl -plout o.pl -xframes 0,2	-
+ed_err_noplout	m.st o.st -plin m.pl	-
+ed_err_nopieces	m.st o.st	-
+ed_err_numout	-imin mh.st -imout a.st -imout b.st -imout c.st	-
+ed_err_numout_count	-imin mh.st -imout a.st -imout b.st -imout c.st -numout 1,1	-
+ed_err_nopiece_sec	m.st o.st -plin m.pl -plout o.pl -xminmax 1000,2000	-
+ed_err_mdoc_missing	mh.st o.st -mdoc	-
+ed_help	-help	-

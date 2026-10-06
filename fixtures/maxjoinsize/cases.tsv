@@ -1,0 +1,8 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+mj_xforms	3 3 j	-
+mj_wrongnum	3 1 j	-
+mj_warp	2 1 w	-
+mj_nofile	2 1 nofile	-
+mj_badnum	3 x j	-
+mj_args	1 2	-
+mj_usage	-	-

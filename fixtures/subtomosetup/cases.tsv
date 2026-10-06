@@ -1,0 +1,38 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+basic	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0
+noreorient	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt
+flip_zlevels	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 1 -zlevels 2
+rotx_dirs	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient -1 -extent 5 -dir out -chunk cc -stackvols 5
+proc3_erase_filter	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -proc 3 -erase -filter
+raw	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -unaligned
+raw_reduce	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -unaligned -reduce 2 -zlevels 2 -erase -filter
+binali	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -binali 2
+model	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.mod -reorient 0
+model_skip	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.mod -reorient 0 -skip -size 8,6,6
+gpu2	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -gpu 2 -zlevels 3
+gpu1_runs	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -gpu 1 -runs 1
+proc0_gpu	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -proc 0 -gpu 1
+adjust_shift	ds/:. tiltshift.com:tilt.com	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -zlevels 2 -adjust
+adjust_invert	ds/:. tiltshift.com:tilt.com	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -zlevels 2 -adjust -invert 1
+raw_flip_erase	ds/:. tiltshift.com:tilt.com	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 1 -extent 2 -unaligned -erase
+proc_runs	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -proc 2 -runs 3
+stackvols3	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -stackvols 3
+vf_auto	ds/:. vf.mrc:vf.mrc	-	-root g -volume vf.mrc -size 16,10,12 -center pts.txt
+vf_rotx	ds/:. vf.mrc:vf.mrc	-	-root g -volume vf.mrc -size 16,10,12 -center pts.txt -reorient -1
+vr_auto	ds/:. vr.mrc:vr.mrc	-	-root g -volume vr.mrc -size 16,10,12 -center pts.txt
+vr_flip	ds/:. vr.mrc:vr.mrc	-	-root g -volume vr.mrc -size 16,10,12 -center pts.txt -reorient 1
+nosize	ds/:.	-	-root g -volume v.mrc -center pts.txt -reorient 0
+noroot	ds/:.	-	-volume v.mrc -center pts.txt -size 16,10,12
+nocenter	ds/:.	-	-root g -volume v.mrc -center nothere.txt -size 16,10,12 -reorient 0
+both_levels	ds/:.	-	-root g -volume v.mrc -size 16,10,12 -center pts.txt -reorient 0 -zlevels 2 -extent 4
+v90	ds/:. v90.mrc:v90.mrc	-	-root g -volume v90.mrc -size 16,10,12 -center pts.txt
+v90_r0	ds/:. v90.mrc:v90.mrc	-	-root g -volume v90.mrc -size 16,10,12 -center pts.txt -reorient 0
+v90_rm1	ds/:. v90.mrc:v90.mrc	-	-root g -volume v90.mrc -size 16,10,12 -center pts.txt -reorient -1
+v0_90	ds/:. v0_90.mrc:v0_90.mrc	-	-root g -volume v0_90.mrc -size 16,10,12 -center pts.txt
+v0_90_r0	ds/:. v0_90.mrc:v0_90.mrc	-	-root g -volume v0_90.mrc -size 16,10,12 -center pts.txt -reorient 0
+v0_90_rm1	ds/:. v0_90.mrc:v0_90.mrc	-	-root g -volume v0_90.mrc -size 16,10,12 -center pts.txt -reorient -1
+vft	ds/:. vft.mrc:vft.mrc	-	-root g -volume vft.mrc -size 16,10,12 -center pts.txt
+vft_r0	ds/:. vft.mrc:vft.mrc	-	-root g -volume vft.mrc -size 16,10,12 -center pts.txt -reorient 0
+vft_rm1	ds/:. vft.mrc:vft.mrc	-	-root g -volume vft.mrc -size 16,10,12 -center pts.txt -reorient -1
+objects	ds/:. pts3.mod:pts3.mod	-	-root g -volume v.mrc -size 16,10,12 -center pts3.mod -objects 1,3 -reorient 0
+objects_one	ds/:. pts3.mod:pts3.mod	-	-root g -volume v.mrc -size 16,10,12 -center pts3.mod -objects 2 -reorient 0

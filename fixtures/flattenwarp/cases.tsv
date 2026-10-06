@@ -1,0 +1,15 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+fw_bnd	-input bnd.mod -output w.xf	-
+fw_bnd_patch_mid	-input bnd.mod -output w.xf -patch p.txt -middle mid.mod	-
+fw_one_bin	-input bnd1.mod -output w.xf -one -binning 2,2	-
+fw_spacing	-input bnd.mod -output w.xf -spacing 20,15	-
+fw_bnd_lambda	-input bnd.mod -output w.xf -lambda 0.5 -middle mid.mod	-
+fw_bnd_lambdas	-input bnd.mod -lambda 0,1,2 -middle mid.mod	-
+fw_scat	-input scat.mod -output w.xf -lambda 1 -middle m.mod -patch p.txt	-
+fw_scat_restore	-input scat.mod -output w.xf -lambda 1 -middle m.mod -restore	-
+fw_scat_lambdas_show	-input scat.mod -output w.xf -lambda 0,2 -middle m.mod -show	-
+fw_scat_nolambda	-input scat.mod -output w.xf	-
+fw_flip_onecont	-input bnd.mod -output w.xf -flip 1 -middle m.mod -restore	-
+fw_scat_noflip	-input scat.mod -output w.xf -lambda 1 -flip 0 -spacing 30,30	-
+fw_nooutput	-input bnd.mod	-
+fw_lambdas_nomid	-input bnd.mod -output w.xf -lambda 0,1	-

@@ -1,0 +1,4 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+no_thickness	eraser.com:eraser.com g.rawtlt:g.rawtlt g.tlt:g.tlt g.xf:g.xf newst.com:newst.com tilt.com:tilt.com track.com:track.com	-	-root g
+wrong_root	eraser.com:eraser.com g.rawtlt:g.rawtlt g.tlt:g.tlt g.xf:g.xf newst.com:newst.com tilt.com:tilt.com track.com:track.com	-	-root x -thick 40
+no_root	eraser.com:eraser.com g.rawtlt:g.rawtlt g.tlt:g.tlt g.xf:g.xf newst.com:newst.com tilt.com:tilt.com track.com:track.com	-	-thick 40

@@ -1,0 +1,9 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+plain	../../boxstartend/v.mrc:v.mrc	-	v.mrc o.mrc
+extended	seri_all.st:seri_all.st	-	seri_all.st o.mrc
+labels	plain_bidir.st:plain_bidir.st	-	plain_bidir.st o.mrc
+backup	../../boxstartend/v.mrc:v.mrc seri_all.st:o.mrc	-	v.mrc o.mrc
+nonexist	-	-	nonexist o.mrc
+onearg	../../boxstartend/v.mrc:v.mrc	-	v.mrc
+noargs	-	-	-
+same	../../boxstartend/v.mrc:v.mrc	-	v.mrc v.mrc

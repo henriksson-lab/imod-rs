@@ -1,0 +1,53 @@
+# imod-rs native golden manifest for fixtures/imodauto; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh imodauto; do not edit by hand.
+sha256 aad5ff33219ffb1daff2c91d24b7e295d411ec14a2b6ad62784517a28d2cf56b 528 golden/ia_exact.out.a.mod
+text 2 golden/ia_exact.rc
+0
+
+text 102 golden/ia_exact.stdout
+Starting section 1 of 4Starting section 2 of 4Starting section 3 of 4Starting section 4 of 4
+done
+
+sha256 aad5ff33219ffb1daff2c91d24b7e295d411ec14a2b6ad62784517a28d2cf56b 528 golden/ia_high_opts.out.a.mod
+text 2 golden/ia_high_opts.rc
+0
+
+text 102 golden/ia_high_opts.stdout
+Starting section 1 of 4Starting section 2 of 4Starting section 3 of 4Starting section 4 of 4
+done
+
+sha256 2a523bb7a3d4780f99e2a8017750e1f18afc3b3466ead503b01137c32bb1ab0a 528 golden/ia_low_z.out.a.mod
+text 2 golden/ia_low_z.rc
+0
+
+text 102 golden/ia_low_z.stdout
+Starting section 1 of 4Starting section 2 of 4Starting section 3 of 4Starting section 4 of 4
+done
+
+text 2 golden/ia_nofile.rc
+3
+
+text 109 golden/ia_nofile.stdout
+ERROR: iiOpen - Opening file nofile (No such file or directory)
+ERROR: imodauto - Opening image file nofile.
+
+sha256 3db556f245bba9e47f4bab34004a6cbad8f665527b5724f79d0e8e8b3daa8657 20104 golden/ia_range.out.a.mod
+text 2 golden/ia_range.rc
+0
+
+text 102 golden/ia_range.stdout
+Starting section 1 of 4Starting section 2 of 4Starting section 3 of 4Starting section 4 of 4
+done
+
+sha256 9b989ae9a9c88a8a69b01c5a87f49345a4f32ec3fadbedd91c87a9fe2f874edd 876 golden/ia_short.out.a.mod
+text 2 golden/ia_short.rc
+0
+
+text 78 golden/ia_short.stdout
+Starting section 1 of 3Starting section 2 of 3Starting section 3 of 3
+done
+
+text 2 golden/ia_usage.rc
+3
+
+sha256 2c565f13d6aa2414524d98ce49254847b4d81a1bd5de30fecd4074eb4e67084d 1646 golden/ia_usage.stdout

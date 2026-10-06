@@ -1,0 +1,12 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+si_basic	-afile v.mrc -bfile v2.mrc -o d.mrc	-
+si_positional	v.mrc v2.mrc d.mrc	-
+si_stats	-afile v.mrc -bfile v2.mrc	-
+si_zero_thresh	-afile v.mrc -bfile v2.mrc -o d.mrc -zero -lower -1 -upper 1 -mode 1	-
+si_subarea_text	-afile v.mrc -bfile v2.mrc -asec 0-2 -bsec 1-3 -frac -xstats 3,30 -ystats 5,20 -text t.txt	-
+si_limits	-afile v.mrc -bfile v2.mrc -minmax 0.5 -sdlimit 0.1	-
+si_default_b	-afile v.mrc	-
+si_size	-afile v.mrc -bfile s.mrc	-
+si_mode12	-afile v.mrc -bfile v2.mrc -o d.mrc -mode 12	-
+si_ambiguous	-a v.mrc -b v2.mrc	-
+si_interactive_all	-	v.mrc\n/\nv2.mrc\n/\nd.mrc\n

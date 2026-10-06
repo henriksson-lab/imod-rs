@@ -1,0 +1,21 @@
+UseHybrid = 1
+Set 1 (-30.0 deg)
+Results with bin 4 rad2 0.06 :
+Resid mean 0.523 max max 1.234 l-o err 0.611 wgtd
+Dist 2.50 smooth 2.10
+Results with bin 6 rad2 0.06 :
+Resid mean 0.433 max max 1.034 l-o err 0.511 wgtd
+Dist 2.30 smooth 2.00
+Hybrid results bin 4:
+Resid mean 0.400 max max 1.000 l-o err 0.500 weighted
+Dist 2.20 smth 1.90
+Set 1: Best bin 4 rad2 0.06
+Set 2 (0.0 deg)
+Results with bin 4 rad2 0.06 :
+Resid mean 0.623 max max 1.334 l-o 0.711
+Dist 3.50 smooth 3.10
+Set 2: Best bin 4 rad2 0.06
+Set 3 (30.0 deg)
+Set 3: drop frames 2
+Resid mean 0.723 max max 1.434 l-o err 0.811
+Dist 4.50 smooth 4.10

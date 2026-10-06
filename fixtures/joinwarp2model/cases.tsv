@@ -1,0 +1,10 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+jw_size	-input ctrl.warp -output j.mod -xform grid.warp -pixel 1.25 -size 600,500 -chunks 10,12	-
+jw_offset_bin	-input ctrl.warp -output j.mod -xform grid.warp -pixel 1.25 -size 600,500 -chunks 10,12 -offset 4,-6 -binning 2	-
+jw_joined_mismatch	-input ctrl.warp -output j.mod -xform grid.warp -join v.mrc -chunks 2,3	-
+jw_joined	-input ctrl.warp -output j.mod -xform grid.warp -join v.mrc -chunks 2,2	-
+jw_xform_has_points	-input ctrl.warp -output j.mod -xform ctrl.warp -pixel 1 -size 6,5 -chunks 10,12	-
+jw_no_points	-input grid.warp -output j.mod -xform grid.warp -pixel 1 -size 6,5 -chunks 10,12	-
+jw_chunk_count	-input ctrl.warp -output j.mod -xform grid.warp -pixel 1 -size 6,5 -chunks 10	-
+jw_no_xform	-input ctrl.warp -output j.mod -pixel 1 -size 6,5 -chunks 10,12	-
+jw_both_sizes	-input ctrl.warp -output j.mod -xform grid.warp -join v.mrc -pixel 1 -size 6,5 -chunks 2,2	-

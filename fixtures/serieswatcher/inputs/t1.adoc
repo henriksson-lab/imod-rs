@@ -1,0 +1,1 @@
+setupset.scopeTemplate = sub/x.adoc

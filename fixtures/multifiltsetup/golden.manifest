@@ -1,0 +1,366 @@
+# imod-rs native golden manifest for fixtures/multifiltsetup; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh multifiltsetup; do not edit by hand.
+text 112 golden/cut_one_fall.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-003.com
+tilt_mulfil-finish.com
+
+text 87 golden/cut_one_fall.out
+4 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/cut_one_fall.rc
+0
+
+sha256 b09f8f03fd35013ad283f93eb7cdf7a0373b97b13a173cb7f9d5f73c80783337 563 golden/cut_one_fall/tilt_mulfil-001.com
+sha256 d3e8acbaed3885f213e539dcb1961b9c0fa05a79f2de93c294e280238f1ee34f 563 golden/cut_one_fall/tilt_mulfil-002.com
+sha256 5a9702f79af92aa7a69836f875161c5435d3742511a6d414b90eed6f3d31468d 563 golden/cut_one_fall/tilt_mulfil-003.com
+text 106 golden/cut_one_fall/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 29 golden/cutoff_range.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 85 golden/cutoff_range.out
+ERROR: multifiltsetup - Gaussian filter cutoff frequencies must be between 0 and 0.5
+
+text 2 golden/cutoff_range.rc
+1
+
+text 92 golden/cutoffs.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-finish.com
+
+text 87 golden/cutoffs.out
+3 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/cutoffs.rc
+0
+
+sha256 f75922b7e21c84594f0b0c17158bc9d2ce0e9f6ec7206e733963b8ba6d6faee4 565 golden/cutoffs/tilt_mulfil-001.com
+sha256 c4bd66e50b86d0a4d1efd18d95da98d95616cdcb34959c0fcdf76b804f15e61f 563 golden/cutoffs/tilt_mulfil-002.com
+text 106 golden/cutoffs/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 112 golden/exact.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-003.com
+tilt_mulfil-finish.com
+
+text 87 golden/exact.out
+4 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/exact.rc
+0
+
+sha256 983c87bed203ea49d325a5be3372019fc0750bc111f097cd71c953a64c93b4d6 572 golden/exact/tilt_mulfil-001.com
+sha256 a8a01435c16afc259785ac1409fe1349dce93f146067bbc7c34659a948a1fb59 572 golden/exact/tilt_mulfil-002.com
+sha256 32e9367612ec001736cdb7e356c141e91f44f18365023fa72011d91b5536c0bd 572 golden/exact/tilt_mulfil-003.com
+text 106 golden/exact/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 72 golden/exact_large.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-finish.com
+
+text 87 golden/exact_large.out
+2 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/exact_large.rc
+0
+
+sha256 a1c3f78df62a1521d46b55ecba55e6a236d1a31c6a2df00becce45c1cdaac2fc 577 golden/exact_large/tilt_mulfil-001.com
+text 106 golden/exact_large/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 112 golden/fake.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-003.com
+tilt_mulfil-finish.com
+
+text 87 golden/fake.out
+4 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/fake.rc
+0
+
+sha256 66330ff2c8559d63dae031e06964c970f9f19ad9a976a3c7f4d2005a288dd424 575 golden/fake/tilt_mulfil-001.com
+sha256 7265197b3fdfb844add3748baa6c2aaedeecae5b239bc3dc26c9945ed0214b81 576 golden/fake/tilt_mulfil-002.com
+sha256 83324182bd886ae65fa0fa094f5efa31a2ee1df04fd629925a1b3c1372e0a1b6 576 golden/fake/tilt_mulfil-003.com
+text 106 golden/fake/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 92 golden/falloffs.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-finish.com
+
+text 87 golden/falloffs.out
+3 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/falloffs.rc
+0
+
+sha256 6c32b5fc090fb3b478a01eb58d7fd786b654cd1f9c5432f80d88c717b9e78207 564 golden/falloffs/tilt_mulfil-001.com
+sha256 a2fefd4b0ecdf1c1faf9352e37dfb29f91d05e52d81ff31dc1fc653b0c6004e8 563 golden/falloffs/tilt_mulfil-002.com
+text 106 golden/falloffs/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 92 golden/four_digit.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-finish.com
+
+text 87 golden/four_digit.out
+3 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/four_digit.rc
+0
+
+sha256 284af9ab1043a43a07a2287b90502cb8bff22e3f2a75b375c68e7896afed1608 580 golden/four_digit/tilt_mulfil-001.com
+sha256 3740547a2904952ef1f0838d466a964f00599bc402c4062622ee9f372e43bbd0 577 golden/four_digit/tilt_mulfil-002.com
+text 106 golden/four_digit/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 92 golden/hamming.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-finish.com
+
+text 87 golden/hamming.out
+3 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/hamming.rc
+0
+
+text 485 golden/hamming/tilt_mulfil-001.com
+# Command file to run Tilt
+#
+####CreatedVersion#### 4.5.59
+#
+#   followed by the standard deviation of the Gaussian roll-off
+#
+# LOG takes the logarithm of tilt data after adding the given value
+#
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile	g_hlfs0.200.mrc
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SHIFT	0.0 0.0
+HammingLikeFilter	0.2
+FalloffIsTrueSigma 1
+XAXISTILT 2.5
+LOG 0
+SCALE 0 500
+PERPENDICULAR
+MODE 1
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+AdjustOrigin 1
+
+text 485 golden/hamming/tilt_mulfil-002.com
+# Command file to run Tilt
+#
+####CreatedVersion#### 4.5.59
+#
+#   followed by the standard deviation of the Gaussian roll-off
+#
+# LOG takes the logarithm of tilt data after adding the given value
+#
+$tilt -StandardInput
+InputProjections g.ali
+OutputFile	g_hlfs0.300.mrc
+IMAGEBINNED 1
+TILTFILE g.tlt
+XTILTFILE g.xtilt
+THICKNESS 30
+SHIFT	0.0 0.0
+HammingLikeFilter	0.3
+FalloffIsTrueSigma 1
+XAXISTILT 2.5
+LOG 0
+SCALE 0 500
+PERPENDICULAR
+MODE 1
+FULLIMAGE 48 40
+SUBSETSTART 0 0
+AdjustOrigin 1
+
+text 106 golden/hamming/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 29 golden/hamming_range.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 83 golden/hamming_range.out
+ERROR: multifiltsetup - Hamming filter start frequencies must be between 0 and 0.5
+
+text 2 golden/hamming_range.rc
+1
+
+text 29 golden/negative_width.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 82 golden/negative_width.out
+ERROR: multifiltsetup - Entries for -width, -thick, and -ysize cannot be negative
+
+text 2 golden/negative_width.rc
+1
+
+text 29 golden/no_comfile.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 119 golden/no_comfile.out
+ERROR: multifiltsetup - The full command file name must be entered because neither nonexist.com nor nonexist.pcm exist
+
+text 2 golden/no_comfile.rc
+1
+
+text 29 golden/no_filter.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 69 golden/no_filter.out
+ERROR: multifiltsetup - One of the filtering options must be entered
+
+text 2 golden/no_filter.rc
+1
+
+text 29 golden/too_many_falloffs.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 99 golden/too_many_falloffs.out
+ERROR: multifiltsetup - You must enter either one cutoff or the same number of cutoffs as falloffs
+
+text 2 golden/too_many_falloffs.rc
+1
+
+text 29 golden/two_filters.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 73 golden/two_filters.out
+ERROR: multifiltsetup - Only one of the filtering options can be entered
+
+text 2 golden/two_filters.rc
+1
+
+text 112 golden/unsorted_list.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-002.com
+tilt_mulfil-003.com
+tilt_mulfil-finish.com
+
+text 87 golden/unsorted_list.out
+4 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/unsorted_list.rc
+0
+
+sha256 2cc6692f2f31c834abd5bd4e5a0a83e578268f6599e759ce5c741c13901c0d3f 575 golden/unsorted_list/tilt_mulfil-001.com
+sha256 165ce961689d0ea87ffd60edf75537d0bfb729d5f5859d52e936a96d1234ec90 575 golden/unsorted_list/tilt_mulfil-002.com
+sha256 0d1a72c669b97d764c8f0dae2ccad4dd73e0b31cdcb2da702bf25025d9a955db 575 golden/unsorted_list/tilt_mulfil-003.com
+text 106 golden/unsorted_list/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 72 golden/volume.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+tilt_mulfil-001.com
+tilt_mulfil-finish.com
+
+text 87 golden/volume.out
+2 command files output and ready to run with
+   processchunks machine_list tilt_mulfil
+
+text 2 golden/volume.rc
+0
+
+sha256 71b72825fbc1972508c6739f6bc839f810feff580af2809c0d93bcf74d19c83f 596 golden/volume/tilt_mulfil-001.com
+text 106 golden/volume/tilt_mulfil-finish.com
+$b3dremove -g tilt_mulfil-[0-9][0-9][0-9]*.com* tilt_mulfil-[0-9][0-9][0-9]*.log* tilt_mulfil-finish.com 
+
+text 29 golden/ysize_too_big.files
+g.ali
+g.tlt
+g.xtilt
+tilt.com
+
+text 93 golden/ysize_too_big.out
+ERROR: multifiltsetup - The combination of Y size and Y shift is outside the range of slices
+
+text 2 golden/ysize_too_big.rc
+1
+

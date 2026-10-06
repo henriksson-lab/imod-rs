@@ -1,0 +1,8 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+help	-	-	-help
+not_dir	-	-	-w nonexist
+bad_ext	q.edf:q.edf	-	q.edf.foo
+missing_etomo	-	-	x.edf
+no_root	q.edf:q.edf	-	-t
+ejf_noname	j.ejf:j.ejf	-	j.ejf
+bad_option	-	-	-badopt

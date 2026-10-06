@@ -1,0 +1,41 @@
+# imod-rs native golden manifest for fixtures/taperoutvol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh taperoutvol; do not edit by hand.
+text 0 golden/tv_badx.out.o.mrc
+
+text 2 golden/tv_badx.rc
+1
+
+sha256 781958d29f58c700a3c27b39c9d863e2160f4539e3b819e9f7b53afe2b10fd8d 1238 golden/tv_badx.stdout
+sha256 9b5a0d723d06f66d73dc6a6fd942b553b9f07e42859de50afc69e22ac227bc97 29824 golden/tv_interactive.out.o.mrc
+text 2 golden/tv_interactive.rc
+0
+
+sha256 52d3bce0ecaedffdad57b3757a217c44c3d6145715061662a321177c93e8312c 1193 golden/tv_interactive.stdout
+text 2 golden/tv_nofile.rc
+1
+
+text 114 golden/tv_nofile.stdout
+ERROR: iiOpen - Opening file nofile.mrc (No such file or directory)
+
+ERROR: iiuOpen - Could not open 'nofile.mrc'
+
+sha256 3c36cbf5ccf0dfef39159a490f292e6b67d30db6f4cfd4721944222827cacbf0 42496 golden/tv_noise.out.o.mrc
+text 2 golden/tv_noise.rc
+0
+
+sha256 daaf8408fb0fbb64952fed773c7dcc8adc53cc7b2af30a7343dbfaa4c21fee0c 1009 golden/tv_noise.stdout
+sha256 0cb5fe1f2f16f1b8538a5d5046972b8c42e99f4ef70182d38c21da5bde3559ae 13312 golden/tv_plain.out.o.mrc
+text 2 golden/tv_plain.rc
+0
+
+sha256 daaf8408fb0fbb64952fed773c7dcc8adc53cc7b2af30a7343dbfaa4c21fee0c 1009 golden/tv_plain.stdout
+sha256 6fc0f7dad28c130dc8b98b02ff8600abe8cfcf41eebdf4c7f5de9e9568397cf9 14272 golden/tv_short_nofft.out.o.mrc
+text 2 golden/tv_short_nofft.rc
+0
+
+sha256 605439ec5ade2ccb0e96cd52598635a53039820792749c5c72d9d907d63139ab 1009 golden/tv_short_nofft.stdout
+sha256 1b8cbbceee1d735957fdc1fddfa03184a458b04706d23651164df073803057ce 42496 golden/tv_sub.out.o.mrc
+text 2 golden/tv_sub.rc
+0
+
+sha256 daaf8408fb0fbb64952fed773c7dcc8adc53cc7b2af30a7343dbfaa4c21fee0c 1009 golden/tv_sub.stdout

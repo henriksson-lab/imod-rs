@@ -1,0 +1,1357 @@
+# imod-rs native golden manifest for fixtures/excludeviews; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh excludeviews; do not edit by hand.
+text 219 golden/altstack.files
+alt.st
+alt_allviews0.st
+alt_cutviews0.info
+alt_cutviews0.st
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+
+text 162 golden/altstack.out
+Copying retained views to alt_keptviews0.st
+Copying excluded views to alt_cutviews0.st
+Renaming files:
+alt.st  ->  alt_allviews0.st
+alt_keptviews0.st  ->  alt.st
+
+text 2 golden/altstack.rc
+0
+
+sha256 4ba63839463a29fe57d4374787db90928cf4f5679add23a003b2c3b6d075245c 2176 golden/altstack/alt.st
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/altstack/alt_allviews0.st
+text 14 golden/altstack/alt_cutviews0.info
+6 0 0 0
+2,4-5
+
+sha256 176c211c8011c5b4200dd32b7d303ba9c786568de08d5f5877afda21760164cb 2176 golden/altstack/alt_cutviews0.st
+text 404 golden/altstack_two.files
+alt.st
+alt_allviews0.st
+alt_allviews1.st
+alt_cutviews0.info
+alt_cutviews0.st
+alt_cutviews1.info
+alt_cutviews1.st
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_allviews1.rawtlt
+ts_allviews1.st
+ts_allviews1.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+ts_cutviews1.info
+ts_cutviews1.rawtlt
+ts_cutviews1.st
+ts_cutviews1.st.mdoc
+
+text 324 golden/altstack_two.out
+Copying retained views to alt_keptviews0.st
+Copying excluded views to alt_cutviews0.st
+Renaming files:
+alt.st  ->  alt_allviews0.st
+alt_keptviews0.st  ->  alt.st
+Copying retained views to alt_keptviews1.st
+Copying excluded views to alt_cutviews1.st
+Renaming files:
+alt.st  ->  alt_allviews1.st
+alt_keptviews1.st  ->  alt.st
+
+text 2 golden/altstack_two.rc
+0
+
+sha256 9db27fa421f4c29106d07b508fbc34a7912bc15075ab8bd9d6dadf255edd146c 1792 golden/altstack_two/alt.st
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/altstack_two/alt_allviews0.st
+sha256 4ba63839463a29fe57d4374787db90928cf4f5679add23a003b2c3b6d075245c 2176 golden/altstack_two/alt_allviews1.st
+text 14 golden/altstack_two/alt_cutviews0.info
+6 0 0 0
+2,4-5
+
+sha256 176c211c8011c5b4200dd32b7d303ba9c786568de08d5f5877afda21760164cb 2176 golden/altstack_two/alt_cutviews0.st
+text 10 golden/altstack_two/alt_cutviews1.info
+3 0 0 0
+1
+
+sha256 665b704299a835c89d512748e27e168dc3a73afe71538d7a8a63882e7f7367c1 1408 golden/altstack_two/alt_cutviews1.st
+text 166 golden/altstack_with_views.files
+alt.st
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+
+text 87 golden/altstack_with_views.out
+ERROR: excludeviews - No other options besides -stack should be entered with -altstack
+
+text 2 golden/altstack_with_views.rc
+1
+
+text 49 golden/delete.files
+plain.st
+plain_cutviews0.info
+plain_cutviews0.st
+
+text 315 golden/delete.out
+Copying retained views to plain_keptviews0.st
+Copying excluded views to plain_cutviews0.st
+Renaming files:
+    plain.st  ->  plain_allviews0.st
+    plain_keptviews0.st  ->  plain.st
+Removing plain_allviews0.st
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore plain.st
+
+text 2 golden/delete.rc
+0
+
+sha256 a03d954a7556507450869b4fb0a21adc7a13168dcd2d83298d7bf5024b476a51 2560 golden/delete/plain.st
+text 12 golden/delete/plain_cutviews0.info
+6 0 0 0
+1,6
+
+sha256 7f833db9b1888a6787f04bc7b80c78dc20cba9a9a9601b77fb920ec2910ac21a 1792 golden/delete/plain_cutviews0.st
+text 116 golden/dose_warning.files
+tsw.st
+tsw.st.mdoc
+tsw_allviews0.st
+tsw_allviews0.st.mdoc
+tsw_cutviews0.info
+tsw_cutviews0.st
+tsw_cutviews0.st.mdoc
+
+text 484 golden/dose_warning.out
+WARNING: Prior Record dose values are missing or incomplete in metadata; the new file should not be used for dose weighting
+Copying retained views to tsw_keptviews0.st
+Copying excluded views to tsw_cutviews0.st
+Renaming files:
+    tsw.st  ->  tsw_allviews0.st
+    tsw_keptviews0.st  ->  tsw.st
+    tsw.st.mdoc  ->  tsw_allviews0.st.mdoc
+    tsw_keptviews0.st.mdoc  ->  tsw.st.mdoc
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore tsw.st
+
+text 2 golden/dose_warning.rc
+0
+
+sha256 fa9c3215102c4ba5112b1db1997c316887259dd8e6043cdd74a0ca18abcb5252 2944 golden/dose_warning/tsw.st
+text 416 golden/dose_warning/tsw.st.mdoc
+PixelSpacing = 2.5
+ImageFile = tsw.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 3]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 4]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/dose_warning/tsw_allviews0.st
+text 466 golden/dose_warning/tsw_allviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = tsw.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+
+text 10 golden/dose_warning/tsw_cutviews0.info
+6 0 1 0
+3
+
+sha256 f9f64cd2ac1e8a3ddd517d6be631c3ba15701c0a222c9b57f273fb6eca2ba84e 1408 golden/dose_warning/tsw_cutviews0.st
+text 118 golden/dose_warning/tsw_cutviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = tsw.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -10
+ExposureDose = 1.5
+
+text 27 golden/duplicate.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+
+text 70 golden/duplicate.out
+ERROR: excludeviews - View number 2 occurs more than once in the list
+
+text 2 golden/duplicate.rc
+1
+
+text 159 golden/exclude.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+
+text 428 golden/exclude.out
+Copying retained views to ts_keptviews0.st
+Copying excluded views to ts_cutviews0.st
+Renaming files:
+    ts.st  ->  ts_allviews0.st
+    ts_keptviews0.st  ->  ts.st
+    ts.rawtlt  ->  ts_allviews0.rawtlt
+    ts_keptviews0.rawtlt  ->  ts.rawtlt
+    ts.st.mdoc  ->  ts_allviews0.st.mdoc
+    ts_keptviews0.st.mdoc  ->  ts.st.mdoc
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore ts.st
+
+text 2 golden/exclude.rc
+0
+
+text 20 golden/exclude/ts.rawtlt
+-30.00
+-10.00
+20.00
+
+sha256 4ba63839463a29fe57d4374787db90928cf4f5679add23a003b2c3b6d075245c 2176 golden/exclude/ts.st
+text 276 golden/exclude/ts.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 2]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 38 golden/exclude/ts_allviews0.rawtlt
+-30.00
+-20.00
+-10.00
+0.00
+10.00
+20.00
+
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/exclude/ts_allviews0.st
+text 485 golden/exclude/ts_allviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+
+text 14 golden/exclude/ts_cutviews0.info
+6 1 1 0
+2,4-5
+
+text 18 golden/exclude/ts_cutviews0.rawtlt
+-20.00
+0.00
+10.00
+
+sha256 176c211c8011c5b4200dd32b7d303ba9c786568de08d5f5877afda21760164cb 2176 golden/exclude/ts_cutviews0.st
+text 276 golden/exclude/ts_cutviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 1]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 2]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+text 0 golden/missing_stack.files
+
+text 62 golden/missing_stack.out
+ERROR: excludeviews - The stack file, none.st, does not exist
+
+text 2 golden/missing_stack.rc
+1
+
+text 56 golden/montage_header.files
+mt.st
+mt_allviews0.st
+mt_cutviews0.info
+mt_cutviews0.st
+
+text 266 golden/montage_header.out
+Copying retained views to mt_keptviews0.st
+Copying excluded views to mt_cutviews0.st
+Renaming files:
+    mt.st  ->  mt_allviews0.st
+    mt_keptviews0.st  ->  mt.st
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore mt.st
+
+text 2 golden/montage_header.rc
+0
+
+sha256 b9869ff5ab35154cc5d6808bfa9d08cdea91d11bf75deec5b9792d3cdc4eeb37 3364 golden/montage_header/mt.st
+sha256 db21f040cf8d4831321a96a528628b60eca77d7db60438f715dacf508f26a285 5704 golden/montage_header/mt_allviews0.st
+text 10 golden/montage_header/mt_cutviews0.info
+2 0 0 1
+2
+
+sha256 241df09fc65161fc86f5843534e81c8df7f61290bf0c5da3a1f7baecd1391733 3364 golden/montage_header/mt_cutviews0.st
+text 94 golden/montage_pl.files
+mp.pl
+mp.st
+mp_allviews0.pl
+mp_allviews0.st
+mp_cutviews0.info
+mp_cutviews0.pl
+mp_cutviews0.st
+
+text 329 golden/montage_pl.out
+Copying retained views to mp_keptviews0.st
+Copying excluded views to mp_cutviews0.st
+Renaming files:
+    mp.st  ->  mp_allviews0.st
+    mp_keptviews0.st  ->  mp.st
+    mp.pl  ->  mp_allviews0.pl
+    mp_keptviews0.pl  ->  mp.pl
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore mp.st
+
+text 2 golden/montage_pl.rc
+0
+
+text 156 golden/montage_pl/mp.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+
+sha256 e5f80b9f7923d8b8c581c4a1c3965e3bbfd0be7897fb41c68a351a1ec94821f6 3328 golden/montage_pl/mp.st
+text 80 golden/montage_pl/mp_allviews0.pl
+0 0 0
+12 0 0
+24 0 0
+0 9 0
+12 9 0
+24 9 0
+0 0 1
+12 0 1
+24 0 1
+0 9 1
+12 9 1
+24 9 1
+
+sha256 e241c85d191d36791a399c7090f2046cf73047688a3013bb9266ae74908b6017 5632 golden/montage_pl/mp_allviews0.st
+text 10 golden/montage_pl/mp_cutviews0.info
+2 0 0 1
+2
+
+text 156 golden/montage_pl/mp_cutviews0.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+
+sha256 e90b1e57d80c2fe364792a617d0b2d50556b1b75a139584a7fe7061f7308e52f 3328 golden/montage_pl/mp_cutviews0.st
+text 27 golden/no_views.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+
+text 92 golden/no_views.out
+ERROR: excludeviews - The list of views to exclude must be entered when not restoring files
+
+text 2 golden/no_views.rc
+1
+
+text 27 golden/orig_without_restore.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+
+text 88 golden/orig_without_restore.out
+ERROR: excludeviews - The -orig option is not used except when restoring the full stack
+
+text 2 golden/orig_without_restore.rc
+1
+
+text 27 golden/out_of_range.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+
+text 62 golden/out_of_range.out
+ERROR: excludeviews - View number 9 is out of range for stack
+
+text 2 golden/out_of_range.rc
+1
+
+text 159 golden/pid.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+
+text 428 golden/pid.out
+Copying retained views to ts_keptviews0.st
+Copying excluded views to ts_cutviews0.st
+Renaming files:
+    ts.st  ->  ts_allviews0.st
+    ts_keptviews0.st  ->  ts.st
+    ts.rawtlt  ->  ts_allviews0.rawtlt
+    ts_keptviews0.rawtlt  ->  ts.rawtlt
+    ts.st.mdoc  ->  ts_allviews0.st.mdoc
+    ts_keptviews0.st.mdoc  ->  ts.st.mdoc
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore ts.st
+
+text 2 golden/pid.rc
+0
+
+text 31 golden/pid/ts.rawtlt
+-30.00
+-10.00
+0.00
+10.00
+20.00
+
+sha256 8c4fd36f20f6613465520ff7dbe26a243bc53292c17bda06dd3c471e18224bcb 2944 golden/pid/ts.st
+text 413 golden/pid/ts.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 2]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 3]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 4]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 38 golden/pid/ts_allviews0.rawtlt
+-30.00
+-20.00
+-10.00
+0.00
+10.00
+20.00
+
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/pid/ts_allviews0.st
+text 485 golden/pid/ts_allviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+
+text 10 golden/pid/ts_cutviews0.info
+6 1 1 0
+2
+
+text 7 golden/pid/ts_cutviews0.rawtlt
+-20.00
+
+sha256 894d5ee494b78917562ebf2205a220cbf82d8e2904602d8ae0bea6b445a265c7 1408 golden/pid/ts_cutviews0.st
+text 139 golden/pid/ts_cutviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+text 205 golden/restore.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.st.mdoc~
+ts_allviews0.st~
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+ts_cutviews0_old.info
+ts_keptviews0.rawtlt
+ts_keptviews0.st
+ts_keptviews0.st.mdoc
+
+text 338 golden/restore.out
+Recombining the stack into ts_allviews0.st...
+Renaming files...
+    ts.st  ->  ts_keptviews0.st
+    ts.rawtlt  ->  ts_keptviews0.rawtlt
+    ts.st.mdoc  ->  ts_keptviews0.st.mdoc
+    ts_allviews0.st  ->  ts.st
+    ts_allviews0.rawtlt  ->  ts.rawtlt
+    ts_allviews0.st.mdoc  ->  ts.st.mdoc
+    ts_cutviews0.info  ->  ts_cutviews0_old.info
+
+text 2 golden/restore.rc
+0
+
+text 38 golden/restore/ts.rawtlt
+-30.00
+-20.00
+-10.00
+0.00
+10.00
+20.00
+
+sha256 df4e81dbb6a32a797ca9951494aca8753a5400528d3241a4b1c609e5d85ff8ce 3328 golden/restore/ts.st
+text 484 golden/restore/ts.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 485 golden/restore/ts_allviews0.st.mdoc~
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/restore/ts_allviews0.st~
+text 14 golden/restore/ts_cutviews0_old.info
+6 1 1 0
+2,4-5
+
+text 20 golden/restore/ts_keptviews0.rawtlt
+-30.00
+-10.00
+20.00
+
+sha256 4ba63839463a29fe57d4374787db90928cf4f5679add23a003b2c3b6d075245c 2176 golden/restore/ts_keptviews0.st
+text 276 golden/restore/ts_keptviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 2]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 88 golden/restore_delete.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.st.mdoc~
+ts_allviews0.st~
+ts_cutviews0_old.info
+
+text 358 golden/restore_delete.out
+Recombining the stack into ts_allviews0.st...
+Removing files for retained and excluded views...
+    ts_cutviews0.st
+    ts_cutviews0.rawtlt
+    ts_cutviews0.st.mdoc
+    ts.st.mdoc
+Renaming files...
+    ts_allviews0.st  ->  ts.st
+    ts_allviews0.rawtlt  ->  ts.rawtlt
+    ts_allviews0.st.mdoc  ->  ts.st.mdoc
+    ts_cutviews0.info  ->  ts_cutviews0_old.info
+
+text 2 golden/restore_delete.rc
+0
+
+text 38 golden/restore_delete/ts.rawtlt
+-30.00
+-20.00
+-10.00
+0.00
+10.00
+20.00
+
+sha256 df4e81dbb6a32a797ca9951494aca8753a5400528d3241a4b1c609e5d85ff8ce 3328 golden/restore_delete/ts.st
+text 484 golden/restore_delete/ts.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 485 golden/restore_delete/ts_allviews0.st.mdoc~
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/restore_delete/ts_allviews0.st~
+text 14 golden/restore_delete/ts_cutviews0_old.info
+6 1 1 0
+2,4-5
+
+text 73 golden/restore_deleted.files
+plain.st
+plain_cutviews0.st
+plain_cutviews0_old.info
+plain_keptviews0.st
+
+text 197 golden/restore_deleted.out
+Recombining the stack into plain_allviews0.st...
+Renaming files...
+    plain.st  ->  plain_keptviews0.st
+    plain_allviews0.st  ->  plain.st
+    plain_cutviews0.info  ->  plain_cutviews0_old.info
+
+text 2 golden/restore_deleted.rc
+0
+
+sha256 df4e81dbb6a32a797ca9951494aca8753a5400528d3241a4b1c609e5d85ff8ce 3328 golden/restore_deleted/plain.st
+text 12 golden/restore_deleted/plain_cutviews0_old.info
+6 0 0 0
+1,6
+
+sha256 a03d954a7556507450869b4fb0a21adc7a13168dcd2d83298d7bf5024b476a51 2560 golden/restore_deleted/plain_keptviews0.st
+text 78 golden/restore_header_montage.files
+mt.st
+mt_allviews0.st~
+mt_cutviews0.st
+mt_cutviews0_old.info
+mt_keptviews0.st
+
+text 176 golden/restore_header_montage.out
+Recombining the stack into mt_allviews0.st...
+Renaming files...
+    mt.st  ->  mt_keptviews0.st
+    mt_allviews0.st  ->  mt.st
+    mt_cutviews0.info  ->  mt_cutviews0_old.info
+
+text 2 golden/restore_header_montage.rc
+0
+
+sha256 f4f3b0b0bb34a5a0ba76a2bd33ad7f3e428c2bfd677495f258df6a5d909ec520 5704 golden/restore_header_montage/mt.st
+sha256 db21f040cf8d4831321a96a528628b60eca77d7db60438f715dacf508f26a285 5704 golden/restore_header_montage/mt_allviews0.st~
+text 10 golden/restore_header_montage/mt_cutviews0_old.info
+2 0 0 1
+2
+
+sha256 b9869ff5ab35154cc5d6808bfa9d08cdea91d11bf75deec5b9792d3cdc4eeb37 3364 golden/restore_header_montage/mt_keptviews0.st
+text 134 golden/restore_montage.files
+mp.pl
+mp.st
+mp_allviews0.pl~
+mp_allviews0.st~
+mp_cutviews0.pl
+mp_cutviews0.st
+mp_cutviews0_old.info
+mp_keptviews0.pl
+mp_keptviews0.st
+
+text 239 golden/restore_montage.out
+Recombining the stack into mp_allviews0.st...
+Renaming files...
+    mp.st  ->  mp_keptviews0.st
+    mp.pl  ->  mp_keptviews0.pl
+    mp_allviews0.st  ->  mp.st
+    mp_allviews0.pl  ->  mp.pl
+    mp_cutviews0.info  ->  mp_cutviews0_old.info
+
+text 2 golden/restore_montage.rc
+0
+
+text 312 golden/restore_montage/mp.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+        0        0      1
+       12        0      1
+       24        0      1
+        0        9      1
+       12        9      1
+       24        9      1
+
+sha256 6e26ead137339269781664da6600d2619309cda067f04711cdff5e07e125982f 5632 golden/restore_montage/mp.st
+text 80 golden/restore_montage/mp_allviews0.pl~
+0 0 0
+12 0 0
+24 0 0
+0 9 0
+12 9 0
+24 9 0
+0 0 1
+12 0 1
+24 0 1
+0 9 1
+12 9 1
+24 9 1
+
+sha256 e241c85d191d36791a399c7090f2046cf73047688a3013bb9266ae74908b6017 5632 golden/restore_montage/mp_allviews0.st~
+text 10 golden/restore_montage/mp_cutviews0_old.info
+2 0 0 1
+2
+
+text 156 golden/restore_montage/mp_keptviews0.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+
+sha256 e5f80b9f7923d8b8c581c4a1c3965e3bbfd0be7897fb41c68a351a1ec94821f6 3328 golden/restore_montage/mp_keptviews0.st
+text 337 golden/restore_second.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_allviews1.st.mdoc~
+ts_allviews1.st~
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+ts_cutviews1.rawtlt
+ts_cutviews1.st
+ts_cutviews1.st.mdoc
+ts_cutviews1_old.info
+ts_keptviews1.rawtlt
+ts_keptviews1.st
+ts_keptviews1.st.mdoc
+
+text 338 golden/restore_second.out
+Recombining the stack into ts_allviews1.st...
+Renaming files...
+    ts.st  ->  ts_keptviews1.st
+    ts.rawtlt  ->  ts_keptviews1.rawtlt
+    ts.st.mdoc  ->  ts_keptviews1.st.mdoc
+    ts_allviews1.st  ->  ts.st
+    ts_allviews1.rawtlt  ->  ts.rawtlt
+    ts_allviews1.st.mdoc  ->  ts.st.mdoc
+    ts_cutviews1.info  ->  ts_cutviews1_old.info
+
+text 2 golden/restore_second.rc
+0
+
+text 20 golden/restore_second/ts.rawtlt
+-30.00
+-10.00
+20.00
+
+sha256 41682d5b960e6b1ba22fc94f3c56126711b3e2b30d97627ab0b32e07da73fc30 2176 golden/restore_second/ts.st
+text 276 golden/restore_second/ts.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 2]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 276 golden/restore_second/ts_allviews1.st.mdoc~
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 2]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+sha256 4ba63839463a29fe57d4374787db90928cf4f5679add23a003b2c3b6d075245c 2176 golden/restore_second/ts_allviews1.st~
+text 10 golden/restore_second/ts_cutviews1_old.info
+3 1 1 0
+1
+
+text 13 golden/restore_second/ts_keptviews1.rawtlt
+-10.00
+20.00
+
+sha256 9db27fa421f4c29106d07b508fbc34a7912bc15075ab8bd9d6dadf255edd146c 1792 golden/restore_second/ts_keptviews1.st
+text 207 golden/restore_second/ts_keptviews1.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 1]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 291 golden/second_iteration.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_allviews1.rawtlt
+ts_allviews1.st
+ts_allviews1.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+ts_cutviews1.info
+ts_cutviews1.rawtlt
+ts_cutviews1.st
+ts_cutviews1.st.mdoc
+
+text 428 golden/second_iteration.out
+Copying retained views to ts_keptviews1.st
+Copying excluded views to ts_cutviews1.st
+Renaming files:
+    ts.st  ->  ts_allviews1.st
+    ts_keptviews1.st  ->  ts.st
+    ts.rawtlt  ->  ts_allviews1.rawtlt
+    ts_keptviews1.rawtlt  ->  ts.rawtlt
+    ts.st.mdoc  ->  ts_allviews1.st.mdoc
+    ts_keptviews1.st.mdoc  ->  ts.st.mdoc
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore ts.st
+
+text 2 golden/second_iteration.rc
+0
+
+text 13 golden/second_iteration/ts.rawtlt
+-10.00
+20.00
+
+sha256 9db27fa421f4c29106d07b508fbc34a7912bc15075ab8bd9d6dadf255edd146c 1792 golden/second_iteration/ts.st
+text 207 golden/second_iteration/ts.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 1]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 20 golden/second_iteration/ts_allviews1.rawtlt
+-30.00
+-10.00
+20.00
+
+sha256 4ba63839463a29fe57d4374787db90928cf4f5679add23a003b2c3b6d075245c 2176 golden/second_iteration/ts_allviews1.st
+text 276 golden/second_iteration/ts_allviews1.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 2]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 10 golden/second_iteration/ts_cutviews1.info
+3 1 1 0
+1
+
+text 7 golden/second_iteration/ts_cutviews1.rawtlt
+-30.00
+
+sha256 665b704299a835c89d512748e27e168dc3a73afe71538d7a8a63882e7f7367c1 1408 golden/second_iteration/ts_cutviews1.st
+text 137 golden/second_iteration/ts_cutviews1.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+text 159 golden/unsorted.files
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+
+text 428 golden/unsorted.out
+Copying retained views to ts_keptviews0.st
+Copying excluded views to ts_cutviews0.st
+Renaming files:
+    ts.st  ->  ts_allviews0.st
+    ts_keptviews0.st  ->  ts.st
+    ts.rawtlt  ->  ts_allviews0.rawtlt
+    ts_keptviews0.rawtlt  ->  ts.rawtlt
+    ts.st.mdoc  ->  ts_allviews0.st.mdoc
+    ts_keptviews0.st.mdoc  ->  ts.st.mdoc
+LOG:
+Operations successfully completed.  To restore full stack, enter:
+   excludeviews -restore ts.st
+
+text 2 golden/unsorted.rc
+0
+
+text 25 golden/unsorted/ts.rawtlt
+-30.00
+-10.00
+0.00
+20.00
+
+sha256 bd268a247249845a948c31280c4823382e5af02209143a2c8e7beeeabcb642e1 2560 golden/unsorted/ts.st
+text 345 golden/unsorted/ts.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 2]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 3]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+text 38 golden/unsorted/ts_allviews0.rawtlt
+-30.00
+-20.00
+-10.00
+0.00
+10.00
+20.00
+
+sha256 a324f7889fb071705ebfb1d879674738bc5535c46f697caf641b946f4ae59f1e 3328 golden/unsorted/ts_allviews0.st
+text 485 golden/unsorted/ts_allviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -30
+ExposureDose = 1.5
+PriorRecordDose = 0
+
+[ZValue = 1]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 2]
+TiltAngle = -10
+ExposureDose = 1.5
+PriorRecordDose = 3
+
+[ZValue = 3]
+TiltAngle = 0
+ExposureDose = 1.5
+PriorRecordDose = 4.5
+
+[ZValue = 4]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+
+[ZValue = 5]
+TiltAngle = 20
+ExposureDose = 1.5
+PriorRecordDose = 7.5
+
+
+text 12 golden/unsorted/ts_cutviews0.info
+6 1 1 0
+2,5
+
+text 13 golden/unsorted/ts_cutviews0.rawtlt
+-20.00
+10.00
+
+sha256 7c7345409f3f3d46599f927c28bdf49ba54b4d9286b62beb21cd0546874b0334 1792 golden/unsorted/ts_cutviews0.st
+text 207 golden/unsorted/ts_cutviews0.st.mdoc
+PixelSpacing = 2.5
+ImageFile = ts.st
+ImageSize = 16 12
+DataMode = 1
+
+[ZValue = 0]
+TiltAngle = -20
+ExposureDose = 1.5
+PriorRecordDose = 1.5
+
+[ZValue = 1]
+TiltAngle = 10
+ExposureDose = 1.5
+PriorRecordDose = 6
+

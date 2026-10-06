@@ -1,0 +1,5 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	-
+new	-	-	new.txt
+existing	old.txt:old.txt	-	old.txt
+baddir	-	-	nodir/x.txt

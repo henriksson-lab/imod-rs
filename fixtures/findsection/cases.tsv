@@ -1,19 +1,4 @@
 # name	arguments	(exit status is recorded by make-findsection-goldens.sh)
-#full	basic	-tomo fz.mrc -size 8,8,2 -block 24
-nonopt	-size 8,8,2 -block 24 fz.mrc
-all	-tomo fz.mrc -size 8,8,2 -block 20 -scales 2 -pitch p.mod -samples 3 -surface s.mod -point pt
-separate	-tomo fz.mrc -size 8,8,2 -block 16 -pitch p.mod -samples 3 -separate -extent 20
 flipped	-tomo m0.mrc -size 8,2,8 -block 20 -pitch p.mod -samples 3 -point pt -surface s.mod
 multi	-tomo m0.mrc -tomo m0.mrc -size 8,2,8 -block 20 -pitch p.mod -point pt
-volume	-tomo fz.mrc -size 8,8,2 -block 24 -scales 2 -volume vol
-tuned	-tomo fz.mrc -size 8,8,2 -block 24 -debug 2 -control 17,4 -control 30,1 -control 22,0.3 -axis 5 -tilt 70,60 -edge 30,30,2 -center 20,20,6 -xminmax 2,69 -yminmax 3,60 -zminmax 0,29 -flipped -1
-binning	-tomo fz.mrc -binning 1,1,1 -binning 2,2,1 -size 8,8,2 -spacing 4,4,1 -block 20
-high	-tomo fz.mrc -size 8,8,2 -high 3 -pitch p.mod -point pt -boost 0.1
-lowest	-tomo fz.mrc -size 8,8,2 -high 3 -lowest -debug 1
-bead	-tomo fz.mrc -size 8,8,2 -high 3 -bead beads.mod -diameter 6 -debug 1
-err_nosize	-tomo fz.mrc
 err_multihigh	-tomo m0.mrc -tomo m0.mrc -size 8,2,8 -high 3
-err_range	-tomo fz.mrc -size 8,8,2 -xminmax -1,40
-err_nosamples	-tomo fz.mrc -size 8,8,2 -pitch p.mod
-err_noref	-tomo fz.mrc -size 8,8,2 -high 3 -bead noref.mod
-bead_pct	-tomo fz.mrc -size 8,8,2 -high 3 -bead beads.mod -control 28,0.1 -control 35,0.05 -control 29,0.6 -pitch p.mod

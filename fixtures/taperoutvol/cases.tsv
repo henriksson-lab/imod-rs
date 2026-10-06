@@ -1,0 +1,8 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+tv_plain	v.mrc o.mrc	-
+tv_sub	-input v.mrc -output o.mrc -x 5,25 -y 3,20 -z 1,2 -taper 10,8,2	-
+tv_short_nofft	-input s.mrc -output o.mrc -x 0,19 -y 5,15 -z 0,2 -taper 6,6,3 -nofft	-
+tv_noise	-input v.mrc -output o.mrc -x 5,25 -y 3,20 -z 1,2 -taper 10,8,2 -noise	-
+tv_badx	-input v.mrc -output o.mrc -x 30,20	-
+tv_nofile	-input nofile.mrc -output o.mrc	-
+tv_interactive	-	v.mrc\no.mrc\n4,20,2,18,0,3\n6,6,2\n

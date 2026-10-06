@@ -1,0 +1,94 @@
+# imod-rs native golden manifest for fixtures/boxstartend; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh boxstartend; do not edit by hand.
+text 342 golden/bx_ends_lists.out.a.pl
+     0     0     0
+     0     0     1
+     0     0     2
+    17     0     0
+    17     0     1
+    17     0     2
+    34     0     0
+    34     0     1
+    34     0     2
+     0    17     0
+     0    17     1
+     0    17     2
+    17    17     0
+    17    17     1
+    17    17     2
+    34    17     0
+    34    17     1
+    34    17     2
+
+sha256 841a59262c9fbcd6820bdab2b689c11f8e037a19f98cdf719196a822661f6b83 11392 golden/bx_ends_lists.out.o.mrc
+text 285 golden/bx_ends_lists.out.t.pl
+    29    23     3
+    29    23     4
+    29    23     5
+    26    36     3
+    26    36     4
+    26    36     5
+    21     1     3
+    21     1     4
+    21     1     5
+    19    18     3
+    19    18     4
+    19    18     5
+    27    16     2
+    27    16     3
+    27    16     4
+
+text 2 golden/bx_ends_lists.rc
+0
+
+sha256 2b98293002c95ad3073d9864b352cf6b60b84e488420292c1fbd5a268f7a3d27 1401 golden/bx_ends_lists.stdout
+sha256 528bc8c77bb6d67c23b048c3466d3ee7d2be9e975faf4ec44fb7c65d34c3e755 8224 golden/bx_interactive.out.o.mrc
+text 2 golden/bx_interactive.rc
+0
+
+sha256 fda268310487c7584a9760b570da46e8eeffa888d7525bddc290884ef69df26e 2177 golden/bx_interactive.stdout
+sha256 645119cea3843a613442ebe6ce2f6e84d0014e040350fd0899d4027336397612 13024 golden/bx_objects.out.o.mrc
+text 2 golden/bx_objects.rc
+0
+
+sha256 5badf8740b163a5018f3a8708dbff984a003775fac13a5390ecc0d30fd50e0f1 1155 golden/bx_objects.stdout
+sha256 de0d866ab6d69a342fd0dde5a6c14d8349fb0c5dc037e509cae1d2f577aacaf4 1536 golden/bx_series.out.sr.01
+sha256 c377d6c34cf4d0be453a3e00dd350d6ee408f41a1c2a8b0c82bf300fe5538343 1536 golden/bx_series.out.sr.02
+sha256 65fc378f2e3359a70304542c62d60564f47ef0e2acf2d783c486053c5d0e9b05 1536 golden/bx_series.out.sr.03
+sha256 78dc44efe84f8f24669fa526a2ad56a1addebcbb00d11bee018db351b8b424fe 1536 golden/bx_series.out.sr.04
+sha256 978772f0b20f89c6f96fdfda61053d3c9a3f8a4bbc144083175a1782ef47e7ef 1536 golden/bx_series.out.sr.05
+sha256 f4910c7a50fbd046c897b06f7e13d52e2feda1665e8f7eed9c0b59809c2ba95c 1536 golden/bx_series.out.sr.06
+sha256 ac8b5fca2e7dcf0d1f02607e0c6cbf200d3e67f5ab048620955eabd8df81dbf7 1536 golden/bx_series.out.sr.07
+sha256 2d641db2d9d4c66e2fd472967a3cadf3bb43a1879586499133b5830de19ddbdd 1536 golden/bx_series.out.sr.08
+sha256 94a0ed1286e2801ede569b5cea75ca8a3ec4ede4f449788403a74e1677ac03e6 1536 golden/bx_series.out.sr.09
+sha256 9be9c3edb3adeae472cec9a6b991a0001fc40be98eda5366f0030720697d879c 1536 golden/bx_series.out.sr.10
+sha256 9fca15fd38c6768725731a6ef21162c88bf94f3052d1dbe3e678fe59023f7fce 1536 golden/bx_series.out.sr.11
+sha256 17a6d1385e31676fe3bf09eda4d7bf07bb15719be8521b061fa5a45556c182ff 1536 golden/bx_series.out.sr.12
+sha256 ffe73f986531efed501d45ccb76a24212171c9e5b7bd62c7bdcc59232f6216b0 1536 golden/bx_series.out.sr.13
+sha256 d5b3bf54d402cc94ff811d94592af9be28f88affa5722d7bd70a93c7b59833b7 1536 golden/bx_series.out.sr.14
+sha256 802e46f5417aa46578b0bf071567b2363c3ae7bc6e0d4b487d7ec0efe145c8fb 1536 golden/bx_series.out.sr.15
+sha256 9e7592d56d8cf7b94b7c7c94e1b1c4b80448fbf260489b5d601c4cfe8e7b604b 1536 golden/bx_series.out.sr.16
+sha256 3a3969e922f41da24fe54ba0b092e4bfb61346313ab555e10ab6d5284abab28e 1536 golden/bx_series.out.sr.17
+sha256 1967f91af76e174371b259d3dd3ab0e831b93eae6af64bbe7c360b0e56363f12 1536 golden/bx_series.out.sr.18
+sha256 1775c2899f26459be9dcd85659bb6bb09a2dcd05fb84a85ddcabaefe7a935ccb 1536 golden/bx_series.out.sr.19
+sha256 b58e22ab3fde47847001d8a6a7d0ca4877346b5eef8185ab57f52d44e7f9fe49 1536 golden/bx_series.out.sr.20
+sha256 951a3795c1772d42b85b4ed57b2d9ed67ecb886612c6ebd73922553ef2d5fbd4 1536 golden/bx_series.out.sr.21
+sha256 d57864596684fee32249d9fbe057870bf31b13452fd19cbe8bc7fd92ff1e5f02 1536 golden/bx_series.out.sr.22
+text 2 golden/bx_series.rc
+0
+
+sha256 bd41acfde1786688e59bf3b8998e9d2c709bbfd96fe13338389bdbfc2dabe400 3092 golden/bx_series.stdout
+sha256 8659ebf51122f060cdc6ba640799a0a2b1c87b1fbb57da81ccb1e2d397ed3d1e 93024 golden/bx_starts.out.o.mrc
+text 2 golden/bx_starts.rc
+0
+
+sha256 e292a6a2a1df0fc56f955d91144b3d730c8e8b00e98dbf75ec961cd1ebbcf34f 2315 golden/bx_starts.stdout
+sha256 79345d27b6f646e5d8654c0794aba60763f48359a4d51d9c799eb76f4f358dfe 2224 golden/bx_taper_bad.out.o.mrc
+text 2 golden/bx_taper_bad.rc
+1
+
+sha256 8bf1f24cb25f8c2cd1bffefe64f9b3ff50ead2179ff81a9ba1b26b4e3f7c0324 1263 golden/bx_taper_bad.stdout
+text 2 golden/bx_volume_taper.rc
+1
+
+sha256 ff8decbaf4677d4623a06e22f18c99faa4a0ef60cf8a26f0296d82d17e0b8dba 1077 golden/bx_volume_taper.stdout

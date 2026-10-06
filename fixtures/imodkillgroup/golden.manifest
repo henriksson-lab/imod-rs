@@ -1,0 +1,61 @@
+# imod-rs native golden manifest for fixtures/imodkillgroup; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh imodkillgroup; do not edit by hand.
+text 0 golden/badarg.files
+
+text 67 golden/badarg.out
+ERROR: imodkillgroup - Unrecognized option or non-integer entry: x
+
+text 2 golden/badarg.rc
+1
+
+text 0 golden/noargs.files
+
+text 483 golden/noargs.out
+Usage: imodkillgroup [-t | -v | -s] PID [PID ...]'
+    Kills whole process group given PID of any member, or just kills process
+    tree below each PID if -t option is given.  Takes multiple PIDs from
+    different groups.  Options:
+      -t  Tree kill, implied with Windows Python; unreliable with Cygwin Python
+      -s  Use initial and follow-up ps to verifying children are gone (Cygwin)
+      -e  Use SIGTERM instead of SIGKILL to allow cleanup actions
+      -v  Verbose output
+
+text 2 golden/noargs.rc
+0
+
+text 0 golden/nopid.files
+
+text 141 golden/nopid.out
+imodkillgroup - Error getting group ID for process ID 999999: [Errno 3] No such process
+ERROR: imodkillgroup - No group ID(s) could be found
+
+text 2 golden/nopid.rc
+1
+
+text 0 golden/status.files
+
+text 65 golden/status.out
+ERROR: imodkillgroup - The -s option works only in Cygwin Python
+
+text 2 golden/status.rc
+1
+
+text 0 golden/tree_nopid.files
+
+text 140 golden/tree_nopid.out
+imodkillgroup - Error occurred trying to stop 999999: [Errno 3] No such process
+imodkillgroup - PID 999999 is no longer in the process list
+
+text 2 golden/tree_nopid.rc
+1
+
+text 0 golden/verbose_two.files
+
+text 229 golden/verbose_two.out
+imodkillgroup - Error getting group ID for process ID 999999: [Errno 3] No such process
+imodkillgroup - Error getting group ID for process ID 999998: [Errno 3] No such process
+ERROR: imodkillgroup - No group ID(s) could be found
+
+text 2 golden/verbose_two.rc
+1
+

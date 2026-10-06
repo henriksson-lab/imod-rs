@@ -1,0 +1,21 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+c01	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	d.txt
+c02	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-ncol 0 d.txt
+c03	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-skip 3 -ncol 3 d.txt
+c04	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-columns 2,3 d.txt
+c05	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-columns 1,2,3 d.txt
+c06	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-columns 2,2 d.txt
+c07	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-ordinal -columns 2 d.txt
+c08	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-types 1,2 t.txt
+c09	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-types 1,2 -defhue -hue 1,red t.txt
+c10	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-hue 1,10,20,30 -hue 2,blue -connect -xlog 1,2 -ylog 0,0.5 -axis Xlab -keys K1 d.txt
+c11	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-message hello -message world -tooltip tip -size 300,200 -position 10,20 -yminmax 0,5 d.txt
+c12	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-png out.png d.txt
+c13	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-stock
+c14	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-hue 1,nocolor d.txt
+c15	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-hue 1,2,3 d.txt
+c16	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-remove -hue 1,nocolor d.txt
+c17	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	c.txt
+c18	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-columns 1,3,4 c.txt
+c19	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	missing.txt
+c20	d.txt:d.txt t.txt:t.txt c.txt:c.txt	-	-yminmax 5,1 d.txt

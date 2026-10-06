@@ -1,0 +1,13 @@
+Provenance of these inputs (authored 2026-10-05 for the native-golden suite).
+
+Images (g.ali, g.st, b_ali.mrc, v.mrc, vt/vft, ...) are seeded random bytes
+(numpy default_rng) converted by the native reference raw2mrc
+(`raw2mrc -t byte`, 48x40x9 for the tilt-series stacks, 64x48x5 for the
+volume); only their headers matter to the script.  vf.mrc/vr.mrc/vft.mrc come
+from native `clip flipyz` / `clip rotx`; v90.mrc and v0_90.mrc are v.mrc with
+the tilt-angle header words (bytes 172-195) set to (90,0,0,0,0,0) and
+(0,0,0,90,0,0).  b_flip.mrc is b_ali.mrc with an added "ctfPhaseFlip:" title.
+b_erase.fid and pts.mod were written by native `point2model`.  The command
+files are hand-written minimal versions of the etomo ones (tilt.com from a
+small tilt-series test set); the .edf files hold hand-written Trimvol keys in
+etomo's form.

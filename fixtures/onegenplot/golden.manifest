@@ -1,0 +1,240 @@
+# imod-rs native golden manifest for fixtures/onegenplot; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh onegenplot; do not edit by hand.
+text 34 golden/c01.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c01.out
+Close graphing window to exit
+
+text 2 golden/c01.rc
+0
+
+sha256 6c5f9a539dd17ec9f9f2015b557e95091f81dd37a6fab0eb07280b165b958832 2578 golden/c01/genhstplt.calls
+text 34 golden/c02.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c02.out
+Close graphing window to exit
+
+text 2 golden/c02.rc
+0
+
+sha256 7a5665e262377660e792f8f0395ce4887189d542f020be5c41cbe84e76d492dd 2829 golden/c02/genhstplt.calls
+text 34 golden/c03.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c03.out
+Close graphing window to exit
+
+text 2 golden/c03.rc
+0
+
+sha256 7a5665e262377660e792f8f0395ce4887189d542f020be5c41cbe84e76d492dd 2829 golden/c03/genhstplt.calls
+text 18 golden/c04.files
+c.txt
+d.txt
+t.txt
+
+text 50 golden/c04.out
+ERROR: onegenplot - 2 is an invalid column number
+
+text 2 golden/c04.rc
+1
+
+text 18 golden/c05.files
+c.txt
+d.txt
+t.txt
+
+text 50 golden/c05.out
+ERROR: onegenplot - 2 is an invalid column number
+
+text 2 golden/c05.rc
+1
+
+text 18 golden/c06.files
+c.txt
+d.txt
+t.txt
+
+text 50 golden/c06.out
+ERROR: onegenplot - 2 is an invalid column number
+
+text 2 golden/c06.rc
+1
+
+text 18 golden/c07.files
+c.txt
+d.txt
+t.txt
+
+text 50 golden/c07.out
+ERROR: onegenplot - 2 is an invalid column number
+
+text 2 golden/c07.rc
+1
+
+text 34 golden/c08.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c08.out
+Close graphing window to exit
+
+text 2 golden/c08.rc
+0
+
+sha256 71baf63134723c17351065ae3bba88a86e241fdb0ff03414b05f3f2390eb82e3 3015 golden/c08/genhstplt.calls
+text 34 golden/c09.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c09.out
+Close graphing window to exit
+
+text 2 golden/c09.rc
+0
+
+sha256 222430ec4719d09fc224c091d24a3eefcf314fc6caaab9ce94c2588f22a7e8f4 3057 golden/c09/genhstplt.calls
+text 34 golden/c10.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c10.out
+Close graphing window to exit
+
+text 2 golden/c10.rc
+0
+
+sha256 6cb46e790420cb3e3fa9fd4096d8b4074066fd8c60a9d88c43f0ca638627bcbb 2621 golden/c10/genhstplt.calls
+text 34 golden/c11.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c11.out
+Close graphing window to exit
+
+text 2 golden/c11.rc
+0
+
+sha256 72fc326d728ad206812ed282a2d567e90496c51a65ba2f3661115a9451b08fb6 2576 golden/c11/genhstplt.calls
+text 42 golden/c12.files
+c.txt
+d.txt
+genhstplt.calls
+out.png
+t.txt
+
+text 0 golden/c12.out
+
+text 2 golden/c12.rc
+0
+
+sha256 afa92fcfcf206f1b3fe19c02f2f89b345f2a73f3707652779dca7645e03f0dab 3639 golden/c12/genhstplt.calls
+sha256 b4f88f7813284439620014a3fb21f305bc148652bcd574ffc8397bf737f84d1e 28 golden/c12/out.png
+text 18 golden/c13.files
+c.txt
+d.txt
+t.txt
+
+sha256 66a71c395745cabd2fa43cb28915eabfe7a62b1a8d8dd5f1328fff2d781586ed 695 golden/c13.out
+text 2 golden/c13.rc
+0
+
+text 18 golden/c14.files
+c.txt
+d.txt
+t.txt
+
+text 63 golden/c14.out
+ERROR: onegenplot - nocolor is not in the list of stock colors
+
+text 2 golden/c14.rc
+1
+
+text 18 golden/c15.files
+c.txt
+d.txt
+t.txt
+
+text 74 golden/c15.out
+ERROR: onegenplot - The color entry 1,2,3 does not have 2 or 4 components
+
+text 2 golden/c15.rc
+1
+
+text 12 golden/c16.files
+c.txt
+t.txt
+
+text 63 golden/c16.out
+ERROR: onegenplot - nocolor is not in the list of stock colors
+
+text 2 golden/c16.rc
+1
+
+text 34 golden/c17.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c17.out
+Close graphing window to exit
+
+text 2 golden/c17.rc
+0
+
+sha256 1f04412744f4d7bf96c9f999c294254a74f9fa363fa4072ca880be50e96c5729 2788 golden/c17/genhstplt.calls
+text 34 golden/c18.files
+c.txt
+d.txt
+genhstplt.calls
+t.txt
+
+text 30 golden/c18.out
+Close graphing window to exit
+
+text 2 golden/c18.rc
+0
+
+sha256 5bac9d5aafbf08a9d951f04e436a5f9fcf42261327a04a022ae786819e7e6d1e 3061 golden/c18/genhstplt.calls
+text 18 golden/c19.files
+c.txt
+d.txt
+t.txt
+
+text 57 golden/c19.out
+ERROR: onegenplot - Data file missing.txt does not exist
+
+text 2 golden/c19.rc
+1
+
+text 18 golden/c20.files
+c.txt
+d.txt
+t.txt
+
+text 77 golden/c20.out
+ERROR: onegenplot - The minimum of the Y range must be less than the maximum
+
+text 2 golden/c20.rc
+1
+

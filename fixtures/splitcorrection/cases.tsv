@@ -1,0 +1,7 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+basic	ctfcorrection.com:ctfcorrection.com b_ali.mrc:b_ali.mrc	-	ctfcorrection
+m3	ctfcorrection.com:ctfcorrection.com b_ali.mrc:b_ali.mrc	-	-m 3 ctfcorrection.com
+size_open	ctfcorrection.com:ctfcorrection.com	-	-size 100,80,23 -m 4 -i 5 -o -unique ctfcorrection
+nodir	ctfcorrection.com:ctfcorrection.com b_ali.mrc:b_ali.mrc	-	-dir sub -r rr ctfcorrection
+bound	ctfcorrection.com:ctfcorrection.com b_ali.mrc:b_ali.mrc	-	-b 10000 -m 2 ctfcorrection
+nofile	-	-	nofile

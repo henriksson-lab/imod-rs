@@ -3,7 +3,10 @@
 //!
 //! Every row of `fixtures/cryoposition/cases.tsv` was run through the native Python
 //! script by `fixtures/make-cryoposition-goldens.sh` (`make-pyscript-goldens.py`); see
-//! `tests/pysetup_common` for what is compared.
+//! `tests/pysetup_common` for what is compared.  The four cases that ran the
+//! whole pipeline on a 1.3 MB float stack (`plain`, `bin2`, `light_erase`,
+//! `scales_box`) were deleted with that stack; the argument and error cases
+//! remain.
 
 mod common;
 mod pysetup_common;
@@ -29,6 +32,10 @@ fn find_beads_without_a_bead_diameter() {
         let path = entry.unwrap().path();
         std::fs::copy(&path, work.join(path.file_name().unwrap())).unwrap();
     }
+    // Any MRC serves as the raw stack: the error comes right after its size
+    // is read.  (The suite's 128x128x21 `g.st` was removed to keep fixtures
+    // small.)
+    std::fs::copy(root.join("fixtures/newstack-mixed-small.mrc"), work.join("g.st")).unwrap();
     std::fs::write(
         work.join("track.com"),
         "$beadtrack -StandardInput\nImageFile\tg.preali\n",

@@ -1,0 +1,41 @@
+# imod-rs native golden manifest for fixtures/gputilttest; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh gputilttest; do not edit by hand.
+text 0 golden/bad_gpu.files
+
+text 45 golden/bad_gpu.out
+ERROR: gputilttest - GPU number must be >= 0
+
+text 2 golden/bad_gpu.rc
+1
+
+text 0 golden/bad_gpu_text.files
+
+text 59 golden/bad_gpu_text.out
+ERROR: gputilttest - Converting second argument to integer
+
+text 2 golden/bad_gpu_text.rc
+1
+
+text 0 golden/bad_minutes.files
+
+text 72 golden/bad_minutes.out
+ERROR: gputilttest - Converting first argument to floating point number
+
+text 2 golden/bad_minutes.rc
+1
+
+text 0 golden/help.files
+
+text 428 golden/help.out
+gputilttest runs the tilt program repeatedly to test whether a GPU
+    gives reproducible results
+Usage:  gputilttest [-P[ID]] [-l] [#_of_minutes] [GPU_#]
+    #_of_minutes sets how long the test will run; the default
+        is 1 minute, fractional values are allowed
+   GPU_# is the # of the GPU to test, numbered from 1,
+        or 0 for the bext or only GPU
+   -l option will leave the log file gputest.log from the last run
+
+text 2 golden/help.rc
+0
+

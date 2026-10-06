@@ -1,0 +1,12 @@
+# name	input (inputs/<name>.in)	arguments (- for none)
+onegen	onegen	-
+size	onegen	-s 400,300 -p 5,5 -message hello -tooltip tip
+nograph	nograph	-nograph
+wait	wait	-
+types	types	-
+neg	neg	-
+colsx	colsx	-
+hist	hist	-
+hist3	hist3	-
+ps	ps	-
+sym	sym	-

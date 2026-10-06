@@ -1,0 +1,11 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+ip_vals6	vals6.mod p.out	-
+ip_vals6_col3	-v 3 vals6.mod p.out	-
+ip_vals3	vals3.mod p.out	-
+ip_vals3_col2	-v 2 vals3.mod p.out	-
+ip_novalues	plain.mod p.out	-
+ip_noflip	v6f.mod p.out	-
+ip_badcol	-v 7 vals6.mod p.out	-
+ip_onearg	x	-
+ip_noargs	-	-
+ip_nofile	nofile.mod p.out	-

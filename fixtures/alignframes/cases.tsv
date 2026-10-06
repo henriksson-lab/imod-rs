@@ -1,0 +1,31 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+af_byte_gain	movb.mrc out.mrc -gain gainref.mrc	-
+af_combine_sum	-break 2 -dtotal 2 one1.mrc one2.mrc one3.mrc one4.mrc one5.mrc one6.mrc out.mrc	-	-	s/^File 2 (one1.mrc)/File 2 (one3.mrc)/;s/^File 3 (one1.mrc)/File 3 (one5.mrc)/
+af_tilt_dtype1	-tilt ts.tlt -dtype 1 -dfile dose1.txt ts1.mrc ts2.mrc ts3.mrc out.mrc	-
+af_tilt_dtype2	-tilt ts.tlt -dtype 2 -dfile dose2.txt -accum 1 ts1.mrc ts2.mrc ts3.mrc out.mrc	-
+af_tilt_dtype3	-tilt ts.tlt -dtype 3 -dfile dose3.txt ts1.mrc ts2.mrc ts3.mrc out.mrc	-
+af_tilt_axis	-tilt ts.tlt -axis 84.5 -reorder -1 ts1.mrc ts2.mrc ts3.mrc out.mrc	-
+af_mdoc	-mdoc ts.mdoc out.mrc	-
+af_mdoc_adjust	-mdoc ts.mdoc -adjust -binning 2,2 out.mrc	-
+af_mdoc_dtype4	-mdoc ts.mdoc -dtype 4 out.mrc	-
+af_mdoc_dtotal	-mdoc ts.mdoc -dtotal 3 out.mrc	-
+af_mdoc_ddrop	-mdoc ts.mdoc -ddrop 2.45,0 out.mrc	-
+af_mdoc_mdrop	-mdoc ts.mdoc -mdrop 150 out.mrc	-
+af_mdoc_ignore	-mdoc ts.mdoc -ignore out.mrc	-
+af_mdoc_dfile4	-dtype 4 -dfile ts.mdoc ts1.mrc ts2.mrc ts3.mrc out.mrc	-
+af_titles	-titles tst.mrc out.mrc	-
+af_titles_total	-titles -total 10 tst.mrc out.mrc	-
+af_fei_rfsum	-rfsum -1 fei.mrc out.mrc	-
+af_mdoc_fei	-mdoc fei.mdoc out.mrc	-
+af_mdoc_fei_axis	-mdoc fei.mdoc -axis 80 out.mrc	-	-mdoc feieq.mdoc -axis 80 out.mrc
+af_mdoc_fs	-mdoc fs.mdoc out.mrc	-	-mdoc fseq.mdoc out.mrc
+af_mdoc_bin2	-mdoc bin2.mdoc -adjust out.mrc	-
+af_mdoc_reorder	-mdoc ts.mdoc -reorder -2 -adjust out.mrc	-
+af_stack	-stack tsstack.mrc ts1.mrc ts2.mrc ts3.mrc out.mrc	-
+af_list	-list list.txt out.mrc	-
+af_combine	-break 3 one1.mrc one2.mrc one3.mrc one4.mrc one5.mrc one6.mrc out.mrc	-	-	s/^File 2 (one1.mrc)/File 2 (one4.mrc)/
+af_err_missing	nofile.mrc out.mrc	-
+af_err_mdoc_stack	-mdoc ts.mdoc -stack tsstack.mrc ts1.mrc out.mrc	-
+af_err_dose_lines	-dtype 5 -dfile dose5.txt ts1.mrc ts2.mrc out.mrc	-
+af_err_tilt_count	-tilt ts.tlt ts1.mrc ts2.mrc ts3.mrc ts1.mrc out.mrc	-
+af_err_combine_frames	-break 3 -frames 1,1 one1.mrc one2.mrc one3.mrc one4.mrc one5.mrc one6.mrc out.mrc	-

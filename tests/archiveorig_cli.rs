@@ -22,14 +22,13 @@ fn archiveorig_matches_native_goldens() {
 #[test]
 fn restore_two_levels_rebuilds_the_oldest_original() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let inputs = root.join("fixtures/archiveorig/inputs");
     let work = std::env::temp_dir().join(format!("imod-rs-archiveorig-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).unwrap();
     // Byte-mode stacks (so every difference restores exactly) on the header
     // of the float fixture, with seeded content.
     let header = {
-        let mut header = std::fs::read(inputs.join("st.mrc")).unwrap()[..1024].to_vec();
+        let mut header = std::fs::read(root.join("fixtures/boxstartend/v.mrc")).unwrap()[..1024].to_vec();
         header[12..16].copy_from_slice(&0_i32.to_le_bytes());
         header
     };

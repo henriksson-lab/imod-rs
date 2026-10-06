@@ -1,0 +1,26 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+noargs	-	-
+two_args	1 grp.mod	-
+one	2 grp.mod o.mod	-
+range	1-3,6 grp.mod o.mod	-
+reorder_dup	6,2,2,1 grp.mod o.mod	-
+delete	-d 2,4 grp.mod o.mod	-
+delete_all	-d 1-7 grp.mod o.mod	-
+group	-g 2 grp.mod o.mod	-
+groups_1_4	-g 1,4 grp.mod o.mod	-
+group_empty	-g 3 grp.mod o.mod	-
+group_delete	-g -d 2 grp.mod o.mod	-
+delete_groups	-d -g 1,3 grp.mod o.mod	-
+group_bad	-g 5 grp.mod o.mod	-
+no_groups	-g 1 six.mod o.mod	-
+zero	0 grp.mod o.mod	-
+too_big	8 grp.mod o.mod	-
+bad_option	-x 1 grp.mod o.mod	-
+bad_list	1,a grp.mod o.mod	-
+slash_list	/1 six.mod o.mod	-
+dash_only	- 1 six.mod o.mod	-
+no_model	1 nothere.mod o.mod	-
+views	3,1 vsix.mod o.mod	-
+backup	1 grp.mod grp.mod	-
+plain	1,4 six.mod o.mod	-
+bad_dir	1 six.mod nodir/o.mod	-

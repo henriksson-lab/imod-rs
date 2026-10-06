@@ -1,0 +1,8 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+ia_range	-l 90 -h 130 v.mrc a.mod	-
+ia_low_z	-l 100 -z 2 v.mrc a.mod	-
+ia_exact	-E 120 -f 3 v.mrc a.mod	-
+ia_high_opts	-h 150 -m 1 -n -s 2 v.mrc a.mod	-
+ia_short	-l 20000 -r 1 s.mrc a.mod	-
+ia_usage	v.mrc	-
+ia_nofile	-l 100 nofile a.mod	-

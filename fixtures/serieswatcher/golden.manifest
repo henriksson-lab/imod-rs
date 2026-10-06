@@ -1,0 +1,132 @@
+# imod-rs native golden manifest for fixtures/serieswatcher; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh serieswatcher; do not edit by hand.
+text 35 golden/bad_core_count.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 147 golden/bad_core_count.out
+To quit all processing, place a Q in the file: /nonexistent/chk
+ERROR: serieswatcher - Converting number of cores in CPUMachineList (x) to integer
+
+text 2 golden/bad_core_count.rc
+1
+
+text 0 golden/bad_float.files
+
+text 80 golden/bad_float.out
+ERROR: serieswatcher - Illegal character in value entry:  MinimumAgeOfStacks  x
+
+text 2 golden/bad_float.rc
+1
+
+text 35 golden/com_only.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 85 golden/com_only.out
+ERROR: serieswatcher - You must enter both a command file and a batch directive file
+
+text 2 golden/com_only.rc
+1
+
+text 35 golden/missing_com.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 112 golden/missing_com.out
+ERROR: serieswatcher - The full command file name must be entered because neither nocom.com nor nocom.pcm exist
+
+text 2 golden/missing_com.rc
+1
+
+text 35 golden/no_cpu_list.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 156 golden/no_cpu_list.out
+To quit all processing, place a Q in the file: /nonexistent/chk
+ERROR: serieswatcher - You must enter a CPU machine list; there is none in the command file
+
+text 2 golden/no_cpu_list.rc
+1
+
+text 0 golden/no_deliver.files
+
+text 88 golden/no_deliver.out
+ERROR: serieswatcher - You must enter a directory to deliver to when not reconstructing
+
+text 2 golden/no_deliver.rc
+1
+
+text 35 golden/project_and_com.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 93 golden/project_and_com.out
+ERROR: serieswatcher - You cannot enter a command or directive file with a project root name
+
+text 2 golden/project_and_com.rc
+1
+
+text 35 golden/project_no_adoc.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 74 golden/project_no_adoc.out
+ERROR: serieswatcher - There is no .adoc file with that project root name
+
+text 2 golden/project_no_adoc.rc
+1
+
+text 35 golden/template_missing.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 151 golden/template_missing.out
+To quit all processing, place a Q in the file: /nonexistent/chk
+ERROR: serieswatcher - system template file nofile.adoc not found in expected location
+
+text 2 golden/template_missing.rc
+1
+
+text 35 golden/template_path.files
+b.com
+d.adoc
+p.ebt
+t1.adoc
+t2.adoc
+
+text 190 golden/template_path.out
+To quit all processing, place a Q in the file: /nonexistent/chk
+ERROR: serieswatcher - Directive for scope template name must be either an absolute path or just a filename, it is sub/x.adoc
+
+text 2 golden/template_path.rc
+1
+
+text 0 golden/usage.files
+
+sha256 c7d0ad8d0444e089fdb59316870ed123be335fb5637ea07a75afe575ba895318 2196 golden/usage.out
+text 2 golden/usage.rc
+0
+

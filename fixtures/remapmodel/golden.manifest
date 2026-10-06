@@ -1,0 +1,126 @@
+# imod-rs native golden manifest for fixtures/remapmodel; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh remapmodel; do not edit by hand.
+sha256 0c16dbf00ede5ef6e8147b9a705d096b775af027e350200153478b0f1bf18106 1424 golden/rm_add.out.o.mod
+text 2 golden/rm_add.rc
+0
+
+text 88 golden/rm_add.stdout
+ The current list of Z values (nearest integers) in model is:
+1,3,7,9,11,14-15,19,22-23
+
+sha256 9be11e5f40b84b311ea2403382f4e36f036b84ca1c83553c9448886ea428493a 1424 golden/rm_chunks.out.o.mod
+text 2 golden/rm_chunks.rc
+0
+
+text 80 golden/rm_chunks.stdout
+ Z values being mapped:
+0-9
+ Values being mapped to:
+-999,0-2,-999,-999,6,5,4,3
+
+text 2 golden/rm_count.rc
+1
+
+text 174 golden/rm_count.stdout
+ The current list of Z values (nearest integers) in model is:
+1,3,7,9,11,14-15,19,22-23
+
+ERROR: REMAPMODEL - Number of Z values does not correspond between old and new lists
+
+sha256 200184420f826d395108ed304e470d3f29f13a1b8c873c18c02d4d83bd63c3b7 1364 golden/rm_delete.out.o.mod
+text 2 golden/rm_delete.rc
+0
+
+text 0 golden/rm_delete.stdout
+
+sha256 f6eb1d811b6a7abf873d05e7bf2245ecc143e681a1cc66c806ab70b3c5141aa1 1424 golden/rm_full_negate.out.o.mod
+text 2 golden/rm_full_negate.rc
+0
+
+text 0 golden/rm_full_negate.stdout
+
+sha256 fdbd11b0e255fb18f934664ab8e13fba4c76fe0f528718714e12ef1154558a0e 1424 golden/rm_interactive.out.o.mod
+text 2 golden/rm_interactive.rc
+0
+
+text 431 golden/rm_interactive.stdout
+ Name of input model file:  Name of output model file:  The current list of Z values (nearest integers) in model is:
+1,3,7,9,11,14-15,19,22-23
+
+ Enter new list of  10 Z values to remap these values to.
+ Enter ranges just as above, or / to leave list alone,
+   or -1 to replace each Z value with its negative.
+ Use numbers from -999 to -990 to remove points with a particular Z value.
+ Amounts to ADD to ALL X, Y and Z coordinates: 
+sha256 abbafd079dab947524683f62ed05782c2d16f2ddad1a5dcc3a748206517be90c 1424 golden/rm_interactive_slash.out.o.mod
+text 2 golden/rm_interactive_slash.rc
+0
+
+text 431 golden/rm_interactive_slash.stdout
+ Name of input model file:  Name of output model file:  The current list of Z values (nearest integers) in model is:
+1,3,7,9,11,14-15,19,22-23
+
+ Enter new list of  10 Z values to remap these values to.
+ Enter ranges just as above, or / to leave list alone,
+   or -1 to replace each Z value with its negative.
+ Use numbers from -999 to -990 to remove points with a particular Z value.
+ Amounts to ADD to ALL X, Y and Z coordinates: 
+text 2 golden/rm_nonew.rc
+0
+
+sha256 b5b8840ced32446877d96317cd54679350b941c26e8c8f4f60a28eba35c533bf 1335 golden/rm_nonew.stdout
+sha256 dafcc51ed87a682299eb4d6b7549b2917621cc3985377292abccc02519fca9cb 1424 golden/rm_oldnew.out.o.mod
+text 2 golden/rm_oldnew.rc
+0
+
+text 0 golden/rm_oldnew.stdout
+
+sha256 3980561478ad2a481850593355ca52456b867c7face4c68d82de0568ba560d01 1424 golden/rm_positional.out.o.mod
+text 2 golden/rm_positional.rc
+0
+
+text 88 golden/rm_positional.stdout
+ The current list of Z values (nearest integers) in model is:
+1,3,7,9,11,14-15,19,22-23
+
+sha256 88f8a90e553df36341470675397cfe5487905bdf29e62e1196fc45d079fa0266 1424 golden/rm_reorder.out.o.mod
+text 2 golden/rm_reorder.rc
+0
+
+text 88 golden/rm_reorder.stdout
+ The current list of Z values (nearest integers) in model is:
+1,3,7,9,11,14-15,19,22-23
+
+sha256 3980561478ad2a481850593355ca52456b867c7face4c68d82de0568ba560d01 1424 golden/rm_reverse.out.o.mod
+text 2 golden/rm_reverse.rc
+0
+
+text 88 golden/rm_reverse.stdout
+ The current list of Z values (nearest integers) in model is:
+1,3,7,9,11,14-15,19,22-23
+
+text 2 golden/rm_thick.rc
+1
+
+text 129 golden/rm_thick.stdout
+
+ FORMATTED  ro  file opened: thick.txt
+
+ERROR: REMAPMODEL - There are not thicknesses in the file to correct all model Z values
+
+sha256 11405a0a1fa59abffc7927048f8321cc402a2ce05189830384e55ca260aa20be 1424 golden/rm_thick_ok.out.o.mod
+text 2 golden/rm_thick_ok.rc
+0
+
+text 41 golden/rm_thick_ok.stdout
+
+ FORMATTED  ro  file opened: thick2.txt
+
+sha256 42a3903800ca0fb5ab3ae243b5b12262e95ece73c10479a9825921d16ccda8d5 1424 golden/rm_thick_scale.out.o.mod
+text 2 golden/rm_thick_scale.rc
+0
+
+text 41 golden/rm_thick_scale.stdout
+
+ FORMATTED  ro  file opened: thick2.txt
+

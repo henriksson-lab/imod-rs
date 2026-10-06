@@ -1,0 +1,334 @@
+# imod-rs native golden manifest for fixtures/edmont; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh edmont; do not edit by hand.
+sha256 af4a486e8316c31776c39e173b14e9885008656bccfd7427527daf42c1401856 2248 golden/ed_bin2.out.o.st
+text 2 golden/ed_bin2.rc
+0
+
+sha256 3ee41615971c6aab503b88479e0c9616dd4472ef08c2ebd9434746f74270ab3d 2256 golden/ed_bin2.stdout
+sha256 2624036aa6b8527d8ebf7dc21025f938e786aac00186c5392f56e8638618afb7 1576 golden/ed_bin3_shift.out.o.st
+text 2 golden/ed_bin3_shift.rc
+0
+
+sha256 88121570b083d5a9d839637d75878776befbdb44b0af44241167fcdd24ceffb7 2256 golden/ed_bin3_shift.stdout
+text 2 golden/ed_err_badsec.rc
+1
+
+text 90 golden/ed_err_badsec.stdout
+
+ERROR: EDMONT - SECTION LIST #    1 CONTAINS      5, WHICH IS NOT A SECTION IN THAT FILE
+
+text 2 golden/ed_err_bin.rc
+1
+
+text 53 golden/ed_err_bin.stdout
+
+ERROR: EDMONT - Binning is outside of allowed range
+
+text 2 golden/ed_err_frames.rc
+1
+
+text 113 golden/ed_err_frames.stdout
+
+ FORMATTED  ro  file opened: m.pl
+
+ERROR: EDMONT - Minimum and maximum frames in X out of range or out of order
+
+text 2 golden/ed_err_mdoc_missing.rc
+1
+
+text 128 golden/ed_err_mdoc_missing.stdout
+ERROR: AdocRead - Error opening autodoc file mh.st.mdoc
+ERROR: EDMONT - Could not open autodoc information for input file mh.st
+
+text 2 golden/ed_err_noinput.rc
+0
+
+sha256 ba4874d5f393cdfe48326732329bf8da7b61930833eceef44fda3ca3038c5dce 2423 golden/ed_err_noinput.stdout
+text 2 golden/ed_err_nopiece_sec.rc
+1
+
+text 186 golden/ed_err_nopiece_sec.stdout
+
+ FORMATTED  ro  file opened: m.pl
+
+ FORMATTED  ro  file opened: m.pl
+
+ERROR: EDMONT - NO PIECES ARE INCLUDED FROM SECTION     0 WHICH IS IN THE LIST OF SECTIONS TO USE FROM FILE #    1
+
+text 2 golden/ed_err_nopieces.rc
+1
+
+text 116 golden/ed_err_nopieces.stdout
+
+ERROR: EDMONT - No piece list file was given for input file m.st and the header does not contain piece coordinates
+
+text 2 golden/ed_err_noplout.rc
+1
+
+text 155 golden/ed_err_noplout.stdout
+
+ FORMATTED  ro  file opened: m.pl
+
+ERROR: EDMONT - There must be an output piece list file for each output image file if there are input piece list files
+
+text 2 golden/ed_err_numout.rc
+1
+
+text 82 golden/ed_err_numout.stdout
+
+ERROR: EDMONT - You must specify number of sections to write to each output file
+
+text 2 golden/ed_err_numout_count.rc
+1
+
+text 103 golden/ed_err_numout_count.stdout
+
+ERROR: EDMONT - The number of values for sections to output does not equal the number of output files
+
+text 2 golden/ed_err_xboth.rc
+1
+
+text 96 golden/ed_err_xboth.stdout
+
+ FORMATTED  ro  file opened: m.pl
+
+ERROR: EDMONT - You cannot enter both -xminmax and -xframes
+
+text 260 golden/ed_exclude.out.o.pl
+        0        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+        0        0      1
+       12        0      1
+       24        0      1
+       12        9      1
+       24        9      1
+
+sha256 96f268f22d42673828c4372e564c5126de4268b6e990e394f64aa5988e0eaf48 4864 golden/ed_exclude.out.o.st
+text 2 golden/ed_exclude.rc
+0
+
+sha256 eb81e6c81e909cd5dc3c3d281272652674842485fb1ab863a889f997ed2fa7d6 2188 golden/ed_exclude.stdout
+text 312 golden/ed_float_input.out.o.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+        0        0      1
+       12        0      1
+       24        0      1
+        0        9      1
+       12        9      1
+       24        9      1
+
+sha256 af6f4d9f7c9fcf67cccbf9b4536dee3c7401633029f70762770474156b1f1062 5632 golden/ed_float_input.out.o.st
+text 2 golden/ed_float_input.rc
+0
+
+sha256 7c8025917907bf374e97d704d646485434c2db5cb4279c7b86dbcb1bfe8b8fb1 2396 golden/ed_float_input.stdout
+sha256 abd1cbabbfe93e1219771183cefe249f9d9fd52d1be4265c408113edef088643 3400 golden/ed_float_mean.out.o.st
+text 2 golden/ed_float_mean.rc
+0
+
+sha256 6672d26ac442b29738057438918c14e78cd3528d68ee58e0a0dc62c62ea8434a 2256 golden/ed_float_mean.stdout
+sha256 08861456ecd0fff5755ddd6282fda30041162e4fa75a60e2eb765cb5e1affe8a 5704 golden/ed_float_range.out.o.st
+text 2 golden/ed_float_range.rc
+0
+
+sha256 ab5efe8828fb0d8a4e3a23b53a77b5fdeb53bf0e584a7f649587d974811825b8 2256 golden/ed_float_range.stdout
+sha256 241df09fc65161fc86f5843534e81c8df7f61290bf0c5da3a1f7baecd1391733 3364 golden/ed_fromone.out.o.st
+text 2 golden/ed_fromone.rc
+0
+
+sha256 ddc4d2c4562e85a99a7c460c64f2e11187e8d9e4911276492e57bfebe525ff4b 1632 golden/ed_fromone.stdout
+sha256 dd29395cb8c5b2f23b20fbf482cb2814766e45fc8e749aeda68d71e476fda177 5704 golden/ed_header.out.o.st
+text 2 golden/ed_header.rc
+0
+
+sha256 99998f562d6b32c667e7c5b243ab6c6dbd4125445ce0abebdc846bf481d45a28 2256 golden/ed_header.stdout
+text 2 golden/ed_help.rc
+0
+
+sha256 ba4874d5f393cdfe48326732329bf8da7b61930833eceef44fda3ca3038c5dce 2423 golden/ed_help.stdout
+sha256 c92772da856a90c84d8b2ee7233b3fd75a5fb499f663ccf54c06e4239792c81c 5632 golden/ed_mdoc.out.o.st
+sha256 07e084e642dcc025548d6cb5b0d7e746bee9206be959e6a9a69d1846e911c717 734 golden/ed_mdoc.out.o.st.mdoc
+text 2 golden/ed_mdoc.rc
+0
+
+sha256 0425424743b300727d470b6ce75ddcd0a7d86a0d495b270802be3f8410a06b4e 2256 golden/ed_mdoc.stdout
+sha256 12caf4607e28588826068d826a6c35c667ac1292f0b476d6fc6f7bc3eb46014c 2176 golden/ed_mdoc_float_shift.out.o.st
+sha256 9edf67cd0bd65fd9172c3533251eba1d9bbb395f891ab586519a05f598f19859 730 golden/ed_mdoc_float_shift.out.o.st.mdoc
+text 2 golden/ed_mdoc_float_shift.rc
+0
+
+sha256 c425f0c88afa61f727044148da00981ca0c7971480dba6c7158d75a419c42423 2256 golden/ed_mdoc_float_shift.stdout
+sha256 e90b1e57d80c2fe364792a617d0b2d50556b1b75a139584a7fe7061f7308e52f 3328 golden/ed_mdoc_renumber.out.o.st
+text 408 golden/ed_mdoc_renumber.out.o.st.mdoc
+PixelSpacing = 2.5
+ImageFile = mm.st
+ImageSize = 16 12
+Montage = 1
+DataMode = 1
+
+[ZValue = 0]
+PieceCoordinates = 0 0 0
+TiltAngle = 18
+
+[ZValue = 1]
+PieceCoordinates = 12 0 0
+TiltAngle = 21
+
+[ZValue = 2]
+PieceCoordinates = 24 0 0
+TiltAngle = 24
+
+[ZValue = 3]
+PieceCoordinates = 0 9 0
+TiltAngle = 27
+
+[ZValue = 4]
+PieceCoordinates = 12 9 0
+TiltAngle = 30
+
+[ZValue = 5]
+PieceCoordinates = 24 9 0
+TiltAngle = 33
+
+text 2 golden/ed_mdoc_renumber.rc
+0
+
+sha256 79dc96818ed5dc2ab0a84d88593d67503f0f0aa2e26034d737381e40c1252964 1632 golden/ed_mdoc_renumber.stdout
+sha256 b9869ff5ab35154cc5d6808bfa9d08cdea91d11bf75deec5b9792d3cdc4eeb37 3364 golden/ed_per_section.out.a.st
+sha256 871f93d2f1dce619571ba188e964d45fda404e0e064eb6c157b370553f11db72 3364 golden/ed_per_section.out.b.st
+text 2 golden/ed_per_section.rc
+0
+
+sha256 5c206e8569104ffecb3e825601cdebdef40ef46aa341f5ede4c5f20a15429fb4 2292 golden/ed_per_section.stdout
+text 312 golden/ed_pl.out.o.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+        0        0      1
+       12        0      1
+       24        0      1
+        0        9      1
+       12        9      1
+       24        9      1
+
+sha256 c92772da856a90c84d8b2ee7233b3fd75a5fb499f663ccf54c06e4239792c81c 5632 golden/ed_pl.out.o.st
+text 2 golden/ed_pl.rc
+0
+
+sha256 bbbd84718b1f635c195fdd347051cfad7905a8aad82362d3331693fe0cdc215c 2396 golden/ed_pl.stdout
+sha256 241df09fc65161fc86f5843534e81c8df7f61290bf0c5da3a1f7baecd1391733 3364 golden/ed_renumber.out.o.st
+text 2 golden/ed_renumber.rc
+0
+
+sha256 ddc4d2c4562e85a99a7c460c64f2e11187e8d9e4911276492e57bfebe525ff4b 1632 golden/ed_renumber.stdout
+sha256 878c6158bc9119938ad6fd9d3e6345ca29504e5bc01c0fbbef57f01bb35fdc14 3400 golden/ed_scale_range.out.o.st
+text 2 golden/ed_scale_range.rc
+0
+
+sha256 67a709af2627c4c7fe34fbef0cdf4da1635b485a167a3ce6e7faa76d8e9b632f 2256 golden/ed_scale_range.stdout
+text 312 golden/ed_to_bytes.out.o.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+        0        0      1
+       12        0      1
+       24        0      1
+        0        9      1
+       12        9      1
+       24        9      1
+
+sha256 776ae2229a3db6a58cedd2cfd2d0254e99a16d3fbfa8cc3f37ea571a447ecf74 3328 golden/ed_to_bytes.out.o.st
+text 2 golden/ed_to_bytes.rc
+0
+
+sha256 7583bf8d928897e82270c0f840f36eca9c20837706099d4c4d09f0305a94f374 2396 golden/ed_to_bytes.stdout
+text 156 golden/ed_two_in.out.o1.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+
+sha256 e5f80b9f7923d8b8c581c4a1c3965e3bbfd0be7897fb41c68a351a1ec94821f6 3328 golden/ed_two_in.out.o1.st
+text 312 golden/ed_two_in.out.o2.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+       12        0      1
+       24        0      1
+       36        0      1
+       12        9      1
+       24        9      1
+       36        9      1
+
+sha256 7385bd000b01b57374d38c4fd91b08eb1894008bccf500adbcf2f3b473be9363 5632 golden/ed_two_in.out.o2.st
+text 156 golden/ed_two_in.out.o3.pl
+       12        0      0
+       24        0      0
+       36        0      0
+       12        9      0
+       24        9      0
+       36        9      0
+
+sha256 e5f80b9f7923d8b8c581c4a1c3965e3bbfd0be7897fb41c68a351a1ec94821f6 3328 golden/ed_two_in.out.o3.st
+text 2 golden/ed_two_in.rc
+0
+
+sha256 97853dadaff74d641336eb7d4bdc234125875ee2bce5e89295ada950199e93a1 4802 golden/ed_two_in.stdout
+sha256 2ed4d4c9d83e9d99506fe3ff54571b9ec03d79b7f3edf9ef68b83d134a778f3a 10384 golden/ed_two_in_header.out.o1.st
+text 2 golden/ed_two_in_header.rc
+0
+
+sha256 6b2bb6ef2bba8c4311992817dc0e3755035831170b44f8c63920e1dde00ab266 4477 golden/ed_two_in_header.stdout
+text 208 golden/ed_xframes.out.o.pl
+       12        0      0
+       24        0      0
+       12        9      0
+       24        9      0
+       12        0      1
+       24        0      1
+       12        9      1
+       24        9      1
+
+sha256 530c0506e1a05d1a46861b5469b287f6efc764141aa82e92b47432345bd13e72 4096 golden/ed_xframes.out.o.st
+text 2 golden/ed_xframes.rc
+0
+
+sha256 b83b5496403ff840334808e2e4f175b1f2a377a32dad55651d8f01a85150910f 1980 golden/ed_xframes.stdout
+text 312 golden/ed_yminmax_shift.out.o.pl
+        0        0      0
+       12        0      0
+       24        0      0
+        0        9      0
+       12        9      0
+       24        9      0
+        0        0      1
+       12        0      1
+       24        0      1
+        0        9      1
+       12        9      1
+       24        9      1
+
+sha256 c92772da856a90c84d8b2ee7233b3fd75a5fb499f663ccf54c06e4239792c81c 5632 golden/ed_yminmax_shift.out.o.st
+text 2 golden/ed_yminmax_shift.rc
+0
+
+sha256 bbbd84718b1f635c195fdd347051cfad7905a8aad82362d3331693fe0cdc215c 2396 golden/ed_yminmax_shift.stdout

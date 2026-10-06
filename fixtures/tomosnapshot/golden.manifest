@@ -1,0 +1,60 @@
+# imod-rs native golden manifest for fixtures/tomosnapshot; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh tomosnapshot; do not edit by hand.
+text 6 golden/bad_ext.files
+q.edf
+
+text 92 golden/bad_ext.out
+ERROR: tomosnapshot - Opening   q.edf.foo: [Errno 2] No such file or directory: 'q.edf.foo'
+
+text 2 golden/bad_ext.rc
+1
+
+text 0 golden/bad_option.files
+
+text 45 golden/bad_option.out
+ERROR: tomosnapshot - Illegal option: badopt
+
+text 2 golden/bad_option.rc
+1
+
+text 6 golden/ejf_noname.files
+j.ejf
+
+text 70 golden/ejf_noname.out
+ERROR: tomosnapshot - Data set root name not found in etomo data file
+
+text 2 golden/ejf_noname.rc
+1
+
+text 0 golden/help.files
+
+sha256 d8ed1371812661472f5e849b12f9adfb016a73d400e43dabc69f5e07082361fb 1162 golden/help.out
+text 2 golden/help.rc
+0
+
+text 0 golden/missing_etomo.files
+
+text 84 golden/missing_etomo.out
+ERROR: tomosnapshot - Opening   x.edf: [Errno 2] No such file or directory: 'x.edf'
+
+text 2 golden/missing_etomo.rc
+1
+
+text 6 golden/no_root.files
+q.edf
+
+text 195 golden/no_root.out
+WARNING: tomosnapshot - Data set root name not found in etomo data file
+ERROR: tomosnapshot - Cannot find dataset name from analysis of files; if running from Etomo, do File - Save and try again
+
+text 2 golden/no_root.rc
+1
+
+text 0 golden/not_dir.files
+
+text 50 golden/not_dir.out
+ERROR: tomosnapshot - nonexist is not a directory
+
+text 2 golden/not_dir.rc
+1
+

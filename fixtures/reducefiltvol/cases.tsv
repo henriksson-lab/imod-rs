@@ -1,0 +1,21 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+reduce	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 2 v.mrc o.mrc
+reduce_xy	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 2 -zfactor 1 v.mrc o.mrc
+reduce_z	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-zfactor 2 v.mrc o.mrc
+reduce_one	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 1 v.mrc o.mrc
+lowpass	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-lowpass 0.3,0.05 v.mrc o.mrc
+reduce_lowpass	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 2 -lowpass 0.3,0.05 v.mrc o.mrc
+deconv	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-deconv 1.0 v.mrc o.mrc
+deconv_options	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 2 -deconv 0.8 -snr 1.2 -dchigh 0.02 -mode 30 v.mrc o.mrc
+deconv_entered	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-deconv 1 -defocus 3.5 -pixel 0.5 -volt 200 -cs 2.0 v.mrc o.mrc
+both_filters	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-lowpass 0.3,0.05 -deconv 1 v.mrc o.mrc
+reduce_small	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 0.5 v.mrc o.mrc
+nothing	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-mode 2 v.mrc o.mrc
+no_input	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 2 nonexist.mrc o.mrc
+mode	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 2 -ModeToOutput 2 v.mrc o.mrc
+reduce_lowpass_mode	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-reduce 2 -lowpass 0.3,0.05 -ModeToOutput 0 v.mrc o.mrc
+astig	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com ctfplotter.com:ctfplotter.com v1/g.defocus:g.defocus	-	-deconv 0.5 -dcphase 30 -mode 2 -reduce 2 v.mrc o.mrc
+old_defocus	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com v2/ctfplotter.com:ctfplotter.com v2/g.defocus:g.defocus	-	-deconv 1.0 v.mrc o.mrc
+no_raw_stack	../../boxstartend/v.mrc:v.mrc tilt.com:tilt.com v4/ctfplotter.com:ctfplotter.com g.defocus:g.defocus	-	-deconv 0.5 -reduce 2 v.mrc o.mrc
+no_ctfplotter	../../boxstartend/v.mrc:v.mrc g.ali:g.ali tilt.com:tilt.com g.defocus:g.defocus	-	-deconv 1.0 v.mrc o.mrc
+no_root	../../boxstartend/v.mrc:v.mrc	-	-deconv 1.0 v.mrc o.mrc

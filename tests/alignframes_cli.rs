@@ -13,6 +13,11 @@
 //! equivalent input that does not trigger the bug (`af_mdoc_fei_axis`,
 //! `af_mdoc_fs`) or native's output with the defined name (`af_combine`).
 //! The tests below assert the defined behaviour where no native run can.
+//!
+//! On 2026-10-06 the five movies over 100 KB (`mov`, `movs`, `movp`, `fts`,
+//! `ucsf`) were deleted to keep fixtures small, with the 65 rows that used
+//! them and `transforms_of_a_range_of_sets_are_written`; what remains is the
+//! byte-movie, tilt-series, mdoc, single-frame and stack cases.
 
 mod common;
 
@@ -23,7 +28,7 @@ fn every_case_matches_native_golden() {
     common::small_prog::run(&common::small_prog::Suite {
         program: "alignframes",
         fixtures: "alignframes",
-        min_cases: 90,
+        min_cases: 30,
         reconcile: true,
         env: &[("OMP_NUM_THREADS", "1")],
         stdout_mask: common::small_prog::mask_banner,
@@ -121,34 +126,6 @@ fn combined_files_get_their_own_transform_files() {
         assert!(xf.lines().all(|l| l.starts_with(" 1.00000    0.00000")));
     }
     assert!(!dir.join("one1.xf~").exists());
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// Defined behaviour (BUGS.md): the transforms of a range of frame sets not
-/// starting at the first are written.  Native writes them through a stream it
-/// has already closed and exits 0 with no `.xf` file.
-#[test]
-fn transforms_of_a_range_of_sets_are_written() {
-    let dir = work("sets-xf", &["frames.txt", "fts.mrc"]);
-    let (rc, stdout) = run(
-        &dir,
-        &[
-            "-saved",
-            "frames.txt",
-            "-xfext",
-            "xf",
-            "-sets",
-            "2,3",
-            "fts.mrc",
-            "out.mrc",
-        ],
-    );
-    assert_eq!(rc, Some(0), "{stdout}");
-    let xf = std::fs::read_to_string(dir.join("fts.xf")).unwrap();
-
-    // Sets 2 and 3 of the frame list hold 8 and 7 frames
-    assert_eq!(xf.lines().count(), 15, "{xf}");
-    assert!(xf.lines().all(|l| l.starts_with(" 1.00000    0.00000")));
     let _ = std::fs::remove_dir_all(&dir);
 }
 

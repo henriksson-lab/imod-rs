@@ -1,0 +1,70 @@
+# imod-rs native golden manifest for fixtures/imod2patch; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh imod2patch; do not edit by hand.
+text 0 golden/ip_badcol.out.p.out
+
+text 2 golden/ip_badcol.rc
+1
+
+text 79 golden/ip_badcol.stdout
+ERROR: imod2patch -  The column for general value type must be between 1 and 6
+
+text 2 golden/ip_noargs.rc
+1
+
+text 60 golden/ip_noargs.stdout
+imod2patch usage:
+imod2patch [-v col] imod_model patch_file
+
+text 2 golden/ip_nofile.rc
+1
+
+text 47 golden/ip_nofile.stdout
+ERROR: imod2patch -  Reading model nofile.mod
+
+
+sha256 5d912acd9337f330ebd8201f977362c4411456d020f9d57373f74254955778c5 3220 golden/ip_noflip.out.p.out
+text 2 golden/ip_noflip.rc
+0
+
+text 0 golden/ip_noflip.stdout
+
+text 0 golden/ip_novalues.out.p.out
+
+text 2 golden/ip_novalues.rc
+1
+
+text 69 golden/ip_novalues.stdout
+ERROR: imod2patch -  There are no general values stored in the model
+
+text 2 golden/ip_onearg.rc
+1
+
+text 101 golden/ip_onearg.stdout
+ERROR: imod2patch - wrong # of arguments
+imod2patch usage:
+imod2patch [-v col] imod_model patch_file
+
+sha256 e6885910c5d4580a383541e860211f58b59b9a4a9dbc32696d8badeb529e12ce 1856 golden/ip_vals3.out.p.out
+text 2 golden/ip_vals3.rc
+0
+
+text 0 golden/ip_vals3.stdout
+
+sha256 3490fc61b0df8d1d6363eef20084af6fe92379e4e7cf0bdc8e52fc8c95feaf8a 1856 golden/ip_vals3_col2.out.p.out
+text 2 golden/ip_vals3_col2.rc
+0
+
+text 0 golden/ip_vals3_col2.stdout
+
+sha256 5d912acd9337f330ebd8201f977362c4411456d020f9d57373f74254955778c5 3220 golden/ip_vals6.out.p.out
+text 2 golden/ip_vals6.rc
+0
+
+text 0 golden/ip_vals6.stdout
+
+sha256 656b15780b38ba4efb0d739540cca7f2b27a82d2147bc36238e069750881e116 3220 golden/ip_vals6_col3.out.p.out
+text 2 golden/ip_vals6_col3.rc
+0
+
+text 0 golden/ip_vals6_col3.stdout
+

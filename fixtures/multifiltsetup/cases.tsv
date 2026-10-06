@@ -1,0 +1,19 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+fake	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 5,10,20 tilt
+exact	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-exact 3-5 tilt.com
+hamming	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-hamming 0.2,0.3 tilt
+cutoffs	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-cutoffs 0.25,0.3 tilt
+falloffs	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-falloffs 0.05,0.1 tilt
+cut_one_fall	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-cutoffs 0.2,0.3,0.4 -falloffs 0.04 tilt
+too_many_falloffs	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-cutoffs 0.2,0.3 -falloffs 0.04,0.05,0.06 tilt
+volume	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 5 -width 30 -ysize 20 -thick 40 -xshift 2.5 -yshift 3 -zshift -1.5 tilt
+ysize_too_big	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 5 -ysize 60 tilt
+two_filters	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 5 -hamming 0.2 tilt
+no_filter	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	tilt
+four_digit	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 1500,3 tilt
+hamming_range	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-hamming 0.7 tilt
+no_comfile	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 5 nonexist
+negative_width	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 5 -width -3 tilt
+exact_large	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-exact 2000 tilt
+cutoff_range	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-cutoffs 0.6 tilt
+unsorted_list	tilt.com:tilt.com ../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt	-	-fake 3,1-2 tilt

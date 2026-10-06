@@ -1,0 +1,36 @@
+# imod-rs native golden manifest for fixtures/goodframe; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh goodframe; do not edit by hand.
+text 2 golden/gf_args.rc
+0
+
+text 37 golden/gf_args.stdout
+         100        3024          78
+
+text 2 golden/gf_bad.rc
+2
+
+text 0 golden/gf_bad.stdout
+
+text 2 golden/gf_empty_stdin.rc
+2
+
+text 0 golden/gf_empty_stdin.stdout
+
+text 2 golden/gf_n.rc
+0
+
+text 109 golden/gf_n.stdout
+         100        3072          80           2           2           4           4           6           6
+
+text 2 golden/gf_n_only.rc
+0
+
+text 1 golden/gf_n_only.stdout
+
+
+text 2 golden/gf_stdin.rc
+0
+
+text 13 golden/gf_stdin.stdout
+         520
+

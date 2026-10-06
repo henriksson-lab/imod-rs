@@ -1,0 +1,617 @@
+# imod-rs native golden manifest for fixtures/finishjoin; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh finishjoin; do not edit by hand.
+text 74 golden/angle.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 1582bf2b1df728bcc1c5fb9cc10b43bb67ea6be4064f6dabff93abe0eeaef4d0 4896 golden/angle.out
+text 2 golden/angle.rc
+0
+
+text 80 golden/angle/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/angle/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 cafaac0498453d3ae93e5cea9bbb18c5e2ef6545618791aaee7ecaee49f8b159 385024 golden/angle/jr_join.mrc
+text 42 golden/bad_binning.files
+jr.info
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 59 golden/bad_binning.out
+ERROR: finishjoin - Binning out of range of allowed values
+
+text 2 golden/bad_binning.rc
+1
+
+text 42 golden/both_ways.files
+jr.info
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 109 golden/both_ways.out
+ERROR: finishjoin - You must enter slice ranges either with -slice or as non-option arguments, not both ways
+
+text 2 golden/both_ways.rc
+1
+
+text 74 golden/gaps.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 6f11ff3572cdad0b517e5cb5533c0c2e41bbe86a71b30980886668bc109dde2b 4896 golden/gaps.out
+text 2 golden/gaps.rc
+0
+
+text 80 golden/gaps/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/gaps/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 90c3464e00b01f20d385db6ea1df8df3cd0af8b34688079be4fffa06d9ca80df 423424 golden/gaps/jr_join.mrc
+text 63 golden/info_v2.files
+o2.info
+o2.join
+o2.tomoxf
+o2.tomoxg
+o2.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 5881cfdd6dfe5d49b6c2c7bd88612b86eddb9e430217527a7418b6b183407dcf 4892 golden/info_v2.out
+text 2 golden/info_v2.rc
+0
+
+sha256 d238824c5c56df46de1f80beb2d82f091be139d26e1bdca102f8a8453f2bd842 505024 golden/info_v2/o2.join
+text 80 golden/info_v2/o2.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/info_v2/o2.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+text 74 golden/local.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 f41c0e3fb6fd299cd036fbb0cb05f376704d0e956624b2aafb928048552e15fc 4896 golden/local.out
+text 2 golden/local.rc
+0
+
+text 80 golden/local/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/local/jr.tomoxg
+   1.0030826  -0.0084365   0.0084225   1.0014230      -0.910       0.433
+   0.9936268   0.0167151  -0.0167707   0.9969292       1.840      -0.824
+   1.0030791  -0.0083529   0.0085069   1.0014360      -0.929       0.390
+
+sha256 546c0e968dff21abc9d444ce8d00c3adadfd609b2e46a65e6a0ceb7d7f475d67 385024 golden/local/jr_join.mrc
+text 42 golden/local_ref.files
+jr.info
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 83 golden/local_ref.out
+ERROR: finishjoin - You cannot use local fitting together with a reference section
+
+text 2 golden/local_ref.rc
+1
+
+text 62 golden/maxsize.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 82 golden/maxsize.out
+Maximum size required:       66       52
+Offset needed to center:      -1       0
+
+text 2 golden/maxsize.rc
+0
+
+text 80 golden/maxsize/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/maxsize/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+text 84 golden/no_image.files
+finishjoinNewst.input
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 0 golden/no_image.out
+
+text 2 golden/no_image.rc
+0
+
+text 335 golden/no_image/finishjoinNewst.input
+InputFile t1.rec
+SectionsToRead 0-11
+MultiplyAndAdd 1.,0.
+InputFile t2.rec
+SectionsToRead 0-9
+MultiplyAndAdd 0.768723,8.03609
+InputFile t3.rec
+SectionsToRead 0-7
+MultiplyAndAdd 0.628913,12.0601
+SizeToOutputInXandY 64,50
+ModeToOutput 2
+OneTransformPerFile
+BinByFactor 1
+OutputFile jr_join.mrc
+OffsetsInXandY 0,0
+TransformFile jr.tomoxg
+
+text 80 golden/no_image/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/no_image/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+text 42 golden/no_info.files
+jr.info
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 55 golden/no_info.out
+ERROR: finishjoin - Join Info file nojr.info not found
+
+text 2 golden/no_info.rc
+1
+
+text 58 golden/old_info.files
+o.info
+o.join
+o.tomoxf
+o.tomoxg
+o.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 5fbd3b91f2217a3a0f65c2cfdaf54e3c2744963012b36a95fad85cbb8104bebd 4890 golden/old_info.out
+text 2 golden/old_info.rc
+0
+
+sha256 c25d6d9f9669fe7e22c70f5335b3cd44677600c05d0dc5307bc5cb8ee20dc5f8 369664 golden/old_info/o.join
+text 80 golden/old_info/o.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/old_info/o.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+text 51 golden/old_info_maxsize.files
+o.info
+o.tomoxf
+o.tomoxg
+o.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 70 golden/old_info_maxsize.out
+ERROR: finishjoin - INFO FILE IS TOO OLD TO GET THE MAXIMUM SIZE FROM
+
+text 2 golden/old_info_maxsize.rc
+1
+
+text 80 golden/old_info_maxsize/o.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/old_info_maxsize/o.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+text 42 golden/out_of_range.files
+jr.info
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 79 golden/out_of_range.out
+ERROR: finishjoin - The Z range for tomogram # 1  has coordinates out of range
+
+text 2 golden/out_of_range.rc
+1
+
+text 74 golden/plain.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 1582bf2b1df728bcc1c5fb9cc10b43bb67ea6be4064f6dabff93abe0eeaef4d0 4896 golden/plain.out
+text 2 golden/plain.rc
+0
+
+text 80 golden/plain/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/plain/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 cafaac0498453d3ae93e5cea9bbb18c5e2ef6545618791aaee7ecaee49f8b159 385024 golden/plain/jr_join.mrc
+text 74 golden/reference.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 d960eaa2e15a85f01a5bc98ae9b14cb1a7c817351ba43b0f09eb03dd0a7c09ad 4896 golden/reference.out
+text 2 golden/reference.rc
+0
+
+text 80 golden/reference/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/reference/jr.tomoxg
+   1.0075310  -0.0508854   0.0508854   1.0075310      -2.595       1.384
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   1.0100000   0.0000000  -0.0000000   1.0000000      -3.000       1.000
+
+sha256 e08fff843d524d6bef0bcfcc8c9918e5fbb7afb842a931b8a46ce9581e890f6c 385024 golden/reference/jr_join.mrc
+text 74 golden/refine.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 bc41effe62d9fcef3ae6faad92ab6d8ff92d8e2907a25e66cc14260463b79193 4896 golden/refine.out
+text 2 golden/refine.rc
+0
+
+text 80 golden/refine/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/refine/jr.tomoxg
+   1.0219995  -0.0343945   0.0331556   0.9851846       0.270       1.588
+   0.9934590   0.0266844  -0.0267069   0.9967619       1.832      -0.842
+   1.0035629   0.0167151  -0.0169384   0.9969290       0.876       2.224
+
+sha256 d41f2b609b0530717866a9b024078a079909f0406c76aad3c4974497c0f05de6 385024 golden/refine/jr_join.mrc
+text 74 golden/reversed.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 1582bf2b1df728bcc1c5fb9cc10b43bb67ea6be4064f6dabff93abe0eeaef4d0 4896 golden/reversed.out
+text 2 golden/reversed.rc
+0
+
+text 80 golden/reversed/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/reversed/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 cafaac0498453d3ae93e5cea9bbb18c5e2ef6545618791aaee7ecaee49f8b159 385024 golden/reversed/jr_join.mrc
+text 74 golden/size_offset.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 e30673c142aa6fc57e68a732d4cfb2edc2313bba634636921f540446285e22cb 4896 golden/size_offset.out
+text 2 golden/size_offset.rc
+0
+
+text 80 golden/size_offset/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/size_offset/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 e577aac8291ddf3417c3d0237771bc6d3a0f3eae4d2d01afd2b50a1aadb710bd 505024 golden/size_offset/jr_join.mrc
+text 93 golden/squeezed.files
+ref.xf
+sq.info
+sq.sqzxf
+sq.tomoxf
+sq.tomoxg
+sq.xf
+sq.xpndxf
+sq_join.mrc
+t1.rec
+t2.rec
+t3.rec
+
+sha256 1faa974d7de5b0cadd94a685b9c9166f40832beb6d4455d240b0084da3faf428 4896 golden/squeezed.out
+text 2 golden/squeezed.rc
+0
+
+text 80 golden/squeezed/sq.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/squeezed/sq.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.916       0.768
+   0.9936268   0.0167151  -0.0167706   0.9969290       2.355      -1.055
+   1.0035628   0.0167151  -0.0169384   0.9969290      -1.439       0.287
+
+sha256 c1a6c37e180c6fc3de568463b7c53b61ff4e7716dbfddd333548b714cb48e126 385024 golden/squeezed/sq_join.mrc
+text 81 golden/squeezed_maxsize.files
+ref.xf
+sq.info
+sq.sqzxf
+sq.tomoxf
+sq.tomoxg
+sq.xf
+sq.xpndxf
+t1.rec
+t2.rec
+t3.rec
+
+text 82 golden/squeezed_maxsize.out
+Maximum size required:       66       52
+Offset needed to center:      -1       0
+
+text 2 golden/squeezed_maxsize.rc
+0
+
+text 80 golden/squeezed_maxsize/sq.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/squeezed_maxsize/sq.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.916       0.768
+   0.9936268   0.0167151  -0.0167706   0.9969290       2.355      -1.055
+   1.0035628   0.0167151  -0.0169384   0.9969290      -1.439       0.287
+
+text 93 golden/squeezed_refine.files
+ref.xf
+sq.info
+sq.sqzxf
+sq.tomoxf
+sq.tomoxg
+sq.xf
+sq.xpndxf
+sq_join.mrc
+t1.rec
+t2.rec
+t3.rec
+
+sha256 efeacd73133a65b8735d2754185719fe17b8b77fec9246cc9f2c8bbc5d110586 4896 golden/squeezed_refine.out
+text 2 golden/squeezed_refine.rc
+0
+
+text 80 golden/squeezed_refine/sq.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/squeezed_refine/sq.tomoxg
+   1.0219995  -0.0343945   0.0331556   0.9851846       0.066       1.753
+   0.9934590   0.0266844  -0.0267069   0.9967619       2.344      -1.079
+   1.0035628   0.0167151  -0.0169384   0.9969290       0.561       2.287
+
+sha256 cdf3d0ebc852cf5ef8c81ee4f8a8a51dfbcd17b177052c622819962a8948b328 385024 golden/squeezed_refine/sq_join.mrc
+text 74 golden/subranges.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 dccf3317dc1198ecd05c0bfab9c96ab35cbd867a03f0e8579ac3e47e75acfa9f 4424 golden/subranges.out
+text 2 golden/subranges.rc
+0
+
+text 80 golden/subranges/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/subranges/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 26658a60294d405c96cae927c1fd2e44a392869fcfa2217aeb5e1d574b571296 282624 golden/subranges/jr_join.mrc
+text 42 golden/too_few.files
+jr.info
+jr.xf
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+text 108 golden/too_few.out
+ERROR: finishjoin - You must enter the rootname as a non-option argument if you enter slice ranges that way
+
+text 2 golden/too_few.rc
+1
+
+text 80 golden/trial.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_trial_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 d412504680a220d4f511e4c1e026d491955d4cff767528f38e9d68eb0ae2b236 3899 golden/trial.out
+text 2 golden/trial.rc
+0
+
+text 80 golden/trial/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/trial/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 b46cf57c959683c65b7a03c57780cf836a89b2997e92448993cc2f797cf0a00c 42624 golden/trial/jr_trial_join.mrc
+text 33 golden/unit_lines.files
+t1.rec
+t2.rec
+t3.rec
+u.info
+u.xf
+
+text 138 golden/unit_lines.out
+ERROR: XFTOXG - OPENING OR READING TRANSFORM FILE
+ERROR: finishjoin - xftoxg -range 50.0  -nfit 0 u.tomoxf u.tomoxg: exited with status 1
+
+text 2 golden/unit_lines.rc
+1
+
+text 74 golden/use_option.files
+jr.info
+jr.tomoxf
+jr.tomoxg
+jr.xf
+jr_join.mrc
+ref.xf
+t1.rec
+t2.rec
+t3.rec
+
+sha256 1582bf2b1df728bcc1c5fb9cc10b43bb67ea6be4064f6dabff93abe0eeaef4d0 4896 golden/use_option.out
+text 2 golden/use_option.rc
+0
+
+text 80 golden/use_option/jr.tomoxf
+1.0 0.0 0.0 1.0 0.0 0.0
+0.99 0.05 -0.05 0.99 2.5 -1.5
+1.01 0.0 0.0 1.0 -3.0 1.0
+
+text 219 golden/use_option/jr.tomoxg
+   1.0019603  -0.0337201   0.0338322   1.0052904      -0.716       0.600
+   0.9936267   0.0167151  -0.0167706   0.9969290       1.840      -0.824
+   1.0035629   0.0167151  -0.0169384   0.9969290      -1.124       0.224
+
+sha256 cafaac0498453d3ae93e5cea9bbb18c5e2ef6545618791aaee7ecaee49f8b159 385024 golden/use_option/jr_join.mrc

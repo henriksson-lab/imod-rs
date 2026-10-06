@@ -1,0 +1,5 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	-
+nocommand	-	-	-o
+baddir	-	-	-d nodir ls
+nocmd	-	-	nonexistent_cmd_xyz

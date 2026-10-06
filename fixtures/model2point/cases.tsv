@@ -1,0 +1,13 @@
+# name	arguments (- for none)	stdin (printf escapes, - for none)
+mp_basic	rf.mod p.txt	-
+mp_object	-input rf.mod -output p.txt -object	-
+mp_contour_zero	-input rf.mod -output p.txt -contour -zero	-
+mp_integer	-input rf.mod -output p.txt -integer	-
+mp_scaled_zcoord	-input rf.mod -output p.txt -scaled -zcoord	-
+mp_point_values	-input vals6.mod -output p.txt -values 1 -object	-
+mp_cont_values	-input vals6.mod -output p.txt -values -1 -contour -fill 9	-
+mp_sizes_times	-input scat.mod -output p.txt -sizes -times	-
+mp_float_integer	-input rf.mod -output p.txt -float -integer	-
+mp_float	-input rf.mod -output p.txt -float	-
+mp_mesh1	-input me.mod -output p.txt -mesh 1	-
+mp_mesh2_fail	-input me.mod -output p.txt -mesh 2 -object	-

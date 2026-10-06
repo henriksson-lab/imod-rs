@@ -77,9 +77,10 @@ PY
 export LD_LIBRARY_PATH=$R/buildlib
 M=$R/mrc/raw2mrc
 if [ -f mb.raw ]; then
-  rm -f vf.mrc vs.mrc mb.mrc  # else raw2mrc leaves `~` backups
+  rm -f vf.mrc vs.mrc  # else raw2mrc leaves `~` backups
   $M -x 25 -y 19 -z 13 -t float vf.raw vf.mrc > /dev/null
   $M -x 21 -y 17 -z 11 -t short vs.raw vs.mrc > /dev/null
-  $M -x 100 -y 90 -z 30 -t byte mb.raw mb.mrc > /dev/null
+  # mb.mrc (100x90x30 bytes) and its cases were deleted on 2026-10-06 to
+  # keep fixtures small; mb.raw is still generated, so nothing else moves.
 fi
 rm -f *.raw

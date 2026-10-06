@@ -1,0 +1,57 @@
+# imod-rs native golden manifest for fixtures/b3dtomosetexts; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh b3dtomosetexts; do not edit by hand.
+text 45 golden/dataset.files
+align.com
+b.st
+eraser.com
+newst.com
+tilt.com
+
+text 15 golden/dataset.out
+mrc st b 0 com
+
+text 2 golden/dataset.rc
+0
+
+text 0 golden/empty.files
+
+text 22 golden/empty.out
+none none none 0 none
+
+text 2 golden/empty.rc
+0
+
+text 0 golden/help.files
+
+text 421 golden/help.out
+Usage: b3dtomosetexts [directory]
+  Examines data set files in the current directory or the optionally specified one.
+  Outputs all on one line ("none" is output if a string is undetermined):
+    type extension (naming style): old, mrc, hdf, or none
+    raw stack extension or none
+    root name of dataset or none
+    2 for dual axis, 0 for single axis, or -1 if not determined
+    com file extension: com, pcm, or none
+
+text 2 golden/help.rc
+0
+
+text 0 golden/nodir.files
+
+text 34 golden/nodir.out
+Error changing directory to nodir
+
+text 2 golden/nodir.rc
+1
+
+text 33 golden/subdir.files
+ds/align.com
+ds/b.st
+ds/tilt.com
+
+text 17 golden/subdir.out
+mrc none b 0 com
+
+text 2 golden/subdir.rc
+0
+

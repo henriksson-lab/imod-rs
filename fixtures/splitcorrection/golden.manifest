@@ -1,0 +1,174 @@
+# imod-rs native golden manifest for fixtures/splitcorrection; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh splitcorrection; do not edit by hand.
+text 146 golden/basic.files
+b_ali.mrc
+ctfcorrection-001.com
+ctfcorrection-002.com
+ctfcorrection-bound.info
+ctfcorrection-finish.com
+ctfcorrection-start.com
+ctfcorrection.com
+
+text 38 golden/basic.out
+4 command files for 2 chunks created 
+
+text 2 golden/basic.rc
+0
+
+sha256 88dfb4e9a670f7fcadae68f3cf12c28537e73b9ce1faddf4ab26291bd8faf898 856 golden/basic/ctfcorrection-001.com
+sha256 523c91be9bbac135b765be8d89dca0e21d81dfb2a87293411ecad6befbb84db7 856 golden/basic/ctfcorrection-002.com
+text 82 golden/basic/ctfcorrection-bound.info
+1 0 48 21 2
+b_ctfcorr_ali-001.cbound
+-1 0 4 -1
+b_ctfcorr_ali-002.cbound
+5 0 -1 -1
+
+text 340 golden/basic/ctfcorrection-finish.com
+$fixboundaries "b_ctfcorr_ali.mrc" "ctfcorrection-bound.info"
+$collectmmm pixels= "ctfcorrection" 2 "b_ctfcorr_ali.mrc" 1 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "ctfcorrection-bound.info"
+$b3dremove -g ctfcorrection-[0-9][0-9][0-9]*.com* ctfcorrection-[0-9][0-9][0-9]*.log* ctfcorrection-start*.* ctfcorrection-finish*.com*
+
+sha256 0a926f8d3b2341aa398e96c71354afd26ef7b72fec39794bbde53f1831f61f10 822 golden/basic/ctfcorrection-start.com
+text 212 golden/bound.files
+b_ali.mrc
+ctfcorrection-001.com
+ctfcorrection-002.com
+ctfcorrection-003.com
+ctfcorrection-004.com
+ctfcorrection-005.com
+ctfcorrection-bound.info
+ctfcorrection-finish.com
+ctfcorrection-start.com
+ctfcorrection.com
+
+text 38 golden/bound.out
+7 command files for 5 chunks created 
+
+text 2 golden/bound.rc
+0
+
+sha256 2555a89d3f0e009584493a635e8a07d8ba8d2dd9ad2fbfcd8ac65cb527109c68 856 golden/bound/ctfcorrection-001.com
+sha256 f47ab2fc5bc0537d7ec87bf707d0a7e02174a216117ad9f1f4cd11cddf2047aa 856 golden/bound/ctfcorrection-002.com
+sha256 052fb02ebe986913061ca1456302163aadc2b2556729483910d34eed5b683961 856 golden/bound/ctfcorrection-003.com
+sha256 ff9b76de4f47a4123ed944fa8b4d1e8ab437cdd3ed14b8b44ba09e61dc5124a9 856 golden/bound/ctfcorrection-004.com
+sha256 b94a2182a6cd6c4992fbecba289dbabc59076c01dda74a34d402ff3f0b876f59 856 golden/bound/ctfcorrection-005.com
+text 184 golden/bound/ctfcorrection-bound.info
+1 0 48 21 5
+b_ctfcorr_ali-001.cbound
+-1 0 1 -1
+b_ctfcorr_ali-002.cbound
+2 0 3 -1
+b_ctfcorr_ali-003.cbound
+4 0 5 -1
+b_ctfcorr_ali-004.cbound
+6 0 7 -1
+b_ctfcorr_ali-005.cbound
+8 0 -1 -1
+
+text 340 golden/bound/ctfcorrection-finish.com
+$fixboundaries "b_ctfcorr_ali.mrc" "ctfcorrection-bound.info"
+$collectmmm pixels= "ctfcorrection" 5 "b_ctfcorr_ali.mrc" 1 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "ctfcorrection-bound.info"
+$b3dremove -g ctfcorrection-[0-9][0-9][0-9]*.com* ctfcorrection-[0-9][0-9][0-9]*.log* ctfcorrection-start*.* ctfcorrection-finish*.com*
+
+sha256 0a926f8d3b2341aa398e96c71354afd26ef7b72fec39794bbde53f1831f61f10 822 golden/bound/ctfcorrection-start.com
+text 168 golden/m3.files
+b_ali.mrc
+ctfcorrection-001.com
+ctfcorrection-002.com
+ctfcorrection-003.com
+ctfcorrection-bound.info
+ctfcorrection-finish.com
+ctfcorrection-start.com
+ctfcorrection.com
+
+text 38 golden/m3.out
+5 command files for 3 chunks created 
+
+text 2 golden/m3.rc
+0
+
+sha256 9d5933ba6f8982da967651e22e89f0ed1947dae0ce7be6511cd52a7181b4dfd5 856 golden/m3/ctfcorrection-001.com
+sha256 860800c886e47bd8e6d61622897cf5ee2b364a979788055963f648999aca7ff7 856 golden/m3/ctfcorrection-002.com
+sha256 b02ebd65daca3dab3490dfc01aaf2c2ef5fc13e9fea3738c691a30a02c546190 856 golden/m3/ctfcorrection-003.com
+text 116 golden/m3/ctfcorrection-bound.info
+1 0 48 21 3
+b_ctfcorr_ali-001.cbound
+-1 0 2 -1
+b_ctfcorr_ali-002.cbound
+3 0 5 -1
+b_ctfcorr_ali-003.cbound
+6 0 -1 -1
+
+text 340 golden/m3/ctfcorrection-finish.com
+$fixboundaries "b_ctfcorr_ali.mrc" "ctfcorrection-bound.info"
+$collectmmm pixels= "ctfcorrection" 3 "b_ctfcorr_ali.mrc" 1 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "ctfcorrection-bound.info"
+$b3dremove -g ctfcorrection-[0-9][0-9][0-9]*.com* ctfcorrection-[0-9][0-9][0-9]*.log* ctfcorrection-start*.* ctfcorrection-finish*.com*
+
+sha256 0a926f8d3b2341aa398e96c71354afd26ef7b72fec39794bbde53f1831f61f10 822 golden/m3/ctfcorrection-start.com
+text 28 golden/nodir.files
+b_ali.mrc
+ctfcorrection.com
+
+text 115 golden/nodir.out
+ERROR: splitcorrection - Opening file: sub/rr-start.com  - [Errno 2] No such file or directory: 'sub/rr-start.com'
+
+text 2 golden/nodir.rc
+1
+
+text 0 golden/nofile.files
+
+text 116 golden/nofile.out
+ERROR: splitcorrection - The full command file name must be entered because neither nofile.com nor nofile.pcm exist
+
+text 2 golden/nofile.rc
+1
+
+text 233 golden/size_open.files
+ctfcorrection-005-sync.com
+ctfcorrection-006.com
+ctfcorrection-007.com
+ctfcorrection-008.com
+ctfcorrection-009.com
+ctfcorrection-010.com
+ctfcorrection-011.com
+ctfcorrection-012-sync.com
+ctfcorrection-bound-005.info
+ctfcorrection.com
+
+text 38 golden/size_open.out
+8 command files for 6 chunks created 
+
+text 2 golden/size_open.rc
+0
+
+sha256 52bae795f08234d2a3efe916e1f4502b388e6669d55add4c0c9965d1881b9475 823 golden/size_open/ctfcorrection-005-sync.com
+sha256 138f1016a6f5a4609a670c8fc33e49e2ce0e4194d65a9ff781f7b4501ea7d7fa 861 golden/size_open/ctfcorrection-006.com
+sha256 fea23b436dcb8da5e76eb02cdd75bbe1b9eeb1deba8baa9ca7cca3f4b6b67d91 861 golden/size_open/ctfcorrection-007.com
+sha256 261a12fc9905cccc8e203658a16853b6938cd35d5aafc69e9c7293904da431cb 862 golden/size_open/ctfcorrection-008.com
+sha256 b06a6376f1573cdd1a1ce31815b4f094efcceed749e5dac58d5522bd6db991df 863 golden/size_open/ctfcorrection-009.com
+sha256 cdc2a6cbffe20a4ea3c7bc16d9dadbb311030a9d5693df1e23492336e36bc1dd 863 golden/size_open/ctfcorrection-010.com
+sha256 78db18b2ef01bb7cb30181866d67ed51a887e00aa3f2d359173e1445d90480d4 863 golden/size_open/ctfcorrection-011.com
+text 212 golden/size_open/ctfcorrection-012-sync.com
+$fixboundaries "b_ctfcorr_ali.mrc" "ctfcorrection-bound-005.info"
+$collectmmm pixels= "ctfcorrection" 6 "b_ctfcorr_ali.mrc" 6 
+$b3dremove -g "b_ctfcorr_ali-[0-9][0-9][0-9]*.cbound" "ctfcorrection-bound-005.info"
+
+text 225 golden/size_open/ctfcorrection-bound-005.info
+1 0 100 21 6
+b_ctfcorr_ali-001.cbound
+-1 0 3 -1
+b_ctfcorr_ali-002.cbound
+4 0 7 -1
+b_ctfcorr_ali-003.cbound
+8 0 11 -1
+b_ctfcorr_ali-004.cbound
+12 0 15 -1
+b_ctfcorr_ali-005.cbound
+16 0 19 -1
+b_ctfcorr_ali-006.cbound
+20 0 -1 -1
+

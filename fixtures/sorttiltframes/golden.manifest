@@ -1,0 +1,429 @@
+# imod-rs native golden manifest for fixtures/sorttiltframes; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh sorttiltframes; do not edit by hand.
+text 90 golden/angle_file.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+t.out
+
+text 357 golden/angle_file.out
+WARNING: sorttiltframes - 1 filenames did not have a number with decimal point between the delimiters
+WARNING: sorttiltframes - 1 filenames did not have a number matching any tilt angle
+f_-30.0_a.tif
+f_-22.50_a.tif
+f_-15.00_a.tif
+f_-7.50_a.tif
+f_-7.52_b.tif
+f_0.00_a.tif
+WARNING: sorttiltframes - 0 of the input filenames were omitted from the output lists
+
+text 2 golden/angle_file.rc
+0
+
+text 54 golden/angle_file/t.out
+  -30.00
+  -22.50
+  -15.00
+   -7.50
+   -7.50
+    0.00
+
+text 84 golden/angle_missing.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 87 golden/angle_missing.out
+ERROR: sorttiltframes - No files were found with an angle within 0.1 of tilt angle 3.0
+
+text 2 golden/angle_missing.rc
+1
+
+text 84 golden/angle_reverse.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 109 golden/angle_reverse.out
+ERROR: sorttiltframes - You cannot enter a file with angles to match and also indicate the direction to sort
+
+text 2 golden/angle_reverse.rc
+1
+
+text 84 golden/args.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 57 golden/args.out
+a[1.0].tif
+c[1.04].tif
+a[1.0].tif
+c[1.04].tif
+b[2.0].tif
+
+text 2 golden/args.rc
+0
+
+text 84 golden/brackets_us.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 291 golden/brackets_us.out
+WARNING: sorttiltframes - 1 filenames did not have a number with decimal point between the delimiters
+TS_01_005_-6.00_x.tif
+TS_01_003_-3.00_x.tif
+TS_01_001_0.00_x.tif
+TS_9_1.5__2.5_y.tif
+TS_01_002_3.00_x.tif
+TS_01_006_3.02_z.tif
+TS_01_002_3.00_x.tif
+TS_01_006_3.02_z.tif
+TS_01_004_6.0_x.tif
+
+text 2 golden/brackets_us.rc
+0
+
+text 84 golden/dose_unpaired.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 79 golden/dose_unpaired.out
+ERROR: sorttiltframes - You must enter both -dose and -fixed if one is entered
+
+text 2 golden/dose_unpaired.rc
+1
+
+text 90 golden/dose_us.files
+a3.tlt
+angles.tlt
+d.out
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 291 golden/dose_us.out
+WARNING: sorttiltframes - 1 filenames did not have a number with decimal point between the delimiters
+TS_01_005_-6.00_x.tif
+TS_01_003_-3.00_x.tif
+TS_01_001_0.00_x.tif
+TS_9_1.5__2.5_y.tif
+TS_01_002_3.00_x.tif
+TS_01_006_3.02_z.tif
+TS_01_002_3.00_x.tif
+TS_01_006_3.02_z.tif
+TS_01_004_6.0_x.tif
+
+text 2 golden/dose_us.rc
+0
+
+text 85 golden/dose_us/d.out
+10.0  2.5
+0.0  2.5
+2.5  2.5
+12.5  2.5
+5.0  2.5
+15.0  2.5
+5.0  2.5
+15.0  2.5
+7.5  2.5
+
+text 84 golden/dots.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 22 golden/dots.out
+a.1.0..tif
+b.2.0..tif
+
+text 2 golden/dots.rc
+0
+
+text 84 golden/input_opts_us.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 58 golden/input_opts_us.out
+q_-2.0_.tif
+a_1.0_.tif
+c_1.04_.tif
+a_1.0_.tif
+c_1.04_.tif
+
+text 2 golden/input_opts_us.rc
+0
+
+text 84 golden/list_and_args.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 97 golden/list_and_args.out
+ERROR: sorttiltframes - You cannot enter a list file and filenames as command line arguments too
+
+text 2 golden/list_and_args.rc
+1
+
+text 84 golden/no_angle_file.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 100 golden/no_angle_file.out
+ERROR: sorttiltframes - Opening   nonexist.tlt: [Errno 2] No such file or directory: 'nonexist.tlt'
+
+text 2 golden/no_angle_file.rc
+1
+
+text 84 golden/one_arg.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 97 golden/one_arg.out
+ERROR: sorttiltframes - You must enter at least two filenames on the command line or a list file
+
+text 2 golden/one_arg.rc
+1
+
+text 90 golden/reverse_tilt.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+t.out
+
+text 317 golden/reverse_tilt.out
+WARNING: sorttiltframes - 1 filenames did not have a number with decimal point between the delimiters
+f_1.0_2.0_c.tif
+f_0.00_a.tif
+f_-7.50_a.tif
+f_-7.52_b.tif
+f_-7.50_a.tif
+f_-7.52_b.tif
+f_-15.00_a.tif
+f_-22.50_a.tif
+f_-30.0_a.tif
+WARNING: sorttiltframes - 0 of the input filenames were omitted from the output lists
+
+text 2 golden/reverse_tilt.rc
+0
+
+text 81 golden/reverse_tilt/t.out
+    1.00
+    0.00
+   -7.50
+   -7.50
+   -7.52
+   -7.52
+  -15.00
+  -22.50
+  -30.00
+
+text 84 golden/reverse_us.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 291 golden/reverse_us.out
+WARNING: sorttiltframes - 1 filenames did not have a number with decimal point between the delimiters
+TS_01_004_6.0_x.tif
+TS_01_002_3.00_x.tif
+TS_01_006_3.02_z.tif
+TS_01_002_3.00_x.tif
+TS_01_006_3.02_z.tif
+TS_9_1.5__2.5_y.tif
+TS_01_001_0.00_x.tif
+TS_01_003_-3.00_x.tif
+TS_01_005_-6.00_x.tif
+
+text 2 golden/reverse_us.rc
+0
+
+text 84 golden/stack_and_angle.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 81 golden/stack_and_angle.out
+ERROR: sorttiltframes - You cannot enter both "-s tiltSeries" and "-a angleFile"
+
+text 2 golden/stack_and_angle.rc
+1
+
+text 84 golden/stack_metadata.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 107 golden/stack_metadata.out
+ERROR: sorttiltframes - Converting angle value  Taking information from associated metadata file
+ to float
+
+text 2 golden/stack_metadata.rc
+1
+
+text 84 golden/three_delims.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 81 golden/three_delims.out
+ERROR: sorttiltframes - You must enter exactly two delimiting characters with -d
+
+text 2 golden/three_delims.rc
+1
+
+text 84 golden/two_delims_ab.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 110 golden/two_delims_ab.out
+ERROR: sorttiltframes - None of the entered filenames have a number with decimal point between the delimiters
+
+text 2 golden/two_delims_ab.rc
+1
+
+text 96 golden/unsorted.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+o.out
+plain_bidir.st
+plain_bidir.st.mdoc
+t.out
+
+text 102 golden/unsorted.out
+WARNING: sorttiltframes - 1 filenames did not have a number with decimal point between the delimiters
+
+text 2 golden/unsorted.rc
+0
+
+text 129 golden/unsorted/o.out
+f_-15.00_a.tif
+f_0.00_a.tif
+f_-30.0_a.tif
+f_-7.50_a.tif
+f_-7.52_b.tif
+f_-22.50_a.tif
+f_-7.50_a.tif
+f_-7.52_b.tif
+f_1.0_2.0_c.tif
+
+text 81 golden/unsorted/t.out
+  -15.00
+    0.00
+  -30.00
+   -7.50
+   -7.50
+  -22.50
+   -7.52
+   -7.52
+    1.00
+
+text 84 golden/unsorted_reverse.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 88 golden/unsorted_reverse.out
+ERROR: sorttiltframes - You cannot enter both -u for unsorted and -r for reverse-sorted
+
+text 2 golden/unsorted_reverse.rc
+1
+
+text 84 golden/unsorted_u_ambiguous.files
+a3.tlt
+angles.tlt
+list.txt
+list3.txt
+list_us.txt
+plain_bidir.st
+plain_bidir.st.mdoc
+
+text 132 golden/unsorted_u_ambiguous.out
+ERROR: sorttiltframes - An option specified by "u" is ambiguous between option help -  usage  and option unsorted -  UnsortedOutput
+
+text 2 golden/unsorted_u_ambiguous.rc
+1
+

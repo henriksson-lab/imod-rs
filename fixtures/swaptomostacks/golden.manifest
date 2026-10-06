@@ -1,0 +1,148 @@
+# imod-rs native golden manifest for fixtures/swaptomostacks; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh swaptomostacks; do not edit by hand.
+text 219 golden/check_excludes.files
+alt_allviews0.st
+alt_cutviews0.info
+alt_cutviews0.st
+old.st
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+
+text 350 golden/check_excludes.out
+WARNING: swaptomostacks - Cannot determine file naming style, assuming extension mrc
+Running Excludeviews on stack being swapped in, alt.st
+Copying retained views to alt_keptviews0.st
+Copying excluded views to alt_cutviews0.st
+Renaming files:
+alt.st  ->  alt_allviews0.st
+alt_keptviews0.st  ->  alt.st
+Renamed ts.st -> old.st
+Renamed alt.st -> ts.st
+
+text 2 golden/check_excludes.rc
+0
+
+sha256 2625da3a08c6f97faadae793e031f3d522ca4c48868e91d97769e0b77274cae0 3328 golden/check_excludes/alt_allviews0.st
+text 14 golden/check_excludes/alt_cutviews0.info
+6 0 0 0
+2,4-5
+
+sha256 dfdcd36a2b86b31dbd3f896b985bde65b5fe68538786dd399c20e8bf2d6cdc8c 2176 golden/check_excludes/alt_cutviews0.st
+sha256 fa151dfa22e77a2179392827b5770fd5a2cbcafdd1c901f1053c54ca10f5ab10 2176 golden/check_excludes/old.st
+sha256 fa151dfa22e77a2179392827b5770fd5a2cbcafdd1c901f1053c54ca10f5ab10 2176 golden/check_excludes/ts.st
+text 24 golden/excl1.files
+g.ali
+g.rec
+g.st
+old.st
+
+text 132 golden/excl1.out
+WARNING: swaptomostacks - Cannot determine file naming style, assuming extension mrc
+Renamed g.st -> old.st
+Renamed alt.mrc -> g.st
+
+text 2 golden/excl1.rc
+0
+
+sha256 2625da3a08c6f97faadae793e031f3d522ca4c48868e91d97769e0b77274cae0 3328 golden/excl1/old.st
+text 24 golden/excl2.files
+g.ali
+g.rec
+g.st
+old.st
+
+text 132 golden/excl2.out
+WARNING: swaptomostacks - Cannot determine file naming style, assuming extension mrc
+Renamed g.st -> old.st
+Renamed alt.mrc -> g.st
+
+text 2 golden/excl2.rc
+0
+
+sha256 2625da3a08c6f97faadae793e031f3d522ca4c48868e91d97769e0b77274cae0 3328 golden/excl2/old.st
+text 166 golden/excluded_set.files
+old.st
+ts.rawtlt
+ts.st
+ts.st.mdoc
+ts_allviews0.rawtlt
+ts_allviews0.st
+ts_allviews0.st.mdoc
+ts_cutviews0.info
+ts_cutviews0.rawtlt
+ts_cutviews0.st
+ts_cutviews0.st.mdoc
+
+text 133 golden/excluded_set.out
+WARNING: swaptomostacks - Cannot determine file naming style, assuming extension mrc
+Renamed ts.st -> old.st
+Renamed alt.st -> ts.st
+
+text 2 golden/excluded_set.rc
+0
+
+sha256 fa151dfa22e77a2179392827b5770fd5a2cbcafdd1c901f1053c54ca10f5ab10 2176 golden/excluded_set/old.st
+sha256 2625da3a08c6f97faadae793e031f3d522ca4c48868e91d97769e0b77274cae0 3328 golden/excluded_set/ts.st
+text 25 golden/no_from.files
+alt.mrc
+g.ali
+g.rec
+g.st
+
+text 158 golden/no_from.out
+WARNING: swaptomostacks - Cannot determine file naming style, assuming extension mrc
+ERROR: swaptomostacks - No stacks exists with the "from" rootname nofrom
+
+text 2 golden/no_from.rc
+1
+
+text 25 golden/no_root.files
+alt.mrc
+g.ali
+g.rec
+g.st
+
+text 87 golden/no_root.out
+ERROR: swaptomostacks - You must enter the data set root name; it cannot be determined
+
+text 2 golden/no_root.rc
+1
+
+text 24 golden/single.files
+g.ali
+g.rec
+g.st
+old.st
+
+text 132 golden/single.out
+WARNING: swaptomostacks - Cannot determine file naming style, assuming extension mrc
+Renamed g.st -> old.st
+Renamed alt.mrc -> g.st
+
+text 2 golden/single.rc
+0
+
+sha256 2625da3a08c6f97faadae793e031f3d522ca4c48868e91d97769e0b77274cae0 3328 golden/single/old.st
+text 24 golden/swap.files
+g.ali
+g.rec
+g.st
+old.st
+
+text 132 golden/swap.out
+WARNING: swaptomostacks - Cannot determine file naming style, assuming extension mrc
+Renamed g.st -> old.st
+Renamed alt.mrc -> g.st
+
+text 2 golden/swap.rc
+0
+
+sha256 2625da3a08c6f97faadae793e031f3d522ca4c48868e91d97769e0b77274cae0 3328 golden/swap/old.st

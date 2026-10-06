@@ -1,0 +1,6 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+old_style	../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt tilt.com:tilt.com	-	10 20 5 g.rec smp.rec tilt.com
+new_style	../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt tilt.com:tilt.com	-	10 20 5 g.rec smp.rec tilt.com 20 30 12
+ali_file	../../reducefiltvol/inputs/g.ali:g.ali g.tlt:g.tlt g.xtilt:g.xtilt tilt.com:tilt.com	-	10 20 5 g.rec smp.rec tilt.com 20 30 12 g.ali
+badint	tilt.com:tilt.com	-	10 20 5 g.rec smp.rec tilt.com x 30 12
+args	-	-	1 2 3

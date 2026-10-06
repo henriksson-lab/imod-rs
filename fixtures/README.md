@@ -115,7 +115,7 @@ Some goldens carry the *defined* behaviour of an upstream bug the translation
 fixes (`BUGS.md`).  The make scripts apply those after the native run — sed
 fixups (`setupcombine`, `matchorwarp`, `splitcombine`, `findsection`,
 `corrsearch3d`, `fakevolume`, `combinefft`, …), cases run with our own build
-(`xfsimplex` `s_sobel`, `tiltxcorr` `nonopt`/`scan`, `xyzproj`
+(`xfsimplex` `s_sobel`, `xyzproj`
 `make-fixed-cases.txt`), `defined/` from `make-<suite>-goldens.sh defined`
 (`ccderaser`, `findbeads3d`), or native-equivalent argument columns.  When a
 regeneration changes an entry, check that first: a make script that does not
@@ -134,24 +134,35 @@ inputs).  How each suite's inputs were made is in its make script or
   the same idea as IMOD's own `IMOD/Etomo/unitTestData` stubs.  Regenerating
   from them gave byte-identical native outputs.
 - **Bytes instead of shorts/floats** (native `newstack -mode 0 -scale 0,255`,
-  or authored as bytes): `findsection`, `findbeads3d`, `tiltxcorr`,
-  `corrsearch3d`, `beadtrack` (`t1.mrc`, 646 -> 324 KB).  `beadtrack`'s
-  Sobel-centring goldens are *defined* (`defined.list`,
-  `make-beadtrack-goldens.sh defined`): the Sobel peak-scaling fix
-  (`BUGS.md`) moves every Sobel position, so on any input those cases leave
-  native's path at the first Sobel round.  An earlier note here blamed a
-  byte-converted or 13-view input for diverging from native there; a build
-  with only that fix reverted matches native on the original, the byte copy
-  and the 13-view series through the end (2026-09-26), so the divergence was
-  the fix and the old fixture had simply been recorded with it.
-- **Smaller or fewer images**: `xfsimplex` (64x56 pairs), `matchvol`'s `mb.mrc`
-  (30 sections; the same multi-cube layouts), `alignlog`'s local-area log
-  (2 x 2 areas).
+  or authored as bytes): `findsection`, `findbeads3d`, `corrsearch3d`.
+- **Smaller or fewer images**: `xfsimplex` (64x56 pairs), `alignlog`'s
+  local-area log (2 x 2 areas).
 - **Shared rather than stored twice** (read from the other suite's directory;
-  named in the test and make script): `warpvol` ← `matchvol` (`vf`, `vs`,
-  `mb`), `findcontrast` (and `trimvol`) ← `densmatch` (`f`, `s`, `b`),
+  named in the test and make script): `warpvol` ← `matchvol` (`vf`, `vs`),
+  `findcontrast` (and `trimvol`) ← `densmatch` (`f`, `s`, `b`),
   `refinematch` ← `findwarp` (patches, transforms, models), `mtffilter` ←
   `ctfphaseflip` (`f48.mrc`), `alignlog` ← `IMOD/Etomo/unitTestData/aligna.log`
-  (read in place), `mrcinfo` ← `mrcx`.
-- **Not reduced**: `matchvol/mb.mrc` needs its size for the
-  `-memory` multi-cube layouts.
+  (read in place), `mrcinfo` ← `mrcx`.  In a pysetup/pyscript `cases.tsv`
+  the `src` of an `src:dst` input may be a path relative to the suite's
+  `inputs/` that reaches another suite's file: `sampletilt` and
+  `multifiltsetup` read `../../reducefiltvol/inputs/g.ali`; `copyheader`,
+  `reducefiltvol` and `archiveorig` (as `st.mrc`) read
+  `../../boxstartend/v.mrc`; `makejoincom`'s one remaining test reads
+  `fixtures/finishjoin/inputs`.
+
+### The 2026-10-06 cut
+
+The owner's rule since 2026-10-06: no fixture file over about 100 KB, and
+inputs are not re-authored to get there -- the oversized input is deleted
+with the cases that need it.  Deleted then (whole suites: test file, fixture
+directory, make script): `transferfid` (2 x 450 KB stacks), `raptor` (345 KB;
+`raptor/make-syn1.py` and `raptor/native-defined.patch` are kept),
+`beadtrack` (324 KB), `xfalign` (220 KB), `autofidseed` (180 KB),
+`blendmont` (130 KB), `tiltxcorr` (111 KB), and `makejoincom`'s golden
+suite (its tomograms duplicated `finishjoin`'s).  Cases deleted from suites
+that remain: `alignframes` (65 rows on `mov`, `movs`, `movp`, `fts`,
+`ucsf`), `cryoposition` (4 pipeline rows on its 1.3 MB `g.st`),
+`findsection` (15 rows on `fz.mrc`), `matchvol`/`warpvol` (5 rows on
+`mb.mrc`).  `ctf3dsetup` moved 5 rows to `#full` to bring its manifest under
+100 KB.  `finishjoin/inputs/t{1,2,3}.rec` (370 KB together) are the one
+exception kept: every finishjoin case needs all three.

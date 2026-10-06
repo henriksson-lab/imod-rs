@@ -1,0 +1,6 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+more	tilt.com:tilt.com	-	20 3 40 40 tilt.com
+enough	tilt.com:tilt.com	-	200 3 40 40 tilt.com
+nocom	-	-	2 3 40 40 tilt.com
+badint	tilt.com:tilt.com	-	2 x 40 40 tilt.com
+args	-	-	2

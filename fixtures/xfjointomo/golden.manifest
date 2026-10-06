@@ -1,0 +1,146 @@
+# imod-rs native golden manifest for fixtures/xfjointomo; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh xfjointomo; do not edit by hand.
+text 219 golden/xj_edit.out.fprev.xf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.9999998  -0.0006605   0.0006605   0.9999998      -3.022      -1.503
+   1.0005940   0.0022741  -0.0000588   0.9999850       1.909      -1.016
+
+text 219 golden/xj_edit.out.fprev.xf~
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.9997571  -0.0001013   0.0010346   0.9999446      -3.028      -1.499
+   1.0005940   0.0022741  -0.0000588   0.9999850       1.909      -1.016
+
+text 219 golden/xj_edit.out.g.xf
+   0.9998024  -0.0003176  -0.0004208   1.0000044       1.377       1.340
+   0.9998019  -0.0009780   0.0002398   1.0000044      -1.643      -0.162
+   1.0003958   0.0012956   0.0001811   0.9999900       0.266      -1.178
+
+text 2 golden/xj_edit.rc
+0
+
+text 466 golden/xj_edit.stdout
+
+ FORMATTED  new  file opened: fprev.xf
+                         Deviations between transformed points extrapolated
+                          from above boundary and points extrapolated from below
+                              Mean     Max  @obj cont point     X-Y Position
+boundary   1,  17 points      0.30     0.76   1  12     9     139.61    83.67
+
+At boundary   1, best gap =   0.0 with error mean =     0.30, max =     0.76
+
+ FORMATTED  new  file opened: g.xf
+
+text 2 golden/xj_edit_mismatch.rc
+1
+
+text 86 golden/xj_edit_mismatch.stdout
+
+ERROR: XFJOINTOMO - NUMBER OF TRANSFORMS IN FILE DOES NOT MATCH NUMBER TO BE WRITTEN
+
+text 219 golden/xj_magrot.out.f.xf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.9998026  -0.0006604   0.0006604   0.9998026      -3.023      -1.502
+   1.0012090   0.0010332  -0.0010332   1.0012090       1.903      -1.019
+
+text 219 golden/xj_magrot.out.g.xf
+   0.9997283   0.0000963  -0.0000963   0.9997283       1.381       1.340
+   0.9995310  -0.0005639   0.0005639   0.9995310      -1.642      -0.161
+   1.0007402   0.0004682  -0.0004682   1.0007402       0.261      -1.179
+
+text 2 golden/xj_magrot.rc
+0
+
+sha256 89e1939ba3cb8399334b7a7b05097b545a35045e92e4ac1b3fc16076d3870825 617 golden/xj_magrot.stdout
+text 2 golden/xj_noboundaries.rc
+1
+
+text 82 golden/xj_noboundaries.stdout
+
+ERROR: XFJOINTOMO - YOU MUST ENTER EITHER BOUNDARY Z VALUES OR SIZES OF SECTIONS
+
+text 219 golden/xj_points_only.out.f.xf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   1.0000000   0.0000000  -0.0000001   1.0000001      -3.100      -1.400
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+
+text 219 golden/xj_points_only.out.g.xf
+   1.0000001   0.0000000   0.0000000   1.0000000       2.067       0.933
+   1.0000001   0.0000000  -0.0000000   1.0000001      -1.033      -0.467
+   1.0000001   0.0000000  -0.0000000   1.0000001      -1.033      -0.467
+
+text 2 golden/xj_points_only.rc
+0
+
+sha256 0fb885702d6d0ab9e9810747c93a588ce058403fff709a4f455d8d59943a53e9 567 golden/xj_points_only.stdout
+text 219 golden/xj_rottrans.out.f.xf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.9999998  -0.0006605   0.0006605   0.9999998      -6.043      -3.007
+   0.9999995   0.0010320  -0.0010320   0.9999995       3.751      -2.076
+
+text 219 golden/xj_rottrans.out.g.xf
+   0.9999998   0.0006605  -0.0006605   0.9999998       6.048       3.005
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.9999995   0.0010320  -0.0010320   0.9999995       3.755      -2.073
+
+text 2 golden/xj_rottrans.rc
+0
+
+sha256 3d17d6c91de5918d6477529b2fcb23e677904ceba6902e9a13e3f39b46e0d639 617 golden/xj_rottrans.stdout
+text 219 golden/xj_sizes.out.f.xf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.9997571  -0.0001013   0.0010346   0.9999446      -3.028      -1.499
+   1.0005940   0.0022741  -0.0000588   0.9999850       1.909      -1.016
+
+text 219 golden/xj_sizes.out.g.xf
+   0.9999644  -0.0006903  -0.0006704   1.0000411       1.382       1.337
+   0.9997208  -0.0007916   0.0003645   0.9999858      -1.645      -0.161
+   1.0003146   0.0014819   0.0003059   0.9999716       0.264      -1.176
+
+text 2 golden/xj_sizes.rc
+0
+
+sha256 3c8c473c37a9ac71a075062e38c6d5fb7ccf4d5429be0a86c3b19b3a8442573a 617 golden/xj_sizes.stdout
+sha256 43c470c2c3dc74f404a67fa596c0b8a26924077b630946f86d49c384b8bd0ffd 2190 golden/xj_slice.out.f.xf
+text 2 golden/xj_slice.rc
+0
+
+sha256 da574fac143bf110928d974c922b4543423e014964bb897b4ebbb322e0368194 581 golden/xj_slice.stdout
+text 219 golden/xj_transonly.out.f.xf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   1.0000000   0.0000000   0.0000000   1.0000000       1.857      -1.001
+
+text 219 golden/xj_transonly.out.g.xf
+   1.0000000   0.0000000   0.0000000   1.0000000      -0.619       0.334
+   1.0000000   0.0000000   0.0000000   1.0000000      -0.619       0.334
+   1.0000000   0.0000000   0.0000000   1.0000000       1.238      -0.667
+
+text 2 golden/xj_transonly.rc
+0
+
+text 462 golden/xj_transonly.stdout
+
+ FORMATTED  new  file opened: f.xf
+                         Deviations between transformed points extrapolated
+                          from above boundary and points extrapolated from below
+                              Mean     Max  @obj cont point     X-Y Position
+boundary   2,  10 points      0.16     0.40   1  19     9     200.43   137.34
+
+At boundary   2, best gap =   0.0 with error mean =     0.16, max =     0.40
+
+ FORMATTED  new  file opened: g.xf
+
+text 219 golden/xj_zvalues_gap.out.f.xf
+   1.0000000   0.0000000   0.0000000   1.0000000       0.000       0.000
+   0.9997571  -0.0001013   0.0010346   0.9999446      -3.028      -1.499
+   1.0005940   0.0022741  -0.0000588   0.9999850       1.909      -1.016
+
+text 219 golden/xj_zvalues_gap.out.g.xf
+   0.9999644  -0.0006903  -0.0006704   1.0000411       1.382       1.337
+   0.9997208  -0.0007916   0.0003645   0.9999858      -1.645      -0.161
+   1.0003146   0.0014819   0.0003059   0.9999716       0.264      -1.176
+
+text 2 golden/xj_zvalues_gap.rc
+0
+
+sha256 3b6a27117246a20891a778d21be597adb5702fb0f7c92e335a114ffab84e2db2 1283 golden/xj_zvalues_gap.stdout

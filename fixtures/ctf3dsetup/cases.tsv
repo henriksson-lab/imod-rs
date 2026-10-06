@@ -1,0 +1,34 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+#full	par3	ds/:.	-	-slabs 3 tilt.com
+procs1	ds/:.	-	-slabs 3 -procs 1 tilt.com
+parallel	ds/:.	-	-slabs 4 -parallel tilt.com
+thick9	ds/:.	-	-thickness 9 tilt.com
+thick20	ds/:.	-	-thickness 20 tilt.com
+filt_erase1	ds/:.	-	-slabs 3 -filter -erase -procs 1 tilt
+#full	filt_erase2	ds/:.	-	-slabs 3 -filter -erase -procs 2 -perproc 2 tilt.com
+invert_leave	ds/:.	-	-slabs 5 -invert 1 -leave -vertical tilt.com
+oldstyle	ds/:.	-	-slabs 3 -oldstyle -procs 2 tilt.com
+oldvert	ds/:.	-	-slabs 3 -oldstyle -vertical tilt.com
+notemp	ds/:.	-	-slabs 3 -tempdir nodir tilt.com
+tempdir	ds/:. ds/g.tlt:tmp/g.tlt	-	-slabs 3 -tempdir tmp tilt.com
+parprocs	ds/:.	-	-slabs 3 -parallel -procs 2 tilt.com
+slabs2	ds/:.	-	-slabs 2 tilt.com
+noslabs	ds/:.	-	tilt.com
+boundary	ds/:.	PARALLEL_BOUNDARY_SIZE=3000	-slabs 3 -boundary 4000 -procs 3 tilt.com
+#full	adjust	ds/:.	-	-slabs 3 -adjust tilt.com
+adjust_shift	ds/:. tiltshift.com:tilt.com	-	-slabs 3 -adjust -invert 0 -procs 1 tilt.com
+#full	raw	ds/:.	-	-slabs 3 -unaligned tilt.com
+raw1	ds/:.	-	-slabs 3 -unaligned -procs 1 tilt.com
+rawred	ds/:.	-	-slabs 3 -unaligned -reduce 2 -filter tilt.com
+rawaxis	ds/:.	-	-slabs 3 -unaligned -axis 95 -pixel 0.5 -procs 1 tilt.com
+rawentered	ds/:.	-	-slabs 3 -unaligned -raw g.ali -xform g.xf -axis 0 tilt.com
+#full	rawerase	ds/:. golderaser.log:golderaser.log	-	-slabs 3 -unaligned -erase tilt.com
+rawerase_par	ds/:. golderaser.log:golderaser.log	-	-slabs 3 -unaligned -erase -parallel tilt.com
+rawerase_warn	ds/b_ali.mrc:b_ali.mrc ds/b_erase.fid:b_erase.fid ds/ctfcorrection.com:ctfcorrection.com ds/eraser.com:eraser.com ds/g.st:g.st ds/g.tlt:g.tlt ds/g.xf:g.xf ds/g.xtilt:g.xtilt ds/golderaser.com:golderaser.com ds/tilt.com:tilt.com ds/track.com:track.com ds/newst.com:newst.com ds/align.log:align.log	-	-slabs 3 -unaligned -erase -procs 1 tilt.com
+xtilt	ds/:. tiltx.com:tilt.com ctfx.com:ctfcorrection.com	-	-slabs 3 tilt.com
+xtilt_raw	ds/:. tiltx.com:tilt.com ctfx.com:ctfcorrection.com	-	-slabs 3 -unaligned tilt.com
+flipped	ds/:. b_flip.mrc:b_ali.mrc	-	-slabs 3 tilt.com
+flipped_raw	ds/:. b_flip.mrc:b_ali.mrc	-	-slabs 3 -unaligned -procs 1 tilt.com
+sirt	ds/:. tiltsirt.com:tilt.com	-	-slabs 3 tilt.com
+nocom	ds/:.	-	-slabs 3 nonexist.com
+noctfcom	ds/tilt.com:tilt.com	-	-slabs 3 tilt.com

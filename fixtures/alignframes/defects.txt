@@ -1,0 +1,6 @@
+CameraSizeX 96
+CameraSizeY 96
+BadColumns 10 11
+BadRows 40
+BadPixels 5 7 60 61 80 20
+PartialBadColumn 70 1 10 50

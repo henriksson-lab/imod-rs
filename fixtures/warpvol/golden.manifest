@@ -61,16 +61,6 @@ text 2 golden/w_interactive.rc
 0
 
 sha256 cd882ac24b7c1f494e142c5cc410661d381c8d85bb309b36e2cc8710a0d694f0 1475 golden/w_interactive.stdout
-sha256 680ab7c1601dc404db2ba449875f5e0f049529ed0c3ec3f0709ccb2cb7b599f2 271024 golden/w_mb.out.o.mrc
-text 2 golden/w_mb.rc
-0
-
-sha256 a50f6d2c4ab08ef6aecb935585fc98e58e050e27d22883afb7ec6313b655649b 1340 golden/w_mb.stdout
-sha256 01153cdc93228e240684466ebf22237508ee3d812f8d7889a13c2615c7faf261 271024 golden/w_mbdef.out.o.mrc
-text 2 golden/w_mbdef.rc
-0
-
-sha256 f4301ac6a7591554ca03a1d9e2b4413c2145e244f79ea26fba73ac70cfb3c872 1300 golden/w_mbdef.stdout
 text 2 golden/w_noout.rc
 0
 

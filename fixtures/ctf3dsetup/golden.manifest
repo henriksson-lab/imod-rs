@@ -1,0 +1,2841 @@
+# imod-rs native golden manifest for fixtures/ctf3dsetup; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh ctf3dsetup; do not edit by hand.
+text 296 golden/adjust_shift.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004-sync.com
+ctf3d-005-sync.com
+ctf3d-006-sync.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 195 golden/adjust_shift.out
+3 slabs of thickness 10 nm will be computed
+8 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm ctf3d*.com
+
+text 2 golden/adjust_shift.rc
+0
+
+sha256 810863678850110f665f0fea82f3770451ac792b038c2c7d0982023be8a60c0a 804 golden/adjust_shift/ctf3d-001-sync.com
+sha256 3d551625ec70349f31a4e6e52b67d00a55e69b6909c177a2fafc4049c97d609d 618 golden/adjust_shift/ctf3d-002-sync.com
+sha256 4d2bb0e1d2e0d4c5f1a53204b403294021c1090f6465bfb5d8e57a9901540315 803 golden/adjust_shift/ctf3d-003-sync.com
+sha256 075bca11f837982a4f3b5e76e985e9c770be9afeea718b46e136ceba57ca5908 619 golden/adjust_shift/ctf3d-004-sync.com
+sha256 af3418b8498faaaadb8f0fa22499c90f8c81cc59b003ef36e71e9555fdbc9beb 804 golden/adjust_shift/ctf3d-005-sync.com
+sha256 9d50602fba2199966a366aaabfe9e09b65ba703c954bbf2a9150458610168775 620 golden/adjust_shift/ctf3d-006-sync.com
+text 305 golden/adjust_shift/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 956 golden/boundary.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007.com
+ctf3d-008.com
+ctf3d-009.com
+ctf3d-010.com
+ctf3d-011-sync.com
+ctf3d-012-sync.com
+ctf3d-013.com
+ctf3d-014-sync.com
+ctf3d-015-sync.com
+ctf3d-016.com
+ctf3d-017.com
+ctf3d-018.com
+ctf3d-019.com
+ctf3d-020.com
+ctf3d-021.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025-sync.com
+ctf3d-026-sync.com
+ctf3d-027.com
+ctf3d-028-sync.com
+ctf3d-029-sync.com
+ctf3d-030.com
+ctf3d-031.com
+ctf3d-032.com
+ctf3d-033.com
+ctf3d-034.com
+ctf3d-035.com
+ctf3d-036.com
+ctf3d-037.com
+ctf3d-038.com
+ctf3d-039-sync.com
+ctf3d-040-sync.com
+ctf3d-041.com
+ctf3d-042-sync.com
+ctf3d-bound-001.info
+ctf3d-bound-012.info
+ctf3d-bound-015.info
+ctf3d-bound-026.info
+ctf3d-bound-029.info
+ctf3d-bound-040.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 169 golden/boundary.out
+3 slabs of thickness 10 nm will be computed
+44 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/boundary.rc
+0
+
+sha256 1d8eaca01912124f917259b334d8aa8b94c866ef1cb4630f02b7f9ad69276cd8 851 golden/boundary/ctf3d-001-sync.com
+sha256 eaf2574baa1609b21d5996807f3f5a820894f58e78136e2cf4412abbcf02066b 881 golden/boundary/ctf3d-002.com
+sha256 720c695b56411049281ca6f7867329f796d4bd76641e32d36b16f9e05c7bfdce 881 golden/boundary/ctf3d-003.com
+sha256 40c4684e5dec99f702270e7a9f284c42a9a783aa190b5286473fa87a57a0cb75 881 golden/boundary/ctf3d-004.com
+sha256 09865397dc9d3e4edc7247319b05d3717760dc8c67cdabc4d2543a8f048eb91c 881 golden/boundary/ctf3d-005.com
+sha256 887b91c3cfd861a8cdc007fa921e5e93196d08037d96b88f08180450e02dcc86 881 golden/boundary/ctf3d-006.com
+sha256 032f73e1e6c14a70525db7249a9d644d4fac207ef69931c3ef0f902e0d4f3154 881 golden/boundary/ctf3d-007.com
+sha256 9554a4ab643163aaf8e987ca03c9c86f8b1e84370f4cce77a927833ead6d169d 881 golden/boundary/ctf3d-008.com
+sha256 11c8d15327a3579948edf284b2fa8e69b4073da2e355c478209f8fe2f7423fde 881 golden/boundary/ctf3d-009.com
+sha256 66a77497893e6b5e25872ca34b1b34338f4f628514dec2902579e1fc63e0f9eb 881 golden/boundary/ctf3d-010.com
+text 206 golden/boundary/ctf3d-011-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-001.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 2 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-001.info"
+
+sha256 d412186ac3c65cbf668662a6d3e621e910ad1463877786c71bbbc979d0f7885b 649 golden/boundary/ctf3d-012-sync.com
+sha256 68c84a7d0620e49766e2862661f9345a64d39bbba0705109b498fd8b5f1248f0 688 golden/boundary/ctf3d-013.com
+text 217 golden/boundary/ctf3d-014-sync.com
+$fixboundaries "./b_ctfcorr_ali_00.rec" "ctf3d-bound-012.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_00.rec" 13
+$b3dremove -g "./b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 0d0dfa07e89732f7acfd00d06e091d7f6fefca9a85f39d89d44aee86e3b0a5cb 850 golden/boundary/ctf3d-015-sync.com
+sha256 d5ac3333db6dd6bf9f3fdcdcc2e63de3c749eef6ab06de5ec175041ed789444b 880 golden/boundary/ctf3d-016.com
+sha256 36bd84628359e0623aa419c3ed2a6f6934113e6d3355497d454084f1e09d1294 880 golden/boundary/ctf3d-017.com
+sha256 106d601671b6f6da7e7b0c628653ed6fb79cfcc1fd66d555b12048ee30093271 880 golden/boundary/ctf3d-018.com
+sha256 c9910dfea2055982e2231bf5e4c1a29854fa06ab2249551b7646cb274bcea33b 880 golden/boundary/ctf3d-019.com
+sha256 04cd4a7616145ae2ab68b2a2a1fff24d4e595934fdd16a692e31bc454eb781e4 880 golden/boundary/ctf3d-020.com
+sha256 f63917a7661b2037c321332801f9865743038a868b6f1feb3b3199c2b011f2fc 880 golden/boundary/ctf3d-021.com
+sha256 b1b4f24d73e1ac6d1d235e6a265999f23adb8aa84ff6cdcd12609f6dc3f1fa82 880 golden/boundary/ctf3d-022.com
+sha256 9bd8c1e2420a02e623c49bcf41addf3aee0d1c95729cf2128664ead98a80d754 880 golden/boundary/ctf3d-023.com
+sha256 a6ca315c2a9bd34417607001d191f08d87799a69212ebd5e1826485a4d4c5ae0 880 golden/boundary/ctf3d-024.com
+text 207 golden/boundary/ctf3d-025-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-015.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 16 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-015.info"
+
+sha256 b2a1fbbae1a091b8e1be1dd052397671132bbb4eb2c9146bc622741289cab9a6 648 golden/boundary/ctf3d-026-sync.com
+sha256 50e7c70b66d2a7be479d9a8f7b73c736473c8fefc4b7939ae85df507f0a42fcd 687 golden/boundary/ctf3d-027.com
+text 217 golden/boundary/ctf3d-028-sync.com
+$fixboundaries "./b_ctfcorr_ali_01.rec" "ctf3d-bound-026.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_01.rec" 27
+$b3dremove -g "./b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 1ab0cc752bef2a25b95738f3e8115723ab5a1c47a274734fe95563fe24cc148f 852 golden/boundary/ctf3d-029-sync.com
+sha256 92d4df6d7c2282d056e63e1b4ab03c28fbd857670f6f26faed1391c073a94bc9 882 golden/boundary/ctf3d-030.com
+sha256 465dda6d941a00b4ac32d33ceca53bcd8f0ecd5b8221358a1188d42dd941fb6f 882 golden/boundary/ctf3d-031.com
+sha256 3b6c3a65678262b9ca2169b208bc644b99b2147e538124255c5a3d4c1534c28b 882 golden/boundary/ctf3d-032.com
+sha256 897ae60e328f3d2db13e8d430374da391526a812fabd08e37ea5f0580d4507ba 882 golden/boundary/ctf3d-033.com
+sha256 aededdff248932b956bb5a9de0eb61f2d70a39a1d36c51208ef226a9d346bbdd 882 golden/boundary/ctf3d-034.com
+sha256 f3b3cb95bef9abe18d99ff87356105fc13e6812750f65d525b4ddf806b3fb91a 882 golden/boundary/ctf3d-035.com
+sha256 5ce3d7777040906419b7ab7478ce05d81405cf56d65042d883318bf07fb4efe0 882 golden/boundary/ctf3d-036.com
+sha256 b7bed85459423dfcd70224ce89db1418c2a044d3177962e295124609c39ede71 882 golden/boundary/ctf3d-037.com
+sha256 697140b123ac6c5af6dc17fa6f617feb5a79debd4b60188dd00210bef1da54e3 882 golden/boundary/ctf3d-038.com
+text 207 golden/boundary/ctf3d-039-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-029.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 30 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-029.info"
+
+sha256 9bfc4fcf072aa5a20b728cb2c7e7b8718fda7ac3f27de61d90b63badf6c144c9 650 golden/boundary/ctf3d-040-sync.com
+sha256 cc2c6fff76515bfa6c94f1d0e423522ea0591752cc75b710142003146feb24eb 689 golden/boundary/ctf3d-041.com
+text 217 golden/boundary/ctf3d-042-sync.com
+$fixboundaries "./b_ctfcorr_ali_02.rec" "ctf3d-bound-040.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_02.rec" 41
+$b3dremove -g "./b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+text 374 golden/boundary/ctf3d-bound-001.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/boundary/ctf3d-bound-012.info
+1 0 48 9 1
+./b_ctfcorr_ali_00-013.rbound
+-1 0 -1 -1
+
+text 374 golden/boundary/ctf3d-bound-015.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/boundary/ctf3d-bound-026.info
+1 0 48 9 1
+./b_ctfcorr_ali_01-027.rbound
+-1 0 -1 -1
+
+text 374 golden/boundary/ctf3d-bound-029.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/boundary/ctf3d-bound-040.info
+1 0 48 9 1
+./b_ctfcorr_ali_02-041.rbound
+-1 0 -1 -1
+
+text 305 golden/boundary/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 372 golden/filt_erase1.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004-sync.com
+ctf3d-005-sync.com
+ctf3d-006-sync.com
+ctf3d-007-sync.com
+ctf3d-008-sync.com
+ctf3d-009-sync.com
+ctf3d-010-sync.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 196 golden/filt_erase1.out
+3 slabs of thickness 10 nm will be computed
+12 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm ctf3d*.com
+
+text 2 golden/filt_erase1.rc
+0
+
+text 157 golden/filt_erase1/ctf3d-001-sync.com
+# Command file to run mtffilter
+$mtffilter -StandardInput
+InputFile	b_ali.mrc
+OutputFile	./b_ctfcorr_ali_filt_tmp.mrc
+PixelSize	1.0
+DoseWeightingFile	b.dose
+
+sha256 fac25d48b723797f043bf905d6aef0998d1cfe5f42938f3734e6eb6f279b99c2 821 golden/filt_erase1/ctf3d-002-sync.com
+text 311 golden/filt_erase1/ctf3d-003-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	./b_ctfcorr_ali_tmp.mrc
+OutputFile	./b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "./b_ctfcorr_ali_erase_tmp.mrc" "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 dc9aab089c6770f6b9234156ac58bcdd24e7621ad70ee7a976e04938142924fc 618 golden/filt_erase1/ctf3d-004-sync.com
+sha256 7ab7001fc4ccc24e6dc0937dbe2c5a4edf5f6d811d8ba5d03315dccd8e662ed3 820 golden/filt_erase1/ctf3d-005-sync.com
+text 311 golden/filt_erase1/ctf3d-006-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	./b_ctfcorr_ali_tmp.mrc
+OutputFile	./b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "./b_ctfcorr_ali_erase_tmp.mrc" "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 abcf3733a924bdcbad0db3994ec77734025277e738292525cf101e2fd35ba6bd 617 golden/filt_erase1/ctf3d-007-sync.com
+sha256 5664be21058c9b0d09f8375d21f082c1caadca5b7a73e687c61bd3ae16d83038 822 golden/filt_erase1/ctf3d-008-sync.com
+text 311 golden/filt_erase1/ctf3d-009-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	./b_ctfcorr_ali_tmp.mrc
+OutputFile	./b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase.fid
+CircleObjects	/
+BetterRadius	4.5
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "./b_ctfcorr_ali_erase_tmp.mrc" "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 6a25bed5a563e1958a375401ea595d32878dd8118add904172553936f317a03f 619 golden/filt_erase1/ctf3d-010-sync.com
+text 348 golden/filt_erase1/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove  "./b_ctfcorr_ali_filt_tmp.mrc"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 165 golden/flipped.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 115 golden/flipped.out
+ERROR: ctf3dsetup - Ctfphaseflip appears to have been run already on the input stack for CTF correction, b_ali.mrc
+
+text 2 golden/flipped.rc
+1
+
+text 296 golden/flipped_raw.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004-sync.com
+ctf3d-005-sync.com
+ctf3d-006-sync.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 194 golden/flipped_raw.out
+3 slabs of thickness 8 nm will be computed
+8 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm ctf3d*.com
+
+text 2 golden/flipped_raw.rc
+0
+
+sha256 e234d280708ad786912e29ca9c1d052040c7bd917889972c1ab805b9a703f060 805 golden/flipped_raw/ctf3d-001-sync.com
+sha256 a6fbd6d24e9cd6aac3c08a5d1a6e77f4dc793fbd4768e99beda2dff98d2b9341 663 golden/flipped_raw/ctf3d-002-sync.com
+sha256 a0d31b17019a9efbe82063fb852d91e3d34cef941122be251801d0eb7763b0ad 804 golden/flipped_raw/ctf3d-003-sync.com
+sha256 4b42fc6b9e67c243b5940bbafc3dfc2cb57e9da50893723f2333e75ccbbc1362 662 golden/flipped_raw/ctf3d-004-sync.com
+sha256 7e66138211c111064f97942fa87ac96e8b02a6f334eca7b285370c105a5aae53 806 golden/flipped_raw/ctf3d-005-sync.com
+sha256 1428b16d455cbaa57a95fc0babf61db344e593852cc16658832a6a4f954b7f1a 664 golden/flipped_raw/ctf3d-006-sync.com
+text 305 golden/flipped_raw/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 1472 golden/invert_leave.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007.com
+ctf3d-008.com
+ctf3d-009.com
+ctf3d-010.com
+ctf3d-011-sync.com
+ctf3d-012-sync.com
+ctf3d-013.com
+ctf3d-014-sync.com
+ctf3d-015-sync.com
+ctf3d-016.com
+ctf3d-017.com
+ctf3d-018.com
+ctf3d-019.com
+ctf3d-020.com
+ctf3d-021.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025-sync.com
+ctf3d-026-sync.com
+ctf3d-027.com
+ctf3d-028-sync.com
+ctf3d-029-sync.com
+ctf3d-030.com
+ctf3d-031.com
+ctf3d-032.com
+ctf3d-033.com
+ctf3d-034.com
+ctf3d-035.com
+ctf3d-036.com
+ctf3d-037.com
+ctf3d-038.com
+ctf3d-039-sync.com
+ctf3d-040-sync.com
+ctf3d-041.com
+ctf3d-042-sync.com
+ctf3d-043-sync.com
+ctf3d-044.com
+ctf3d-045.com
+ctf3d-046.com
+ctf3d-047.com
+ctf3d-048.com
+ctf3d-049.com
+ctf3d-050.com
+ctf3d-051.com
+ctf3d-052.com
+ctf3d-053-sync.com
+ctf3d-054-sync.com
+ctf3d-055.com
+ctf3d-056-sync.com
+ctf3d-057-sync.com
+ctf3d-058.com
+ctf3d-059.com
+ctf3d-060.com
+ctf3d-061.com
+ctf3d-062.com
+ctf3d-063.com
+ctf3d-064.com
+ctf3d-065.com
+ctf3d-066.com
+ctf3d-067-sync.com
+ctf3d-068-sync.com
+ctf3d-069.com
+ctf3d-070-sync.com
+ctf3d-bound-001.info
+ctf3d-bound-012.info
+ctf3d-bound-015.info
+ctf3d-bound-026.info
+ctf3d-bound-029.info
+ctf3d-bound-040.info
+ctf3d-bound-043.info
+ctf3d-bound-054.info
+ctf3d-bound-057.info
+ctf3d-bound-068.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 168 golden/invert_leave.out
+5 slabs of thickness 6 nm will be computed
+72 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/invert_leave.rc
+0
+
+sha256 0e7031f4decbd193f84f774907328448a06f3b0ea949147224a1b5be384d704f 851 golden/invert_leave/ctf3d-001-sync.com
+sha256 e09fd6196ca62cc9f6ae8e963bdbe5be2f335c2db02addd961f1c6a34217f77c 881 golden/invert_leave/ctf3d-002.com
+sha256 76431d60056a98d38d6e43ffa8238bf055ed03827d3af03ecbfb31c7cc31d633 881 golden/invert_leave/ctf3d-003.com
+sha256 8d88a13f1cb10817a9bb085a7376dd9b2192fc92023657b158ba1c99e5037ed7 881 golden/invert_leave/ctf3d-004.com
+sha256 c19ef9ba87405e2ba779f66c53a5e33436e9b4176e9bb5ab5cc0b2640750c06a 881 golden/invert_leave/ctf3d-005.com
+sha256 4debfa50f2e8686ddde081bbb070927e6b644ca0b37e3f5ffae5ab6b97470cf6 881 golden/invert_leave/ctf3d-006.com
+sha256 ae63993265e777de89def9d587e362849fd9e1577893f271cd4a81bbdb99a7c2 881 golden/invert_leave/ctf3d-007.com
+sha256 66a564c1d769ae9d056886ac27d426ba2784a074c659a4f4502275f65d67ed25 881 golden/invert_leave/ctf3d-008.com
+sha256 2a78cafe0be0a81a064faeea8e8e9bb4acc9b0659019b5afc2f7d4d6a60004fc 881 golden/invert_leave/ctf3d-009.com
+sha256 7a8ec75843c942258f67dc53111da7535950e7e303761719fcd1679a5dc903b7 881 golden/invert_leave/ctf3d-010.com
+text 206 golden/invert_leave/ctf3d-011-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-001.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 2 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-001.info"
+
+sha256 3b4121a7b0f04df61f1ae256d5f04c4af154eb1f7a5d7cd5bedbf27ecbcd170a 648 golden/invert_leave/ctf3d-012-sync.com
+sha256 2d0dd50eaf4e45c0cf14f676176a323233e668a77c2374833fb53bd073dbe1ba 687 golden/invert_leave/ctf3d-013.com
+text 181 golden/invert_leave/ctf3d-014-sync.com
+$fixboundaries "./b_ctfcorr_ali_00.rec" "ctf3d-bound-012.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_00.rec" 13
+$b3dremove -g "./b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound" 
+
+sha256 4bb37f606bf2943a14e22288a2f61fb8100e2d98d7a463c83dc0e7a25d7d6c3d 850 golden/invert_leave/ctf3d-015-sync.com
+sha256 1e5cb722bdd6b349a813bdc8d5deb50994120d277457c41ad8f9e9f52a9c68f6 880 golden/invert_leave/ctf3d-016.com
+sha256 72316d0d4103fa364e76624483ef45a0684af57a49c7f518d53702c10837e0db 880 golden/invert_leave/ctf3d-017.com
+sha256 2b4dbe8e1aa8ad36b271612b7f952aaab18b166ea89e653c27582311e282e824 880 golden/invert_leave/ctf3d-018.com
+sha256 4ebbe3d4d5b116623f04a224819c5284c6ee0b117e4a19b3b40df44377a19803 880 golden/invert_leave/ctf3d-019.com
+sha256 1eee7eaa9420d881ec6f3096a3dc1cbf8e529962563e820b13398928a2078b2c 880 golden/invert_leave/ctf3d-020.com
+sha256 b67160c57324c0e8ecf4238a3eeb5c8dfa32dbdb28b4bea9d5f21cbd75c85d1a 880 golden/invert_leave/ctf3d-021.com
+sha256 4cca621149f6eac2daa3a66e3af48476218d17ffc2a80d357d41602130f2baaa 880 golden/invert_leave/ctf3d-022.com
+sha256 0264e3b9f30254faa773b38199365b0278c321f7a44c10a11956d4321e7dca6e 880 golden/invert_leave/ctf3d-023.com
+sha256 1ae7bf7a9bd892400bc8d25c1c630b5d6331bc230b61ebffd900228bbee77c7b 880 golden/invert_leave/ctf3d-024.com
+text 207 golden/invert_leave/ctf3d-025-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-015.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 16 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-015.info"
+
+sha256 7d45fd1b649e41c553f5f0e1260f2b1ce023c25e929809885a5dd86af58f6ef3 647 golden/invert_leave/ctf3d-026-sync.com
+sha256 1edc1234d31e978309a1faf9fc7436c05f26c6a3ac2299ef03d9e443c2bcbd71 686 golden/invert_leave/ctf3d-027.com
+text 181 golden/invert_leave/ctf3d-028-sync.com
+$fixboundaries "./b_ctfcorr_ali_01.rec" "ctf3d-bound-026.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_01.rec" 27
+$b3dremove -g "./b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound" 
+
+sha256 583aaf4120c5aab63da7a6434bc15754b18ec8b915ec24f18388ab404ecf0b75 850 golden/invert_leave/ctf3d-029-sync.com
+sha256 2418a39d61a9faacc682382067af3c29ae450b3d59bc4489914581b296b9b889 880 golden/invert_leave/ctf3d-030.com
+sha256 805210e0f3e05d3398bb4f012e6c8aee5fb3e7c2b98c65bf15f86a999888bfb6 880 golden/invert_leave/ctf3d-031.com
+sha256 7522ebe47176a0942df28c8585babf2d98cc97e0db9732d083fc77fda965754d 880 golden/invert_leave/ctf3d-032.com
+sha256 1cb811753db498c17a5455c03c5842bc5f46683f34ae3e6e31d477d4b3dad841 880 golden/invert_leave/ctf3d-033.com
+sha256 c8fd3a469f424aa74f0a6d33bd6e410911ba90596037e1900895075aed4812b9 880 golden/invert_leave/ctf3d-034.com
+sha256 a78df57a4965aabde8d513dd077e45d76115c6bb826d05af9c8a6b1bbe7bc8df 880 golden/invert_leave/ctf3d-035.com
+sha256 3302f4e07cea4fbd6e2df09b064f8b3b711902f3a84e1f9497f902f47f3e9091 880 golden/invert_leave/ctf3d-036.com
+sha256 75ad3ab16167fde51bfa45011e59823452a2d368fcafc331c7f7e097509cc404 880 golden/invert_leave/ctf3d-037.com
+sha256 d79bb327b4362c2818f8cbf797dfc50b5ac579f6f296b311d1785ddba162770b 880 golden/invert_leave/ctf3d-038.com
+text 207 golden/invert_leave/ctf3d-039-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-029.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 30 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-029.info"
+
+sha256 92fb6c950e66b698d660455adc0fe105ab5c53eb8045a12a422cf992407eef44 647 golden/invert_leave/ctf3d-040-sync.com
+sha256 ef32ecfd932e1c441d0323e067d5be4d6d4431850a00b8c8b905df1508b1c81d 686 golden/invert_leave/ctf3d-041.com
+text 181 golden/invert_leave/ctf3d-042-sync.com
+$fixboundaries "./b_ctfcorr_ali_02.rec" "ctf3d-bound-040.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_02.rec" 41
+$b3dremove -g "./b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound" 
+
+sha256 dcfa0c1bf9c424cd4e9410cef656c481b32fc170893617e71450bcdf336c8127 849 golden/invert_leave/ctf3d-043-sync.com
+sha256 f1563f5435e2a398c94c7c2d6b3636a274426f2193be5a6ff1867425b82cda28 879 golden/invert_leave/ctf3d-044.com
+sha256 87cd81dbb9366c18384a15d7370593a1f1fa51016f7c2b398351f981b20e2d2f 879 golden/invert_leave/ctf3d-045.com
+sha256 ba6c2af4e2b6812d533137a08d6a21b65f9db93cc1fdd12dab0bd6684b724867 879 golden/invert_leave/ctf3d-046.com
+sha256 77949b42fd8e82a1aec679eb97e401cf691a80dd72616262e034b711224959d8 879 golden/invert_leave/ctf3d-047.com
+sha256 fee2b63c9c05940da8db7ba0f2310798a87a1c476b64a627c8b17b8050789a64 879 golden/invert_leave/ctf3d-048.com
+sha256 21327986299e58430e351358f62a0525d5788221bff731485f8c211bf31dfd27 879 golden/invert_leave/ctf3d-049.com
+sha256 cbb39983ec020e2131dd8441a5a568a2436508c91daab4bcd0829316d260fc50 879 golden/invert_leave/ctf3d-050.com
+sha256 7aaa79e30934d0dbf5781bd5f23653ea8ee08266f83924dee55cb4b41a04082d 879 golden/invert_leave/ctf3d-051.com
+sha256 abde81ef4226f4fb845655c794adcfeb1c8be1d2e698762c0e9ad3bbc7e44fb0 879 golden/invert_leave/ctf3d-052.com
+text 207 golden/invert_leave/ctf3d-053-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-043.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 44 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-043.info"
+
+sha256 d3b63c3f6b39d0526d3adc6e0afae675747fd84e47d420bc58cb790e1804a47f 648 golden/invert_leave/ctf3d-054-sync.com
+sha256 3fdc6edb7e9100c9ac9902f7920b771376e1dda955abb66d339bfe6771ce554a 687 golden/invert_leave/ctf3d-055.com
+text 181 golden/invert_leave/ctf3d-056-sync.com
+$fixboundaries "./b_ctfcorr_ali_03.rec" "ctf3d-bound-054.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_03.rec" 55
+$b3dremove -g "./b_ctfcorr_ali_03-[0-9][0-9][0-9]*.rbound" 
+
+sha256 9f371910c0949b9897a1c38680f056da081abdfbb19f27c04a83320465611963 850 golden/invert_leave/ctf3d-057-sync.com
+sha256 6fee80e12c6be0242104e6982a745d885a0f0b2b1f1fd860096cee6f742e092a 880 golden/invert_leave/ctf3d-058.com
+sha256 607fa500e43cea710fecf0b0f7a6d8f13d12236a6ebaeec201eb498b70378a6c 880 golden/invert_leave/ctf3d-059.com
+sha256 349d3d39891f9ea2ff852e240d71550f2c9e87fdd2dbf9980ca22a6da35fad19 880 golden/invert_leave/ctf3d-060.com
+sha256 1029304ec55d9346787f90faec1e4026dade3bc9c677ad464ef42d64dba3d231 880 golden/invert_leave/ctf3d-061.com
+sha256 b9ee525cab14a00cb5aba0db71da839c00bd8d999483f3ab90fd07d5e0b6e8cd 880 golden/invert_leave/ctf3d-062.com
+sha256 21bf30328be625516636841824dafa36bcb14fe39154b8a199052d35368d4fad 880 golden/invert_leave/ctf3d-063.com
+sha256 686c412e458e1f546230bc0f4d50e97536f7c6ae2d8a5dd20fe72e29389d2c3e 880 golden/invert_leave/ctf3d-064.com
+sha256 3901c7e73116edb0a6a9ae8e40d0e3588bf3c82cf6d6d092b57abfed388e74fd 880 golden/invert_leave/ctf3d-065.com
+sha256 ca96ab280b025dad5f023c5e47349c38c66dc5a4b8762cc58553e0efa2034821 880 golden/invert_leave/ctf3d-066.com
+text 207 golden/invert_leave/ctf3d-067-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-057.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 58 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-057.info"
+
+sha256 ae54fd6bd4b8af815ceadd922daf599e43fd446cb67b5339832d5bb3f365b191 649 golden/invert_leave/ctf3d-068-sync.com
+sha256 8a6c4539d268ab8955d1e9ec9bd20148192a33f3974ced1ad3d7f5e8495afd56 688 golden/invert_leave/ctf3d-069.com
+text 181 golden/invert_leave/ctf3d-070-sync.com
+$fixboundaries "./b_ctfcorr_ali_04.rec" "ctf3d-bound-068.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_04.rec" 69
+$b3dremove -g "./b_ctfcorr_ali_04-[0-9][0-9][0-9]*.rbound" 
+
+text 374 golden/invert_leave/ctf3d-bound-001.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/invert_leave/ctf3d-bound-012.info
+1 0 48 5 1
+./b_ctfcorr_ali_00-013.rbound
+-1 0 -1 -1
+
+text 374 golden/invert_leave/ctf3d-bound-015.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/invert_leave/ctf3d-bound-026.info
+1 0 48 5 1
+./b_ctfcorr_ali_01-027.rbound
+-1 0 -1 -1
+
+text 374 golden/invert_leave/ctf3d-bound-029.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/invert_leave/ctf3d-bound-040.info
+1 0 48 5 1
+./b_ctfcorr_ali_02-041.rbound
+-1 0 -1 -1
+
+text 374 golden/invert_leave/ctf3d-bound-043.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/invert_leave/ctf3d-bound-054.info
+1 0 48 5 1
+./b_ctfcorr_ali_03-055.rbound
+-1 0 -1 -1
+
+text 374 golden/invert_leave/ctf3d-bound-057.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/invert_leave/ctf3d-bound-068.info
+1 0 48 5 1
+./b_ctfcorr_ali_04-069.rbound
+-1 0 -1 -1
+
+text 324 golden/invert_leave/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 5
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+InputFile ./b_ctfcorr_ali_03.rec
+InputFile ./b_ctfcorr_ali_04.rec
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 165 golden/nocom.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 61 golden/nocom.out
+ERROR: ctf3dsetup - Command file nonexist.com does not exist
+
+text 2 golden/nocom.rc
+1
+
+text 9 golden/noctfcom.files
+tilt.com
+
+text 122 golden/noctfcom.out
+ERROR: ctf3dsetup - You must enter the name of the CTF correction command file, the file ctfcorrection.com dose not exist
+
+text 2 golden/noctfcom.rc
+1
+
+text 165 golden/noslabs.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 88 golden/noslabs.out
+ERROR: ctf3dsetup - You must enter either the number of slabs or a slab thickness in nm
+
+text 2 golden/noslabs.rc
+1
+
+text 165 golden/notemp.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 67 golden/notemp.out
+ERROR: ctf3dsetup - Cannot write to nodir as a temporary directory
+
+text 2 golden/notemp.rc
+1
+
+text 788 golden/oldstyle.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007-sync.com
+ctf3d-008-sync.com
+ctf3d-009.com
+ctf3d-010-sync.com
+ctf3d-011-sync.com
+ctf3d-012.com
+ctf3d-013.com
+ctf3d-014.com
+ctf3d-015.com
+ctf3d-016.com
+ctf3d-017-sync.com
+ctf3d-018-sync.com
+ctf3d-019.com
+ctf3d-020-sync.com
+ctf3d-021-sync.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025.com
+ctf3d-026.com
+ctf3d-027-sync.com
+ctf3d-028-sync.com
+ctf3d-029.com
+ctf3d-030-sync.com
+ctf3d-bound-001.info
+ctf3d-bound-008.info
+ctf3d-bound-011.info
+ctf3d-bound-018.info
+ctf3d-bound-021.info
+ctf3d-bound-028.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 169 golden/oldstyle.out
+3 slabs of thickness 10 nm will be computed
+32 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/oldstyle.rc
+0
+
+sha256 1d8eaca01912124f917259b334d8aa8b94c866ef1cb4630f02b7f9ad69276cd8 851 golden/oldstyle/ctf3d-001-sync.com
+sha256 a4089ff5500d2f5fbf2af75be278c8036dd0434d78ca95d0e8f0e7150576fc7a 881 golden/oldstyle/ctf3d-002.com
+sha256 f5bf558347b957ab0320ac3469e542788cc0afe7c6754fe14a29ffaabdb8c3c6 881 golden/oldstyle/ctf3d-003.com
+sha256 4e16354c6abd200c1277309c7692c904eee1b6ce7bdae3f20a9733d11505dbec 881 golden/oldstyle/ctf3d-004.com
+sha256 09c84aea64bba065e62d3476a039eb809c5868792dc5dee6de4ecdc28c524d0e 881 golden/oldstyle/ctf3d-005.com
+sha256 66a77497893e6b5e25872ca34b1b34338f4f628514dec2902579e1fc63e0f9eb 881 golden/oldstyle/ctf3d-006.com
+text 206 golden/oldstyle/ctf3d-007-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-001.info"
+$collectmmm pixels= "ctf3d" 5 "./b_ctfcorr_ali_tmp.mrc" 2 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-001.info"
+
+sha256 d412186ac3c65cbf668662a6d3e621e910ad1463877786c71bbbc979d0f7885b 649 golden/oldstyle/ctf3d-008-sync.com
+sha256 96cf7a593561b84dd245d1e40e3c600d78b8708363d1f223d4328595e459c225 700 golden/oldstyle/ctf3d-009.com
+text 216 golden/oldstyle/ctf3d-010-sync.com
+$fixboundaries "./b_ctfcorr_ali_00.rec" "ctf3d-bound-008.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_00.rec" 9
+$b3dremove -g "./b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 0d0dfa07e89732f7acfd00d06e091d7f6fefca9a85f39d89d44aee86e3b0a5cb 850 golden/oldstyle/ctf3d-011-sync.com
+sha256 ed4c6240c628d058ffd11c76804f85938b9f45c56d2e0ed09139bdc3d9427f94 880 golden/oldstyle/ctf3d-012.com
+sha256 b62dcf4062dd660f6e109f218e9abc7d4ba7d000f2dfb11cf576233a229486e4 880 golden/oldstyle/ctf3d-013.com
+sha256 6cb9a3a4f83eda83b7c2fe4c8d2994afd180d8b2abfe8b5e75743d493504529b 880 golden/oldstyle/ctf3d-014.com
+sha256 498472ed986862a347e316d701bc0d17e13d335e262a83e006ad166f2ed4822f 880 golden/oldstyle/ctf3d-015.com
+sha256 0c70b85a63dd58ba51da2043a4a650e233985ab3fab72813f1e32ab501e89aee 880 golden/oldstyle/ctf3d-016.com
+text 207 golden/oldstyle/ctf3d-017-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-011.info"
+$collectmmm pixels= "ctf3d" 5 "./b_ctfcorr_ali_tmp.mrc" 12 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-011.info"
+
+sha256 b2a1fbbae1a091b8e1be1dd052397671132bbb4eb2c9146bc622741289cab9a6 648 golden/oldstyle/ctf3d-018-sync.com
+sha256 776476868b51179d2061e8b6e3d599717d5c7ae79447c4b081fa261d5aa3f4f3 699 golden/oldstyle/ctf3d-019.com
+text 217 golden/oldstyle/ctf3d-020-sync.com
+$fixboundaries "./b_ctfcorr_ali_01.rec" "ctf3d-bound-018.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_01.rec" 19
+$b3dremove -g "./b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 1ab0cc752bef2a25b95738f3e8115723ab5a1c47a274734fe95563fe24cc148f 852 golden/oldstyle/ctf3d-021-sync.com
+sha256 3292922624ac02109664b956ce7c8f8e549d9438ba904e9e60c01e5a5bef4c5e 882 golden/oldstyle/ctf3d-022.com
+sha256 762ef6cc07d747e86ffb9bd395dd70bc7b24550cb1231e9fabbc748c9e4a3bf4 882 golden/oldstyle/ctf3d-023.com
+sha256 63d5c29ddfdbd65c4dd45aa2f173c1a7c2c39e0b81b7138e591270f9f375e50d 882 golden/oldstyle/ctf3d-024.com
+sha256 38668635a0c5036eb3273987edd3279cea134bc80e13e34c58e6151776f3a5d8 882 golden/oldstyle/ctf3d-025.com
+sha256 dad7e6d3961c7cf4a69d45ef7e6a711dc47046730e0386b55dc5795293818228 882 golden/oldstyle/ctf3d-026.com
+text 207 golden/oldstyle/ctf3d-027-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-021.info"
+$collectmmm pixels= "ctf3d" 5 "./b_ctfcorr_ali_tmp.mrc" 22 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-021.info"
+
+sha256 9bfc4fcf072aa5a20b728cb2c7e7b8718fda7ac3f27de61d90b63badf6c144c9 650 golden/oldstyle/ctf3d-028-sync.com
+sha256 a9e7257bab5487421cc217dfa3409419907e6c930943ea3e9ab52a31d6c5eeab 701 golden/oldstyle/ctf3d-029.com
+text 217 golden/oldstyle/ctf3d-030-sync.com
+$fixboundaries "./b_ctfcorr_ali_02.rec" "ctf3d-bound-028.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_02.rec" 29
+$b3dremove -g "./b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+text 214 golden/oldstyle/ctf3d-bound-001.info
+1 0 48 21 5
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 1 -1
+./b_ctfcorr_ali_tmp-002.cbound
+2 0 3 -1
+./b_ctfcorr_ali_tmp-003.cbound
+4 0 5 -1
+./b_ctfcorr_ali_tmp-004.cbound
+6 0 7 -1
+./b_ctfcorr_ali_tmp-005.cbound
+8 0 -1 -1
+
+text 52 golden/oldstyle/ctf3d-bound-008.info
+1 0 48 9 1
+./b_ctfcorr_ali_00-009.rbound
+-1 0 -1 -1
+
+text 214 golden/oldstyle/ctf3d-bound-011.info
+1 0 48 21 5
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 1 -1
+./b_ctfcorr_ali_tmp-002.cbound
+2 0 3 -1
+./b_ctfcorr_ali_tmp-003.cbound
+4 0 5 -1
+./b_ctfcorr_ali_tmp-004.cbound
+6 0 7 -1
+./b_ctfcorr_ali_tmp-005.cbound
+8 0 -1 -1
+
+text 52 golden/oldstyle/ctf3d-bound-018.info
+1 0 48 9 1
+./b_ctfcorr_ali_01-019.rbound
+-1 0 -1 -1
+
+text 214 golden/oldstyle/ctf3d-bound-021.info
+1 0 48 21 5
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 1 -1
+./b_ctfcorr_ali_tmp-002.cbound
+2 0 3 -1
+./b_ctfcorr_ali_tmp-003.cbound
+4 0 5 -1
+./b_ctfcorr_ali_tmp-004.cbound
+6 0 7 -1
+./b_ctfcorr_ali_tmp-005.cbound
+8 0 -1 -1
+
+text 52 golden/oldstyle/ctf3d-bound-028.info
+1 0 48 9 1
+./b_ctfcorr_ali_02-029.rbound
+-1 0 -1 -1
+
+text 305 golden/oldstyle/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 165 golden/oldvert.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 94 golden/oldvert.out
+ERROR: ctf3dsetup - You cannot enter options for both vertical slices and old-style X tilting
+
+text 2 golden/oldvert.rc
+1
+
+text 238 golden/parallel.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 167 golden/parallel.out
+4 slabs of thickness 7 nm will be computed
+6 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/parallel.rc
+0
+
+sha256 c54457faf31634dc7cafebfe7fdaf6a9d98ff76fbb54984288e769b76fe6bf67 1418 golden/parallel/ctf3d-001.com
+sha256 02d5fd777e8de3a47ef7fdf9384c31cc8228c47aa84f264feda5fb2216d9da1d 1416 golden/parallel/ctf3d-002.com
+sha256 192cfa6f798054795603b675b2e2929a6dcdeed8ff2618b7585a56431012b87e 1418 golden/parallel/ctf3d-003.com
+sha256 5a74dd82ed2e9eee7197df244bff1a979abd9272199a538783ab78ea8de46337 1420 golden/parallel/ctf3d-004.com
+text 385 golden/parallel/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 4
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+InputFile ./b_ctfcorr_ali_03.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].mrc"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 165 golden/parprocs.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 91 golden/parprocs.out
+ERROR: ctf3dsetup - You cannot enter a number of processors when running slabs in parallel
+
+text 2 golden/parprocs.rc
+1
+
+text 296 golden/procs1.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004-sync.com
+ctf3d-005-sync.com
+ctf3d-006-sync.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 195 golden/procs1.out
+3 slabs of thickness 10 nm will be computed
+8 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm ctf3d*.com
+
+text 2 golden/procs1.rc
+0
+
+sha256 d7a95b510b8dd91ea23c0ea9b3acf17cc0ae76bb770409167fcc18fa2cda31e2 803 golden/procs1/ctf3d-001-sync.com
+sha256 dc9aab089c6770f6b9234156ac58bcdd24e7621ad70ee7a976e04938142924fc 618 golden/procs1/ctf3d-002-sync.com
+sha256 ea81a6ac7c0b71e9bcdf04fba28c2a9be830ffe28fe0a89efc34295bea78e948 802 golden/procs1/ctf3d-003-sync.com
+sha256 abcf3733a924bdcbad0db3994ec77734025277e738292525cf101e2fd35ba6bd 617 golden/procs1/ctf3d-004-sync.com
+sha256 68c4c6c51ffa2e03c591aec16d1d4bd5b3f227294ac2c487175e1b65030185f1 804 golden/procs1/ctf3d-005-sync.com
+sha256 6a25bed5a563e1958a375401ea595d32878dd8118add904172553936f317a03f 619 golden/procs1/ctf3d-006-sync.com
+text 305 golden/procs1/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 296 golden/raw1.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004-sync.com
+ctf3d-005-sync.com
+ctf3d-006-sync.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 194 golden/raw1.out
+3 slabs of thickness 8 nm will be computed
+8 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm ctf3d*.com
+
+text 2 golden/raw1.rc
+0
+
+sha256 e234d280708ad786912e29ca9c1d052040c7bd917889972c1ab805b9a703f060 805 golden/raw1/ctf3d-001-sync.com
+sha256 a6fbd6d24e9cd6aac3c08a5d1a6e77f4dc793fbd4768e99beda2dff98d2b9341 663 golden/raw1/ctf3d-002-sync.com
+sha256 a0d31b17019a9efbe82063fb852d91e3d34cef941122be251801d0eb7763b0ad 804 golden/raw1/ctf3d-003-sync.com
+sha256 4b42fc6b9e67c243b5940bbafc3dfc2cb57e9da50893723f2333e75ccbbc1362 662 golden/raw1/ctf3d-004-sync.com
+sha256 7e66138211c111064f97942fa87ac96e8b02a6f334eca7b285370c105a5aae53 806 golden/raw1/ctf3d-005-sync.com
+sha256 1428b16d455cbaa57a95fc0babf61db344e593852cc16658832a6a4f954b7f1a 664 golden/raw1/ctf3d-006-sync.com
+text 305 golden/raw1/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 296 golden/rawaxis.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004-sync.com
+ctf3d-005-sync.com
+ctf3d-006-sync.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 194 golden/rawaxis.out
+3 slabs of thickness 5 nm will be computed
+8 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm ctf3d*.com
+
+text 2 golden/rawaxis.rc
+0
+
+sha256 efb7dc6d11fca1a5306c773f82b61772a746d8ddd5bd28621fada9149c94c32f 804 golden/rawaxis/ctf3d-001-sync.com
+sha256 b19497c47a5227ea8901c4731f6d21157784dda74def8c296e2ef9bd6be9d162 663 golden/rawaxis/ctf3d-002-sync.com
+sha256 6acf2eeb6e9dd7468ab1c147a91cc895c3566a653872e369a364b237f7e7d230 803 golden/rawaxis/ctf3d-003-sync.com
+sha256 832569d06c2ee8c3f83466b59e12c2caf22afe689ec5266e44f60b6ae4431228 662 golden/rawaxis/ctf3d-004-sync.com
+sha256 bc165299fda7f1e16ae675e04f34c56ca5dcaf32e493e54eea2eb2e585b0863f 805 golden/rawaxis/ctf3d-005-sync.com
+sha256 6517ec8a2c728ca2c5eb3efee3e4b83b297d06e9099a64b7e24a36584ce9f2fa 664 golden/rawaxis/ctf3d-006-sync.com
+text 305 golden/rawaxis/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 956 golden/rawentered.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007.com
+ctf3d-008.com
+ctf3d-009.com
+ctf3d-010.com
+ctf3d-011-sync.com
+ctf3d-012-sync.com
+ctf3d-013.com
+ctf3d-014-sync.com
+ctf3d-015-sync.com
+ctf3d-016.com
+ctf3d-017.com
+ctf3d-018.com
+ctf3d-019.com
+ctf3d-020.com
+ctf3d-021.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025-sync.com
+ctf3d-026-sync.com
+ctf3d-027.com
+ctf3d-028-sync.com
+ctf3d-029-sync.com
+ctf3d-030.com
+ctf3d-031.com
+ctf3d-032.com
+ctf3d-033.com
+ctf3d-034.com
+ctf3d-035.com
+ctf3d-036.com
+ctf3d-037.com
+ctf3d-038.com
+ctf3d-039-sync.com
+ctf3d-040-sync.com
+ctf3d-041.com
+ctf3d-042-sync.com
+ctf3d-bound-001.info
+ctf3d-bound-012.info
+ctf3d-bound-015.info
+ctf3d-bound-026.info
+ctf3d-bound-029.info
+ctf3d-bound-040.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 168 golden/rawentered.out
+3 slabs of thickness 8 nm will be computed
+44 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/rawentered.rc
+0
+
+sha256 c5028525e1be248955a6fac3a9f448836ffee8900cd15ce7ca7fb94c4764c470 853 golden/rawentered/ctf3d-001-sync.com
+sha256 6469cb389a16323661bd9beca20fb5312e86af3027725958cc4c7c6488914634 883 golden/rawentered/ctf3d-002.com
+sha256 bf1dea9d45f0ff7a2e07ca97913066d73f29ab43309fc5412fbe06768d61b16d 883 golden/rawentered/ctf3d-003.com
+sha256 6ab0f9aaadd6ce339a28a4918b5e5f4be774aa709bb8b0d525f1a91f11065de5 883 golden/rawentered/ctf3d-004.com
+sha256 154bdd43c96d870b14022ea8323387f07583d2f808f2cc4b53f95797c7803295 883 golden/rawentered/ctf3d-005.com
+sha256 35885e8716c7e0d1a64ce7e31a4833bc3f330405f58356877813347009935c49 883 golden/rawentered/ctf3d-006.com
+sha256 63b1290817fde530a6952a97fe70a137560db08fe4b836b2854c86f8159e75e8 883 golden/rawentered/ctf3d-007.com
+sha256 879e183c0eac2ffbeff68972298f4dbfbfce39f85592e7c20339005b32c236d8 883 golden/rawentered/ctf3d-008.com
+sha256 b77c386387eb49c8994d80c0abe94eb6edb2bffd56319f16e9b413a06d3edbf2 883 golden/rawentered/ctf3d-009.com
+sha256 ebfd6a7d532ffd3ff9bbf56d24fd78d5f78f597f75defe6f20425337c81d6c58 883 golden/rawentered/ctf3d-010.com
+text 206 golden/rawentered/ctf3d-011-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-001.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 2 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-001.info"
+
+sha256 1d6e8219b43a6dd1b00dc35f73406982b16bdc62bda6a69bce488fe345e0886d 694 golden/rawentered/ctf3d-012-sync.com
+sha256 ef32c51212b369c72a399d61f3a0aadcbca339346ca0ff75a54d33be4a30df95 733 golden/rawentered/ctf3d-013.com
+text 217 golden/rawentered/ctf3d-014-sync.com
+$fixboundaries "./b_ctfcorr_ali_00.rec" "ctf3d-bound-012.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_00.rec" 13
+$b3dremove -g "./b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 4d7b29da8ed540c889c3f396b480697938a6254513f32d1da2844b577828e0b7 852 golden/rawentered/ctf3d-015-sync.com
+sha256 d68754de66509a65dba226ddfb862596d84bd8943a9bd37b87b0b939dd75094e 882 golden/rawentered/ctf3d-016.com
+sha256 934dde1ab00eae1d9cdb6984676459fba455f7ee2fcf8100e5043694e3074f7a 882 golden/rawentered/ctf3d-017.com
+sha256 6644a813c03299cdced1c931933c9a65dbb9e3aede6ed05151e196cbfee9432f 882 golden/rawentered/ctf3d-018.com
+sha256 217bf64e9f738d25a0877b82de1bcf59e881b03f9302bc760be0eea0f6165e48 882 golden/rawentered/ctf3d-019.com
+sha256 2dca24b0343bcbc3f8fc99f45cb35e84aefb4bbbe6bde7f7a0f1ad856b30eb09 882 golden/rawentered/ctf3d-020.com
+sha256 6911a74fca0c8e4ea19d559d746bafd376ddc7e1b0340e7b05c22cf5d3190e86 882 golden/rawentered/ctf3d-021.com
+sha256 4b297baca2f51024118ecfe7c7ad8fd15bf7c12d40bf6698cd24459a7ffb2b68 882 golden/rawentered/ctf3d-022.com
+sha256 20f68bb2f37cefcd585c876e054ec73a56d98e0478469908f69de00990796230 882 golden/rawentered/ctf3d-023.com
+sha256 71d4649c27d96702b2faf2196f6397513811de6987bb55de6295dbff39a82600 882 golden/rawentered/ctf3d-024.com
+text 207 golden/rawentered/ctf3d-025-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-015.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 16 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-015.info"
+
+sha256 afcba198731ffc7bfcc30c28e8b6212b682aa8b18f8c8261ea58f58e61bb93c7 693 golden/rawentered/ctf3d-026-sync.com
+sha256 5ff29510ba2e4508f2a766e30ff85d59ba3e3b35b756b39e874400a40ba70e4c 732 golden/rawentered/ctf3d-027.com
+text 217 golden/rawentered/ctf3d-028-sync.com
+$fixboundaries "./b_ctfcorr_ali_01.rec" "ctf3d-bound-026.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_01.rec" 27
+$b3dremove -g "./b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 5732bfaacfd5b9c426336d5278e40f7626cda770f2df21ff1cae01760b9dd223 854 golden/rawentered/ctf3d-029-sync.com
+sha256 9f40b03e738b87df433962a679fe525636065f9c79b6dac78d280503623101cd 884 golden/rawentered/ctf3d-030.com
+sha256 150899f275150a639fdb1f4bab94812f761a5adacde47408a9de30042a8aa051 884 golden/rawentered/ctf3d-031.com
+sha256 7ce644ebffa40fc9b8725a6e859321a9df0ad5e45c268d76acd319f752b2f83d 884 golden/rawentered/ctf3d-032.com
+sha256 bf64dd5914694d74a579ad3fb63a3f39c27abf6df29218cf2c778929c0d04c0d 884 golden/rawentered/ctf3d-033.com
+sha256 ae5f0ecd62ebddab6ad686316988bec031289005c70c1c9de0f39d2812a969e8 884 golden/rawentered/ctf3d-034.com
+sha256 4bf3c9a407fa7f66d1410c3cbca7f80b97069fe43efe510c743b7dc231a51d15 884 golden/rawentered/ctf3d-035.com
+sha256 b16d863ac94bccda1ef20f110ebc9a572e9abd9c935d3474e2dd2aca6ba5a013 884 golden/rawentered/ctf3d-036.com
+sha256 ebe5603d8dfa53e7cfb5b635b729881935130883ab0c1a57fc4bc48fbd80a1f3 884 golden/rawentered/ctf3d-037.com
+sha256 363b4ad3978f95f005a03ade19b3345a141019768e61429b968a330263f870b3 884 golden/rawentered/ctf3d-038.com
+text 207 golden/rawentered/ctf3d-039-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-029.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 30 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-029.info"
+
+sha256 defa7b27899f3f50ff19496d8954de5c161c683347da56ac77b2d0d58a72774f 695 golden/rawentered/ctf3d-040-sync.com
+sha256 f3e5cabeeabc0966ed33f4b2225892b01cf04f386b29bf9819d928229f1c6cb6 734 golden/rawentered/ctf3d-041.com
+text 217 golden/rawentered/ctf3d-042-sync.com
+$fixboundaries "./b_ctfcorr_ali_02.rec" "ctf3d-bound-040.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_02.rec" 41
+$b3dremove -g "./b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+text 374 golden/rawentered/ctf3d-bound-001.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/rawentered/ctf3d-bound-012.info
+1 0 48 9 1
+./b_ctfcorr_ali_00-013.rbound
+-1 0 -1 -1
+
+text 374 golden/rawentered/ctf3d-bound-015.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/rawentered/ctf3d-bound-026.info
+1 0 48 9 1
+./b_ctfcorr_ali_01-027.rbound
+-1 0 -1 -1
+
+text 374 golden/rawentered/ctf3d-bound-029.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/rawentered/ctf3d-bound-040.info
+1 0 48 9 1
+./b_ctfcorr_ali_02-041.rbound
+-1 0 -1 -1
+
+text 305 golden/rawentered/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 255 golden/rawerase_par.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+b_erase_raw.fid
+ctf3d-001.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+golderaser.log
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 167 golden/rawerase_par.out
+3 slabs of thickness 8 nm will be computed
+5 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/rawerase_par.rc
+0
+
+sha256 e5acaf2cda594fa29e33210011cf3c281d04d5d5e4cf3a2b3029d7c42f86c92f 584 golden/rawerase_par/b_erase_raw.fid
+sha256 0a1fc4097a59e10ce1b78c5500dedf0d6e7e06d00e3043949e8d03cb80752894 1778 golden/rawerase_par/ctf3d-001.com
+sha256 31af726c7baf9eb09357ea5875f727b8c2a1b60c22dc34654b6451dd93e31233 1776 golden/rawerase_par/ctf3d-002.com
+sha256 af4d907edeb8bd4c8a379938dac03861c1e93cfce76bd2388fbea6754a619cb0 1780 golden/rawerase_par/ctf3d-003.com
+text 379 golden/rawerase_par/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].mrc"
+$b3dremove b_erase_raw.fid
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 333 golden/rawerase_warn.files
+align.log
+b_ali.mrc
+b_erase.fid
+b_erase_raw.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004-sync.com
+ctf3d-005-sync.com
+ctf3d-006-sync.com
+ctf3d-007-sync.com
+ctf3d-008-sync.com
+ctf3d-009-sync.com
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+newst.com
+tilt.com
+track.com
+
+text 306 golden/rawerase_warn.out
+WARNING: Ctf3dsetup - Assuming that the entered diameter of 9.0 for bead erasing applies to pixels binned by 1
+3 slabs of thickness 8 nm will be computed
+11 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+Or with:
+  subm ctf3d*.com
+
+text 2 golden/rawerase_warn.rc
+0
+
+sha256 e5acaf2cda594fa29e33210011cf3c281d04d5d5e4cf3a2b3029d7c42f86c92f 584 golden/rawerase_warn/b_erase_raw.fid
+sha256 e234d280708ad786912e29ca9c1d052040c7bd917889972c1ab805b9a703f060 805 golden/rawerase_warn/ctf3d-001-sync.com
+text 315 golden/rawerase_warn/ctf3d-002-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	./b_ctfcorr_ali_tmp.mrc
+OutputFile	./b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase_raw.fid
+CircleObjects	/
+BetterRadius	6.0
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "./b_ctfcorr_ali_erase_tmp.mrc" "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 a6fbd6d24e9cd6aac3c08a5d1a6e77f4dc793fbd4768e99beda2dff98d2b9341 663 golden/rawerase_warn/ctf3d-003-sync.com
+sha256 a0d31b17019a9efbe82063fb852d91e3d34cef941122be251801d0eb7763b0ad 804 golden/rawerase_warn/ctf3d-004-sync.com
+text 315 golden/rawerase_warn/ctf3d-005-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	./b_ctfcorr_ali_tmp.mrc
+OutputFile	./b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase_raw.fid
+CircleObjects	/
+BetterRadius	6.0
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "./b_ctfcorr_ali_erase_tmp.mrc" "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 4b42fc6b9e67c243b5940bbafc3dfc2cb57e9da50893723f2333e75ccbbc1362 662 golden/rawerase_warn/ctf3d-006-sync.com
+sha256 7e66138211c111064f97942fa87ac96e8b02a6f334eca7b285370c105a5aae53 806 golden/rawerase_warn/ctf3d-007-sync.com
+text 315 golden/rawerase_warn/ctf3d-008-sync.com
+# Command file to erase gold
+$ccderaser -StandardInput
+InputFile	./b_ctfcorr_ali_tmp.mrc
+OutputFile	./b_ctfcorr_ali_erase_tmp.mrc
+ModelFile	b_erase_raw.fid
+CircleObjects	/
+BetterRadius	6.0
+MaxPixelsInDiffPatch	0
+PolynomialOrder	0
+ExcludeAdjacent
+$b3drename "./b_ctfcorr_ali_erase_tmp.mrc" "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 1428b16d455cbaa57a95fc0babf61db344e593852cc16658832a6a4f954b7f1a 664 golden/rawerase_warn/ctf3d-009-sync.com
+text 332 golden/rawerase_warn/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove b_erase_raw.fid
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 994 golden/rawred.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002-sync.com
+ctf3d-003-sync.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007.com
+ctf3d-008.com
+ctf3d-009.com
+ctf3d-010.com
+ctf3d-011.com
+ctf3d-012.com
+ctf3d-013-sync.com
+ctf3d-014-sync.com
+ctf3d-015.com
+ctf3d-016-sync.com
+ctf3d-017-sync.com
+ctf3d-018.com
+ctf3d-019.com
+ctf3d-020.com
+ctf3d-021.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025.com
+ctf3d-026.com
+ctf3d-027-sync.com
+ctf3d-028-sync.com
+ctf3d-029.com
+ctf3d-030-sync.com
+ctf3d-031-sync.com
+ctf3d-032.com
+ctf3d-033.com
+ctf3d-034.com
+ctf3d-035.com
+ctf3d-036.com
+ctf3d-037.com
+ctf3d-038.com
+ctf3d-039.com
+ctf3d-040.com
+ctf3d-041-sync.com
+ctf3d-042-sync.com
+ctf3d-043.com
+ctf3d-044-sync.com
+ctf3d-bound-003.info
+ctf3d-bound-014.info
+ctf3d-bound-017.info
+ctf3d-bound-028.info
+ctf3d-bound-031.info
+ctf3d-bound-042.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 168 golden/rawred.out
+3 slabs of thickness 8 nm will be computed
+46 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/rawred.rc
+0
+
+text 58 golden/rawred/ctf3d-001-sync.com
+$newstack -ftreduce 2 g.st "./b_ctfcorr_ali_red2_tmp.mrc"
+
+text 176 golden/rawred/ctf3d-002-sync.com
+# Command file to run mtffilter
+$mtffilter -StandardInput
+InputFile	./b_ctfcorr_ali_red2_tmp.mrc
+OutputFile	./b_ctfcorr_ali_filt_tmp.mrc
+PixelSize	1.5
+DoseWeightingFile	b.dose
+
+sha256 1483e3ba04355a513959eb8fa7090f00e1e74e8efe54685d5ffa88c642321d95 875 golden/rawred/ctf3d-003-sync.com
+sha256 c4c29993ff5312a76caf4d6433b1f6b867377ed175e78e401d59977eb71ac1e7 905 golden/rawred/ctf3d-004.com
+sha256 0c6d7594c06cfdbe6cfa3b9ad1257a59631f99be974ab8be58b41998144dd584 905 golden/rawred/ctf3d-005.com
+sha256 c6c12148bd0cdf87c6c09135b1f27162c544e69fdd161b067aeda59072df0dfd 905 golden/rawred/ctf3d-006.com
+sha256 b6ce55503bea610283c0ececc75365fc1c54d8e09bf90e18cfabc678cb1e8dbf 905 golden/rawred/ctf3d-007.com
+sha256 4a16300f88401a73063c4c9245eda14b6b03634206bc63a6ffa00b3e28dd3f28 905 golden/rawred/ctf3d-008.com
+sha256 4588840c6eb4caeaea25a8a1e24b648c2321e4b58acb1eba817f71420b3cd800 905 golden/rawred/ctf3d-009.com
+sha256 2116f7b46740bf90765ca13142e500e73ca07f0d8ddc16fa9acd2fd11b3d1ff5 905 golden/rawred/ctf3d-010.com
+sha256 7782db60dc7e5a8d5fbe2f690b2c36e96691b9ad229eeb85a32f2306ccc8bd8a 905 golden/rawred/ctf3d-011.com
+sha256 c2e7237d9ee6ccb08b95083bd4e6bdf5f1a4ec497a0f037ba44d72caba66886e 905 golden/rawred/ctf3d-012.com
+text 206 golden/rawred/ctf3d-013-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-003.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 4 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-003.info"
+
+sha256 dbf173ff3ae6e5ee8de07af37539b4ea109c79d0bfec9eb399a6ba61dac6ce05 694 golden/rawred/ctf3d-014-sync.com
+sha256 2459e9cd276525229f58820303e34fd6e9485a2e02e6d0b60f19a02f31b680f7 733 golden/rawred/ctf3d-015.com
+text 217 golden/rawred/ctf3d-016-sync.com
+$fixboundaries "./b_ctfcorr_ali_00.rec" "ctf3d-bound-014.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_00.rec" 15
+$b3dremove -g "./b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 0e2c328367f5ff4ff424e81ac79fe19000d7c845ec33231c9c6f2fcc9efcbb5c 875 golden/rawred/ctf3d-017-sync.com
+sha256 b7d86db299458c3c7166fa723617664b8d59cb0f4aee235f31fda2dd74f159ed 905 golden/rawred/ctf3d-018.com
+sha256 7d102326b1058248670eb283723f0b88a8c3b5675fece11a4d4dffafbbbbeb35 905 golden/rawred/ctf3d-019.com
+sha256 e95095860a015c5ec820233e5161bf26262d74df06582647da842100c4362a84 905 golden/rawred/ctf3d-020.com
+sha256 80c55a7ff163d8e82192d1d796ef76c4f82896a5ad81995b16066af674e511a8 905 golden/rawred/ctf3d-021.com
+sha256 d2704fe90a21fd72225b22628973cd13630360f73f93f39bf95f07245aa6bb3a 905 golden/rawred/ctf3d-022.com
+sha256 99c38627d697b7d95f6bb63a25725ff2936c02d6f9318679e5ddf66635bf96e7 905 golden/rawred/ctf3d-023.com
+sha256 788e2a02d5f71ce62cef000fa1c521406ee8a8ee2684d4afb9b58ddc2eedda22 905 golden/rawred/ctf3d-024.com
+sha256 f5b740141270b22ee69326f20efe8239af2c8092e3d6aa1d16f024dd67766788 905 golden/rawred/ctf3d-025.com
+sha256 452dcbf578b7a5ef6ea0bbf9334357016432689618271489e6879ab7aaefbbba 905 golden/rawred/ctf3d-026.com
+text 207 golden/rawred/ctf3d-027-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-017.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 18 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-017.info"
+
+sha256 0933873073d19bb6f52e038f7d9daed031a49f152d3dd2252775247a2d69557e 693 golden/rawred/ctf3d-028-sync.com
+sha256 876619c002c8aba7a9e4210f77615e7b9a40966ee9d7a8e10c1465f7ab58228f 732 golden/rawred/ctf3d-029.com
+text 217 golden/rawred/ctf3d-030-sync.com
+$fixboundaries "./b_ctfcorr_ali_01.rec" "ctf3d-bound-028.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_01.rec" 29
+$b3dremove -g "./b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 e1ac94f8eafcbe32f1b346d942465d084f284a3526b2f5fd4a8fbecb53e205e9 876 golden/rawred/ctf3d-031-sync.com
+sha256 47757132125b00c1b941cac2896ad909d1cb0dc53980e9c0e25f404c5338d103 906 golden/rawred/ctf3d-032.com
+sha256 29a50bdcd125e06173f31bb49bb9cd828fc37154886e65155b4561a9f1562fca 906 golden/rawred/ctf3d-033.com
+sha256 d615d1fda90fd9e9ce1f2dd3db309ad61a31c177a5961ce587eb942cf928ebb9 906 golden/rawred/ctf3d-034.com
+sha256 16a7549f7f1fb31f0b15f4873610a7973d434880d70bd192ee96d5757e654987 906 golden/rawred/ctf3d-035.com
+sha256 6f94b0c6335cc49073902157e44a1af406849c220001f8c5ccc939d20e2b4037 906 golden/rawred/ctf3d-036.com
+sha256 3344cddaea44abc9d7201d2d6f94ff2b3b712286259113bcf7262e44be3417ba 906 golden/rawred/ctf3d-037.com
+sha256 c0e72f601a99bdfd899e091f0acfde095bfdb51161ce4081ecdbc0c4a3498334 906 golden/rawred/ctf3d-038.com
+sha256 a2676b8950a76e28f63a2daa244c4607814ab807f4e272f1c5b7c24ac33f52fe 906 golden/rawred/ctf3d-039.com
+sha256 47835effaf9505424e5a74f9f66d9cfed142354b4992a274481ab06389c8a728 906 golden/rawred/ctf3d-040.com
+text 207 golden/rawred/ctf3d-041-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-031.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 32 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-031.info"
+
+sha256 608b0dcd2ae58e3cf6756c029f9d090172b13bd9c37ec0f0d609d5772413dc09 695 golden/rawred/ctf3d-042-sync.com
+sha256 f8e73bd58bd6c09c45baca22844f5dcccf41435ecf25180e0ecb050e9967526b 734 golden/rawred/ctf3d-043.com
+text 217 golden/rawred/ctf3d-044-sync.com
+$fixboundaries "./b_ctfcorr_ali_02.rec" "ctf3d-bound-042.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_02.rec" 43
+$b3dremove -g "./b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+text 374 golden/rawred/ctf3d-bound-003.info
+1 0 24 11 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/rawred/ctf3d-bound-014.info
+1 0 24 4 1
+./b_ctfcorr_ali_00-015.rbound
+-1 0 -1 -1
+
+text 374 golden/rawred/ctf3d-bound-017.info
+1 0 24 11 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/rawred/ctf3d-bound-028.info
+1 0 24 4 1
+./b_ctfcorr_ali_01-029.rbound
+-1 0 -1 -1
+
+text 374 golden/rawred/ctf3d-bound-031.info
+1 0 24 11 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/rawred/ctf3d-bound-042.info
+1 0 24 4 1
+./b_ctfcorr_ali_02-043.rbound
+-1 0 -1 -1
+
+text 379 golden/rawred/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove  "./b_ctfcorr_ali_red2_tmp.mrc" "./b_ctfcorr_ali_filt_tmp.mrc"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 165 golden/sirt.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 112 golden/sirt.out
+ERROR: ctf3dsetup - The Tilt command file has a SIRTiterations entry; this cannot be usedwith 3D CTF correction
+
+text 2 golden/sirt.rc
+1
+
+text 165 golden/slabs2.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 111 golden/slabs2.out
+ERROR: ctf3dsetup - The number of slabs to compute at different heights must be entered and must be at least 3
+
+text 2 golden/slabs2.rc
+1
+
+text 966 golden/tempdir.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007.com
+ctf3d-008.com
+ctf3d-009.com
+ctf3d-010.com
+ctf3d-011-sync.com
+ctf3d-012-sync.com
+ctf3d-013.com
+ctf3d-014-sync.com
+ctf3d-015-sync.com
+ctf3d-016.com
+ctf3d-017.com
+ctf3d-018.com
+ctf3d-019.com
+ctf3d-020.com
+ctf3d-021.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025-sync.com
+ctf3d-026-sync.com
+ctf3d-027.com
+ctf3d-028-sync.com
+ctf3d-029-sync.com
+ctf3d-030.com
+ctf3d-031.com
+ctf3d-032.com
+ctf3d-033.com
+ctf3d-034.com
+ctf3d-035.com
+ctf3d-036.com
+ctf3d-037.com
+ctf3d-038.com
+ctf3d-039-sync.com
+ctf3d-040-sync.com
+ctf3d-041.com
+ctf3d-042-sync.com
+ctf3d-bound-001.info
+ctf3d-bound-012.info
+ctf3d-bound-015.info
+ctf3d-bound-026.info
+ctf3d-bound-029.info
+ctf3d-bound-040.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+tmp/g.tlt
+track.com
+v.mrc
+
+text 169 golden/tempdir.out
+3 slabs of thickness 10 nm will be computed
+44 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/tempdir.rc
+0
+
+sha256 257b63fb6172a0e1f2a8502d3351a4534f00b35ac5c684ea4567a1aa213eef80 853 golden/tempdir/ctf3d-001-sync.com
+sha256 28dd1a9d9f5418bfbd0fe78869795582723e230cb8b06a210db550382b6491bf 883 golden/tempdir/ctf3d-002.com
+sha256 45dab075d742b1942eb86c8e80c83db24e95f933239d0a5a432ea99aa7dad553 883 golden/tempdir/ctf3d-003.com
+sha256 191c93dba98c35ddd1310737da84919a870607771141975b36a9fd5afd2c2e3b 883 golden/tempdir/ctf3d-004.com
+sha256 ba899674edebe8173f49863d69e94f014643a496b683914b0ea3c80ad5394c28 883 golden/tempdir/ctf3d-005.com
+sha256 4dbb72aa0c605e61aeef6b93555e46a36e2508eea8be4a585fe6f1c27151acb2 883 golden/tempdir/ctf3d-006.com
+sha256 733e6df447de8fafa9dc1b796d4adbd3f293c2ce52f3fbae023cf25debb52c5e 883 golden/tempdir/ctf3d-007.com
+sha256 ae0e922d0622863e92bcf8a2c5157ac84fde79de5558d336726254cc21d271e3 883 golden/tempdir/ctf3d-008.com
+sha256 b21191d304ea0347e807fb34130337f6d0a3e0c5777cf7bff017de8f17f7fdf2 883 golden/tempdir/ctf3d-009.com
+sha256 acbc5b18803ac69c43d160d7f1e8bf020919ba3ffde3a3aec401ad7011a4d87c 883 golden/tempdir/ctf3d-010.com
+text 212 golden/tempdir/ctf3d-011-sync.com
+$fixboundaries "tmp/b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-001.info"
+$collectmmm pixels= "ctf3d" 9 "tmp/b_ctfcorr_ali_tmp.mrc" 2 
+$b3dremove -g "tmp/b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-001.info"
+
+sha256 b702b5fb96a868e6fa1a8499d880c4ee881d652357e4ccae117a6f37247eb638 653 golden/tempdir/ctf3d-012-sync.com
+sha256 c3cc007557c29713b79a907c0e592c9cf5a708842272dacb0b7f5698328d9d42 692 golden/tempdir/ctf3d-013.com
+text 225 golden/tempdir/ctf3d-014-sync.com
+$fixboundaries "tmp/b_ctfcorr_ali_00.rec" "ctf3d-bound-012.info"
+$collectmmm pixels= "ctf3d" 1 "tmp/b_ctfcorr_ali_00.rec" 13
+$b3dremove -g "tmp/b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound"
+$b3dremove "tmp/b_ctfcorr_ali_tmp.mrc"
+
+sha256 b679733dc4cad93b3cc2dcb804a58865d77d4dd329c33df3922281909f9b90d5 852 golden/tempdir/ctf3d-015-sync.com
+sha256 35b9dfcec85f8cd89fdae9921963161e56e00130e0fdca6cb0b0d4e85d778723 882 golden/tempdir/ctf3d-016.com
+sha256 d91d9979710fe6b23c9c98ee6a4de1235e255d7f8b928ea6646ff128110f475c 882 golden/tempdir/ctf3d-017.com
+sha256 05e796578662470a648ddab4fbe03205d3e696caedc6dcc79f6dcc51557bfd14 882 golden/tempdir/ctf3d-018.com
+sha256 a35bbdf34dbe4b283d6bff1b1be8584dd8802a006003620b61a445839c4db331 882 golden/tempdir/ctf3d-019.com
+sha256 63c309cc9edfcad9d89ada0c2c2d2bb82bf435e09b7d8f2e49a2b4bd49207279 882 golden/tempdir/ctf3d-020.com
+sha256 77c25275339aceac4bb60b8d56376e474260259d95b71087036d04c9fd8330ab 882 golden/tempdir/ctf3d-021.com
+sha256 3370aa2cf84fc8bbec8958af75b8bf6cf8de0c01fa8fc093a1c032d587c4baa4 882 golden/tempdir/ctf3d-022.com
+sha256 fe1014d6dda732ab4b0b0bd9b0549e2e53536b333ca600fe0868a68335314c89 882 golden/tempdir/ctf3d-023.com
+sha256 802cb6f916b6aef2e3a28673b20b51c6a2384d362329be2c66500edf663207ac 882 golden/tempdir/ctf3d-024.com
+text 213 golden/tempdir/ctf3d-025-sync.com
+$fixboundaries "tmp/b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-015.info"
+$collectmmm pixels= "ctf3d" 9 "tmp/b_ctfcorr_ali_tmp.mrc" 16 
+$b3dremove -g "tmp/b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-015.info"
+
+sha256 63098cc7094109d421672fb0e28df772f9dd35cd105d48151ab854c692b84487 652 golden/tempdir/ctf3d-026-sync.com
+sha256 c40bc309a21da22d58fb7e8d56491107ef8daf2da69551285da30052503ad223 691 golden/tempdir/ctf3d-027.com
+text 225 golden/tempdir/ctf3d-028-sync.com
+$fixboundaries "tmp/b_ctfcorr_ali_01.rec" "ctf3d-bound-026.info"
+$collectmmm pixels= "ctf3d" 1 "tmp/b_ctfcorr_ali_01.rec" 27
+$b3dremove -g "tmp/b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound"
+$b3dremove "tmp/b_ctfcorr_ali_tmp.mrc"
+
+sha256 c262473e26a3a3645f1d26ded5faa1a8831efab2de75eae68facfbf3ad9b14b5 854 golden/tempdir/ctf3d-029-sync.com
+sha256 e21f95996d52018975d882a8c1068112a6e3bcf06c2bdb142db05d2340ae6574 884 golden/tempdir/ctf3d-030.com
+sha256 5802fa369b606ab869e9d2802ea22258512dad25a3439d8306401aa39e4af759 884 golden/tempdir/ctf3d-031.com
+sha256 e9525824f9726cc8a7edcebb51b7dfb4d9efc1fdddcd715fe59231a647ac4c01 884 golden/tempdir/ctf3d-032.com
+sha256 a0276d813fa778e61b64a00c736235c0891020737b6eadf4af37bfbe1782e11d 884 golden/tempdir/ctf3d-033.com
+sha256 c74b6480929b73bce73c699d2cd6c648b0aa5bfd9f38fc58ea362a052c464573 884 golden/tempdir/ctf3d-034.com
+sha256 30fa680e909db62cda674917244869bfe096df9b8dd973c2c511e6a9817ea6ea 884 golden/tempdir/ctf3d-035.com
+sha256 557248ed22be8ed9490098a7ab557204ad473d295e1f8df438130ac8fb1711fb 884 golden/tempdir/ctf3d-036.com
+sha256 60f62d2889e7fd0b86f244e6614227fb0fa474b9e1f126cef1fe92cb9c7a7a4c 884 golden/tempdir/ctf3d-037.com
+sha256 9456c2373243f9dbd6d2c7060c2c1c6aaf1f749a1489d9d4ea20a72e7b58438e 884 golden/tempdir/ctf3d-038.com
+text 213 golden/tempdir/ctf3d-039-sync.com
+$fixboundaries "tmp/b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-029.info"
+$collectmmm pixels= "ctf3d" 9 "tmp/b_ctfcorr_ali_tmp.mrc" 30 
+$b3dremove -g "tmp/b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-029.info"
+
+sha256 3be88e0ef09a01a4be7fc7825e545eb6b3a256157fe38ec105277600b0e743cd 654 golden/tempdir/ctf3d-040-sync.com
+sha256 dd1762cc75ae1f4c8de4d4aa24ec92e91c0ba506029953315204b9b0d43485a7 693 golden/tempdir/ctf3d-041.com
+text 225 golden/tempdir/ctf3d-042-sync.com
+$fixboundaries "tmp/b_ctfcorr_ali_02.rec" "ctf3d-bound-040.info"
+$collectmmm pixels= "ctf3d" 1 "tmp/b_ctfcorr_ali_02.rec" 41
+$b3dremove -g "tmp/b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound"
+$b3dremove "tmp/b_ctfcorr_ali_tmp.mrc"
+
+text 392 golden/tempdir/ctf3d-bound-001.info
+1 0 48 21 9
+tmp/b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+tmp/b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+tmp/b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+tmp/b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+tmp/b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+tmp/b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+tmp/b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+tmp/b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+tmp/b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 54 golden/tempdir/ctf3d-bound-012.info
+1 0 48 9 1
+tmp/b_ctfcorr_ali_00-013.rbound
+-1 0 -1 -1
+
+text 392 golden/tempdir/ctf3d-bound-015.info
+1 0 48 21 9
+tmp/b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+tmp/b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+tmp/b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+tmp/b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+tmp/b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+tmp/b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+tmp/b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+tmp/b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+tmp/b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 54 golden/tempdir/ctf3d-bound-026.info
+1 0 48 9 1
+tmp/b_ctfcorr_ali_01-027.rbound
+-1 0 -1 -1
+
+text 392 golden/tempdir/ctf3d-bound-029.info
+1 0 48 21 9
+tmp/b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+tmp/b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+tmp/b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+tmp/b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+tmp/b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+tmp/b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+tmp/b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+tmp/b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+tmp/b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 54 golden/tempdir/ctf3d-bound-040.info
+1 0 48 9 1
+tmp/b_ctfcorr_ali_02-041.rbound
+-1 0 -1 -1
+
+text 313 golden/tempdir/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile tmp/b_ctfcorr_ali_00.rec
+InputFile tmp/b_ctfcorr_ali_01.rec
+InputFile tmp/b_ctfcorr_ali_02.rec
+$b3dremove -g "tmp/b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 165 golden/thick20.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 108 golden/thick20.out
+ERROR: ctf3dsetup - The entered slab thickness would give only 2 slabs; you must enter a value less than 15
+
+text 2 golden/thick20.rc
+1
+
+text 1214 golden/thick9.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007.com
+ctf3d-008.com
+ctf3d-009.com
+ctf3d-010.com
+ctf3d-011-sync.com
+ctf3d-012-sync.com
+ctf3d-013.com
+ctf3d-014-sync.com
+ctf3d-015-sync.com
+ctf3d-016.com
+ctf3d-017.com
+ctf3d-018.com
+ctf3d-019.com
+ctf3d-020.com
+ctf3d-021.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025-sync.com
+ctf3d-026-sync.com
+ctf3d-027.com
+ctf3d-028-sync.com
+ctf3d-029-sync.com
+ctf3d-030.com
+ctf3d-031.com
+ctf3d-032.com
+ctf3d-033.com
+ctf3d-034.com
+ctf3d-035.com
+ctf3d-036.com
+ctf3d-037.com
+ctf3d-038.com
+ctf3d-039-sync.com
+ctf3d-040-sync.com
+ctf3d-041.com
+ctf3d-042-sync.com
+ctf3d-043-sync.com
+ctf3d-044.com
+ctf3d-045.com
+ctf3d-046.com
+ctf3d-047.com
+ctf3d-048.com
+ctf3d-049.com
+ctf3d-050.com
+ctf3d-051.com
+ctf3d-052.com
+ctf3d-053-sync.com
+ctf3d-054-sync.com
+ctf3d-055.com
+ctf3d-056-sync.com
+ctf3d-bound-001.info
+ctf3d-bound-012.info
+ctf3d-bound-015.info
+ctf3d-bound-026.info
+ctf3d-bound-029.info
+ctf3d-bound-040.info
+ctf3d-bound-043.info
+ctf3d-bound-054.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 168 golden/thick9.out
+4 slabs of thickness 7 nm will be computed
+58 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/thick9.rc
+0
+
+sha256 42197412936827b97fe3e7fab67bc58fae76079dc1b2d55f7c40f094e32f5247 850 golden/thick9/ctf3d-001-sync.com
+sha256 d2aec5bb50b6b3a3652e99bd0b4c3d10d07d747ea323010b7b7c747a41dce3d3 880 golden/thick9/ctf3d-002.com
+sha256 0ee171c7ca2f96c72bc7d6e064b270b83d40103c82eb4892b1895c676d1c43ba 880 golden/thick9/ctf3d-003.com
+sha256 f9d2b74224967ad24c128c7f4f8c835fdc7c25abfcb95962984a68cbd2515573 880 golden/thick9/ctf3d-004.com
+sha256 314fcadecde8030ed379897b2a70d25b3dadc1cd372bb5cd0c137cadce7dc529 880 golden/thick9/ctf3d-005.com
+sha256 c023b543db759a606ca4e0d9fade9a4948162619f263c9c217eade4399a537d4 880 golden/thick9/ctf3d-006.com
+sha256 56db8a0b3dddd8e143dfacf17cc48b170264618f0f9cdd6d96361b9b9c5e34cc 880 golden/thick9/ctf3d-007.com
+sha256 cfe51e357370e5f5509bca0ae88aff7270ce03ac5584a08b9ea4680ada0627f4 880 golden/thick9/ctf3d-008.com
+sha256 7c2e14174b557d84f53e766153639cd97cb915b96d7e7eba817eb4bd89a3e3e3 880 golden/thick9/ctf3d-009.com
+sha256 15ecf2c8c290a2987ea3697d2f5a3c3e6a2072079aabce82bd87cf3ef0fa5169 880 golden/thick9/ctf3d-010.com
+text 206 golden/thick9/ctf3d-011-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-001.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 2 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-001.info"
+
+sha256 8d396c162796649590bf89b5083fc0f66674c6d08e9c107165d12f78f51a02ff 648 golden/thick9/ctf3d-012-sync.com
+sha256 7efbd3938368ed5d8c12a357d7257983f97bc25832b98a65285e3beaca420608 687 golden/thick9/ctf3d-013.com
+text 217 golden/thick9/ctf3d-014-sync.com
+$fixboundaries "./b_ctfcorr_ali_00.rec" "ctf3d-bound-012.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_00.rec" 13
+$b3dremove -g "./b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 0f048a70f6cdd17da010cd83591d77a90f5551625000c70dd24b814d0d572c88 849 golden/thick9/ctf3d-015-sync.com
+sha256 9247ba41f7851f4baa65e4fd9f5df66e94103df528ec99f4a23e332b5d914e22 879 golden/thick9/ctf3d-016.com
+sha256 b0919f8d2fecc1e14312a5058ff66e61e712d0d8dfc32b407c19057aeabef883 879 golden/thick9/ctf3d-017.com
+sha256 6e0795beec1cb40ed9579d65bb3260f8408e421cf53433e45642b0ddd44b6e23 879 golden/thick9/ctf3d-018.com
+sha256 d70d4985f3327179a8fa2c38a41553712aa99c11151d32900d38048213a1af40 879 golden/thick9/ctf3d-019.com
+sha256 cbc1d1a52bf17830ea5ea816a8c2589085e2cbe42be3554c6be04c549c1344cd 879 golden/thick9/ctf3d-020.com
+sha256 c36df6c22a42172c5c7e23e86e0a940530b665d81b9a2a2288f77ec4868c9b75 879 golden/thick9/ctf3d-021.com
+sha256 2706c84c28b3a7fe3114704d14a67d5614ac60b83391d90bb29b8b3b6688b4f0 879 golden/thick9/ctf3d-022.com
+sha256 58fe6fa2ef1b62a7cd15155e0262e517c7638f5e6a1a67518888e6af6c5c3f29 879 golden/thick9/ctf3d-023.com
+sha256 d24e8b7db04e6032c8e6ec4759e642ba096faa24f19c31342605838388f6ce2c 879 golden/thick9/ctf3d-024.com
+text 207 golden/thick9/ctf3d-025-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-015.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 16 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-015.info"
+
+sha256 8f1b4d6d77c7a0fa450945fb4e0f1d0906eef7b79dd12d80a122d8f1db10acb5 647 golden/thick9/ctf3d-026-sync.com
+sha256 1f859438bc5d51eaa41ac5a3b945eb040ca60b86647fbbd9ab0844153a6985a7 686 golden/thick9/ctf3d-027.com
+text 217 golden/thick9/ctf3d-028-sync.com
+$fixboundaries "./b_ctfcorr_ali_01.rec" "ctf3d-bound-026.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_01.rec" 27
+$b3dremove -g "./b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 9a7ec8d403914b3278658639603e694c1fe1f7a0883c4678978c0092d1b9c3be 850 golden/thick9/ctf3d-029-sync.com
+sha256 684a97bb0f36db3ae1137b521e933cfe285f0cc57a7fb743b6f7997c1aaf5d4b 880 golden/thick9/ctf3d-030.com
+sha256 1b0de2c14f18d7d60aab19706d017b6af4a2a489cffbbcc7efa1a5a6bef56e7c 880 golden/thick9/ctf3d-031.com
+sha256 cf70a6d282ebf39954edcd5dfe0b514806f9797a8671cc871aabeaaba26f9f14 880 golden/thick9/ctf3d-032.com
+sha256 014f32af45032c3361ef1000722430042c097646058c9837fffcbd150a457b93 880 golden/thick9/ctf3d-033.com
+sha256 170c2345f32ead29d7e5a9fc46ffbbf8d24e11ed8b94ff4e701191c7e1bbf282 880 golden/thick9/ctf3d-034.com
+sha256 09c89a8aefa27270545049257a5320938c41a01204ad53c021d3f8002dffc67e 880 golden/thick9/ctf3d-035.com
+sha256 5565d9b70e717fdaaaf2a5067441c5480fddaca0e5407df012e1a4591696ebf1 880 golden/thick9/ctf3d-036.com
+sha256 42fc66d5abd6aabfa15e4e27ef9bbc39b05852f199e53a4b12a638ed4637c48c 880 golden/thick9/ctf3d-037.com
+sha256 ff569b1719fa5908dd8700fbffc94d53eea126b860f7cb7be18751f4bbe080c6 880 golden/thick9/ctf3d-038.com
+text 207 golden/thick9/ctf3d-039-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-029.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 30 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-029.info"
+
+sha256 d971c94c1fb1ee5d1fdd7d2cbe0238fa47e520c512dc615e8924226b897ba360 648 golden/thick9/ctf3d-040-sync.com
+sha256 a691d3c7dfec4387c426a8808b4d4dff8ecc310dc58d0f0e01ef2c061703bbd6 687 golden/thick9/ctf3d-041.com
+text 217 golden/thick9/ctf3d-042-sync.com
+$fixboundaries "./b_ctfcorr_ali_02.rec" "ctf3d-bound-040.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_02.rec" 41
+$b3dremove -g "./b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 9fa6e47b51406e55782ab06b2d8197f3bba984e628609a26d3b494b4f9bc6d89 851 golden/thick9/ctf3d-043-sync.com
+sha256 230d9b336acf2c0094ea6107c569cbe62005552bdb6a4e20e17aaaa87fdde95e 881 golden/thick9/ctf3d-044.com
+sha256 62f47c861bbf0f5bee51bc67faf24a186928d78c16851acd9e23b14bd9de49c3 881 golden/thick9/ctf3d-045.com
+sha256 84d0199cd2ecb016f1006cfb9259591904b213b44d16a1a45c6053efd7161b49 881 golden/thick9/ctf3d-046.com
+sha256 0690c118934471fbb26ad4b1c4a44bbd3f7f9a34eb49b8e26d0770e54934bf52 881 golden/thick9/ctf3d-047.com
+sha256 4d30827fb9f3603b004a15472a567cb09d603380a4f34a76029b81d980020547 881 golden/thick9/ctf3d-048.com
+sha256 5af12eeae004e249096671cc6e4e15b7399eeb9f877f9f0775e13f12c48bc6be 881 golden/thick9/ctf3d-049.com
+sha256 8aeba1906c4b0694f737a213d1c2a1b57be2d5f86045ee411d55b36b44f4417f 881 golden/thick9/ctf3d-050.com
+sha256 9b12edce8113074c2a296b6a0700c0045e2cb94597b102b0acde0806ac7ed6e4 881 golden/thick9/ctf3d-051.com
+sha256 9c9086988bdd169538ff183219097cd332fd4bd5aeaa5ef781edd06626cc6fb6 881 golden/thick9/ctf3d-052.com
+text 207 golden/thick9/ctf3d-053-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-043.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 44 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-043.info"
+
+sha256 00235a982896835ab23819f00e152df7c6935cfc2d73e539084922913942da60 649 golden/thick9/ctf3d-054-sync.com
+sha256 3147b777848b4b4b733e9b6466b08a26055cfc14f047bbc902a5c929c7fa342e 688 golden/thick9/ctf3d-055.com
+text 217 golden/thick9/ctf3d-056-sync.com
+$fixboundaries "./b_ctfcorr_ali_03.rec" "ctf3d-bound-054.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_03.rec" 55
+$b3dremove -g "./b_ctfcorr_ali_03-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+text 374 golden/thick9/ctf3d-bound-001.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/thick9/ctf3d-bound-012.info
+1 0 48 7 1
+./b_ctfcorr_ali_00-013.rbound
+-1 0 -1 -1
+
+text 374 golden/thick9/ctf3d-bound-015.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/thick9/ctf3d-bound-026.info
+1 0 48 7 1
+./b_ctfcorr_ali_01-027.rbound
+-1 0 -1 -1
+
+text 374 golden/thick9/ctf3d-bound-029.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/thick9/ctf3d-bound-040.info
+1 0 48 6 1
+./b_ctfcorr_ali_02-041.rbound
+-1 0 -1 -1
+
+text 374 golden/thick9/ctf3d-bound-043.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/thick9/ctf3d-bound-054.info
+1 0 48 6 1
+./b_ctfcorr_ali_03-055.rbound
+-1 0 -1 -1
+
+text 338 golden/thick9/ctf3d-finish.com
+$assemblevol -StandardInput
+NumberOfFilesInY 4
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+InputFile ./b_ctfcorr_ali_03.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 956 golden/xtilt.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctf3d-001-sync.com
+ctf3d-002.com
+ctf3d-003.com
+ctf3d-004.com
+ctf3d-005.com
+ctf3d-006.com
+ctf3d-007.com
+ctf3d-008.com
+ctf3d-009.com
+ctf3d-010.com
+ctf3d-011-sync.com
+ctf3d-012-sync.com
+ctf3d-013.com
+ctf3d-014-sync.com
+ctf3d-015-sync.com
+ctf3d-016.com
+ctf3d-017.com
+ctf3d-018.com
+ctf3d-019.com
+ctf3d-020.com
+ctf3d-021.com
+ctf3d-022.com
+ctf3d-023.com
+ctf3d-024.com
+ctf3d-025-sync.com
+ctf3d-026-sync.com
+ctf3d-027.com
+ctf3d-028-sync.com
+ctf3d-029-sync.com
+ctf3d-030.com
+ctf3d-031.com
+ctf3d-032.com
+ctf3d-033.com
+ctf3d-034.com
+ctf3d-035.com
+ctf3d-036.com
+ctf3d-037.com
+ctf3d-038.com
+ctf3d-039-sync.com
+ctf3d-040-sync.com
+ctf3d-041.com
+ctf3d-042-sync.com
+ctf3d-bound-001.info
+ctf3d-bound-012.info
+ctf3d-bound-015.info
+ctf3d-bound-026.info
+ctf3d-bound-029.info
+ctf3d-bound-040.info
+ctf3d-finish.com
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 293 golden/xtilt.out
+3 slabs of thickness 5 nm will be computed
+WARNING: ctf3dsetup - X-axis tilt for CTF correction is non-zero (5.0)  but it differs from X-tilt for reconstruction (30.0)
+44 command files created with root name ctf3d and
+ ready to run with processchunks or parallel processing interface in Etomo
+
+text 2 golden/xtilt.rc
+0
+
+sha256 3dc9d8a168e9ca990e8632bfccb316505c7ea47e64329d414be89de300d94d21 899 golden/xtilt/ctf3d-001-sync.com
+sha256 ab45420354e9137ae36ac46da7082dafd2c7200c4d553d6d2de7588ba4090731 929 golden/xtilt/ctf3d-002.com
+sha256 1dac9ca0e1955eafff91579bc82742924d65d36dc2bf56d98da8e358bea167e5 929 golden/xtilt/ctf3d-003.com
+sha256 37fb7dccbb403d51f143eb5f0ddea2c148b3ca72c2fff04e4fc5c4b4b40408c0 929 golden/xtilt/ctf3d-004.com
+sha256 d60ed2a5a386bd83d0ab200cec4cbdba4bfbd6156745a28a5539599ad4d62034 929 golden/xtilt/ctf3d-005.com
+sha256 6ef3fcc76b570b5d63deb31ee1e1885d3588bffb29eedc889df0f7ebbdaadf16 929 golden/xtilt/ctf3d-006.com
+sha256 89941441e2f16d1d49efd851bbfb75e1a1a30ebae34c687dc6f25cc2c7fc840d 929 golden/xtilt/ctf3d-007.com
+sha256 d2ce875adb31aed238697db1a46b1d0adeff7ae0f5056e12be99e0f734b35c2f 929 golden/xtilt/ctf3d-008.com
+sha256 89eb7e86f1b7a6fda229f645d902bf173c63b4eae8118cf08cf11730b73eac87 929 golden/xtilt/ctf3d-009.com
+sha256 a767c27d604d934c0f3cb6786c80989b3e7c1a52b36585e03f71d368d31fa9fa 929 golden/xtilt/ctf3d-010.com
+text 206 golden/xtilt/ctf3d-011-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-001.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 2 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-001.info"
+
+sha256 8fac1469030dda363f9531939901215e3cc588e88053f46fce25bed622c4aefb 649 golden/xtilt/ctf3d-012-sync.com
+sha256 98a6f716a4b0b9f490c891c5d49c111989753c44f58bec63ae3a1e5c4bf2486a 688 golden/xtilt/ctf3d-013.com
+text 217 golden/xtilt/ctf3d-014-sync.com
+$fixboundaries "./b_ctfcorr_ali_00.rec" "ctf3d-bound-012.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_00.rec" 13
+$b3dremove -g "./b_ctfcorr_ali_00-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 54735c022996e99c9cf7594391d104c3784e6ef1ae70c7253f948167b025acb9 898 golden/xtilt/ctf3d-015-sync.com
+sha256 3613a0fe80837b8b6a9e5ca2b3e1d9e47e15eab0f650585bb84f902aba91b774 928 golden/xtilt/ctf3d-016.com
+sha256 4ce50f439f392c2d1290e505bc62063f8519b9093b72e77470a0510f283b30b6 928 golden/xtilt/ctf3d-017.com
+sha256 2d40af7c6593f6affabc90ecd4b35401803ce08df52bc3cde060ee5170215247 928 golden/xtilt/ctf3d-018.com
+sha256 66814a0b202afa0d4f3be5670d429f8403418e63aaf3923c30e738e45b0f48d6 928 golden/xtilt/ctf3d-019.com
+sha256 b52b807f512b0e0d7cf2f5092c099228b4ea804ae15e36df79ee6f002fb25b0a 928 golden/xtilt/ctf3d-020.com
+sha256 7644c2e39588c6b74bc6a2bf7051bc52eb681fd441438740b26b672b961f3fb3 928 golden/xtilt/ctf3d-021.com
+sha256 7548ad27b8babfa93d9256b379f2a299cfc108e93b2803eb2f48ca96815b9f1e 928 golden/xtilt/ctf3d-022.com
+sha256 86d26ff7b27f4b136b55a8a5f549702dff74e4ff4ad0ecb67a50e60fee559073 928 golden/xtilt/ctf3d-023.com
+sha256 8a8972b661293aa36a0e3dd62c631267845d88e16c365b58f55112af49238948 928 golden/xtilt/ctf3d-024.com
+text 207 golden/xtilt/ctf3d-025-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-015.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 16 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-015.info"
+
+sha256 3db85e1f46c1db81f71f474d8b35f45d07a7dda775210f16e0ad478f0d0bf28b 648 golden/xtilt/ctf3d-026-sync.com
+sha256 21462ad98008adb94356e612869ff306f095a7d4339d443d5957501164ee1a0d 687 golden/xtilt/ctf3d-027.com
+text 217 golden/xtilt/ctf3d-028-sync.com
+$fixboundaries "./b_ctfcorr_ali_01.rec" "ctf3d-bound-026.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_01.rec" 27
+$b3dremove -g "./b_ctfcorr_ali_01-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+sha256 d0660994e9ab118b6e27c5bbae65a8045d93c6a2c8bfb697bf578d42fca6f498 898 golden/xtilt/ctf3d-029-sync.com
+sha256 184ed013a5639efacedf6a97c9841ef1cded2630ae77dfb6415e74d977f79782 928 golden/xtilt/ctf3d-030.com
+sha256 77e9866bfe295fa790d7515cc2d79a139c447c642acecf5dd0ebab243af77e7d 928 golden/xtilt/ctf3d-031.com
+sha256 a2634fee13600984013c8748ece9f0a9f37077760169f3c93597e606df6acc21 928 golden/xtilt/ctf3d-032.com
+sha256 c220b320169671c0b538236f7b94de8bc0baf5eb7869baa6d2b5be2601785f1a 928 golden/xtilt/ctf3d-033.com
+sha256 53216c3b58b92e8ad187f9ca9bd9777a63a787c305af4416f17c469d4a566fb5 928 golden/xtilt/ctf3d-034.com
+sha256 b4ee6ac6360d8cd80f19f29461c25732d3c9a3775cf59bae6272bb8d7de48d90 928 golden/xtilt/ctf3d-035.com
+sha256 85f7fcf13fc50f03ced208815f4aa814c6657097d0e5d57b8c16a502e82a4f7c 928 golden/xtilt/ctf3d-036.com
+sha256 9a81ffa66d0ea521e8094bece619a4a676d5b200df54afea44a4151fdae5b1c4 928 golden/xtilt/ctf3d-037.com
+sha256 eb3eb9de53643e9c88b202707d91c9d2da3b158a13081d949f88cbbbcd3d5e8a 928 golden/xtilt/ctf3d-038.com
+text 207 golden/xtilt/ctf3d-039-sync.com
+$fixboundaries "./b_ctfcorr_ali_tmp.mrc" "ctf3d-bound-029.info"
+$collectmmm pixels= "ctf3d" 9 "./b_ctfcorr_ali_tmp.mrc" 30 
+$b3dremove -g "./b_ctfcorr_ali_tmp-[0-9][0-9][0-9]*.cbound" "ctf3d-bound-029.info"
+
+sha256 8e60cab385d2471842ddb6ccaae55e7fb6031f06d091b18f6f5ba895d7470d43 650 golden/xtilt/ctf3d-040-sync.com
+sha256 8c2eeb85bbe601aa38b1297e11bbfa1614abf2adc802d89f40515ba0894942bc 689 golden/xtilt/ctf3d-041.com
+text 217 golden/xtilt/ctf3d-042-sync.com
+$fixboundaries "./b_ctfcorr_ali_02.rec" "ctf3d-bound-040.info"
+$collectmmm pixels= "ctf3d" 1 "./b_ctfcorr_ali_02.rec" 41
+$b3dremove -g "./b_ctfcorr_ali_02-[0-9][0-9][0-9]*.rbound"
+$b3dremove "./b_ctfcorr_ali_tmp.mrc"
+
+text 374 golden/xtilt/ctf3d-bound-001.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/xtilt/ctf3d-bound-012.info
+1 0 48 9 1
+./b_ctfcorr_ali_00-013.rbound
+-1 0 -1 -1
+
+text 374 golden/xtilt/ctf3d-bound-015.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/xtilt/ctf3d-bound-026.info
+1 0 48 9 1
+./b_ctfcorr_ali_01-027.rbound
+-1 0 -1 -1
+
+text 374 golden/xtilt/ctf3d-bound-029.info
+1 0 48 21 9
+./b_ctfcorr_ali_tmp-001.cbound
+-1 0 0 -1
+./b_ctfcorr_ali_tmp-002.cbound
+1 0 1 -1
+./b_ctfcorr_ali_tmp-003.cbound
+2 0 2 -1
+./b_ctfcorr_ali_tmp-004.cbound
+3 0 3 -1
+./b_ctfcorr_ali_tmp-005.cbound
+4 0 4 -1
+./b_ctfcorr_ali_tmp-006.cbound
+5 0 5 -1
+./b_ctfcorr_ali_tmp-007.cbound
+6 0 6 -1
+./b_ctfcorr_ali_tmp-008.cbound
+7 0 7 -1
+./b_ctfcorr_ali_tmp-009.cbound
+8 0 -1 -1
+
+text 52 golden/xtilt/ctf3d-bound-040.info
+1 0 48 9 1
+./b_ctfcorr_ali_02-041.rbound
+-1 0 -1 -1
+
+text 339 golden/xtilt/ctf3d-finish.com
+$setenv IMOD_WRITE_FLOATS_16BIT 1
+$assemblevol -StandardInput
+NumberOfFilesInY 3
+OutputFile b_3dctf.rec
+InputFile ./b_ctfcorr_ali_00.rec
+InputFile ./b_ctfcorr_ali_01.rec
+InputFile ./b_ctfcorr_ali_02.rec
+$b3dremove -g "./b_ctfcorr_ali_[0-9][0-9].rec"
+$b3dremove -g ctf3d-[0-9][0-9][0-9]*.com* ctf3d-[0-9][0-9][0-9]*.log* ctf3d-finish*.com*
+
+text 165 golden/xtilt_raw.files
+align.com
+align.log
+b_ali.mrc
+b_erase.fid
+ctfcorrection.com
+eraser.com
+g.ali
+g.st
+g.tlt
+g.xf
+g.xtilt
+golderaser.com
+mtffilter.com
+newst.com
+tilt.com
+track.com
+v.mrc
+
+text 93 golden/xtilt_raw.out
+ERROR: ctf3dsetup - You cannot reconstruct from raw images when applying an expansion factor
+
+text 2 golden/xtilt_raw.rc
+1
+

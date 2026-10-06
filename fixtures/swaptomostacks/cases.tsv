@@ -1,0 +1,9 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+swap	g.st:g.st g.ali:g.ali g.rec:g.rec alt.mrc:alt.mrc	-	-root g alt old
+excl1	g.st:g.st g.ali:g.ali g.rec:g.rec alt.mrc:alt.mrc	-	-root g -excl 1 alt old
+excl2	g.st:g.st g.ali:g.ali g.rec:g.rec alt.mrc:alt.mrc	-	-root g -excl 2 alt old
+no_root	g.st:g.st g.ali:g.ali g.rec:g.rec alt.mrc:alt.mrc	-	alt old
+single	g.st:g.st g.ali:g.ali g.rec:g.rec alt.mrc:alt.mrc	-	-root g -single alt old
+no_from	g.st:g.st g.ali:g.ali g.rec:g.rec alt.mrc:alt.mrc	-	-root g nofrom old
+check_excludes	c/alt.st:alt.st c/ts.rawtlt:ts.rawtlt c/ts.st:ts.st c/ts.st.mdoc:ts.st.mdoc c/ts_allviews0.rawtlt:ts_allviews0.rawtlt c/ts_allviews0.st:ts_allviews0.st c/ts_allviews0.st.mdoc:ts_allviews0.st.mdoc c/ts_cutviews0.info:ts_cutviews0.info c/ts_cutviews0.rawtlt:ts_cutviews0.rawtlt c/ts_cutviews0.st:ts_cutviews0.st c/ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc	-	-root ts -check alt old
+excluded_set	c/alt.st:alt.st c/ts.rawtlt:ts.rawtlt c/ts.st:ts.st c/ts.st.mdoc:ts.st.mdoc c/ts_allviews0.rawtlt:ts_allviews0.rawtlt c/ts_allviews0.st:ts_allviews0.st c/ts_allviews0.st.mdoc:ts_allviews0.st.mdoc c/ts_cutviews0.info:ts_cutviews0.info c/ts_cutviews0.rawtlt:ts_cutviews0.rawtlt c/ts_cutviews0.st:ts_cutviews0.st c/ts_cutviews0.st.mdoc:ts_cutviews0.st.mdoc	-	-root ts alt old

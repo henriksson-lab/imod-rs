@@ -1,0 +1,12 @@
+# name	inputs (src:dst from inputs/)	env	arguments
+usage	-	-	-
+com_only	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-com b.com
+project_and_com	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-project p -com b.com
+project_no_adoc	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-project p
+no_cpu_list	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-com b.com -adoc d.adoc -check /nonexistent/chk
+bad_core_count	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-com b.com -adoc d.adoc -cpus a:x,b -parallel 2 -check /nonexistent/chk
+template_path	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-com b.com -adoc t1.adoc -check /nonexistent/chk
+template_missing	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-com b.com -adoc t2.adoc -check /nonexistent/chk
+bad_float	-	-	-age x
+missing_com	b.com:b.com d.adoc:d.adoc t1.adoc:t1.adoc t2.adoc:t2.adoc p.ebt:p.ebt	-	-com nocom -adoc d.adoc
+no_deliver	-	-	-watch .

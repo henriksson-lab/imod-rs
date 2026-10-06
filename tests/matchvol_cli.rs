@@ -8,15 +8,17 @@
 //! `.stdout` the standard output and `.out.<file>` each file the run created
 //! or changed.  Inputs: seeded float, short and byte volumes written by the
 //! native raw2mrc, 3x4 transform files and findwarp-format warp files
-//! (`make-inputs.sh`).  The byte volume `mb.mrc` with `-memory` limits forces
-//! several cubes, scratch files and the recomposition pass.
+//! (`make-inputs.sh`).  The 270 KB byte volume `mb.mrc`, whose `-memory`
+//! runs (`m_mb`, `m_mbzx`, `m_mbyx`) forced several cubes, scratch files and
+//! the recomposition pass, was deleted with those cases on 2026-10-06 to keep
+//! fixtures small.
 //! Exit status, standard output and every output file must match byte for
 //! byte, except the `hh:mm:ss` time and the date of a `dd-Mmm-yy  hh:mm:ss`
 //! stamp in an MRC label, the time-derived digits of scratch file names
 //! (`<input>.mat<hhmmss>N`, `.wrp<hhmmss>N`) and the verbose timing lines,
 //! which differ between runs.
 //!
-//! Pruned 2026-09-26: 18 of 21 rows kept (dropped: the Y-X order on the float volume (kept with -memory), -verbose alone (kept with -memory), and a third interactive run); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
+//! Pruned 2026-09-26: 18 of 21 rows kept (15 after the 2026-10-06 `mb.mrc` cut) (dropped: the Y-X order on the float volume (kept with -memory), -verbose alone (kept with -memory), and a third interactive run); the rest stay in cases.tsv as `#full` rows (FULL=1 / IMOD_RS_FULL_CASES=1, fixtures/README.md).
 
 mod common;
 
@@ -173,6 +175,6 @@ fn every_case_matches_native_golden() {
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
-    assert!(count >= 18, "only {count} cases read");
+    assert!(count >= 15, "only {count} cases read");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

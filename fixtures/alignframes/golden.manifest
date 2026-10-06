@@ -1,0 +1,187 @@
+# imod-rs native golden manifest for fixtures/alignframes; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh alignframes; do not edit by hand.
+sha256 9b5984f55c8e0a1f021bb38a43f0c57c9db1a9a426f1e5b6035d5d88817345b0 19456 golden/af_byte_gain.out.out.mrc
+text 2 golden/af_byte_gain.rc
+0
+
+text 390 golden/af_byte_gain.stdout
+Selected the default binning of 2 for this image size
+Applying default total scaling of 30 because byte values are being gain-normalized
+Number of sets of frames to align = 1                           [ALF1]
+File 1 (movb.mrc): 8 frames
+  Wgtd resid mean = 0.011, mean max = 0.02, max max = 0.02  l-o err = 0.018
+  Max unweighted resid mean = 0.05, max = 0.06   Dist = 8.26, smoothed = 7.81
+
+sha256 80ca81bfc8eb0d80a2bdec3c1cd3218fd8c321e866267ec8d16e00b0bb2640a9 33792 golden/af_combine.out.out.mrc
+text 2 golden/af_combine.rc
+0
+
+sha256 de9ede8e49cb989e85e23a13ef072da134e8de19a7c597451c86218a1de319ac 524 golden/af_combine.stdout
+sha256 ff2b3b4696197bb26d5d5ac929431b1cf73afb356c65ad6dbb61289238049c02 50176 golden/af_combine_sum.out.out.mrc
+text 2 golden/af_combine_sum.rc
+0
+
+sha256 962c2ea8c57fa47e59d00283f8d236ff15ed512537ae77ae62b561ac19b32660 546 golden/af_combine_sum.stdout
+text 2 golden/af_err_combine_frames.rc
+1
+
+text 80 golden/af_err_combine_frames.stdout
+ERROR: alignframes - You cannot enter -frames when combining single-frame files
+
+text 2 golden/af_err_dose_lines.rc
+1
+
+text 145 golden/af_err_dose_lines.stdout
+Assuming that dose does NOT accumulate between frame sets
+ERROR: alignframes - The dose file has fewer lines (1) than frame sets to be aligned 2
+
+text 2 golden/af_err_mdoc_stack.rc
+1
+
+text 84 golden/af_err_mdoc_stack.stdout
+ERROR: alignframes - You cannot enter -mdoc with -stack; the mdoc would not be used
+
+text 2 golden/af_err_missing.rc
+1
+
+text 57 golden/af_err_missing.stdout
+ERROR: alignframes - Opening input image file nofile.mrc
+
+text 2 golden/af_err_tilt_count.rc
+1
+
+text 94 golden/af_err_tilt_count.stdout
+ERROR: alignframes - There are fewer tilt angles in the file (3) than frame files or sets (4)
+
+sha256 637f1d6d99664605ad0016776c2a459016c5686bc746af19d9092ff827aca41d 9216 golden/af_fei_rfsum.out.out.mrc
+text 2 golden/af_fei_rfsum.rc
+0
+
+text 400 golden/af_fei_rfsum.stdout
+Assuming frames are from Thermo/FEI software: setting sum rotation/flip to 6 to flip around X
+Selected the default binning of 2 for this image size
+Number of sets of frames to align = 1                           [ALF1]
+File 1 (fei.mrc): 6 frames
+  Wgtd resid mean = 0.056, mean max = 0.09, max max = 0.09  l-o err = 0.102
+  Max unweighted resid mean = 0.11, max = 0.11   Dist = 6.70, smoothed = 6.67
+
+sha256 1210b405ae8b02c5584cc0de2449bfa975fd72eb73d956ac1226b9453533d856 25600 golden/af_list.out.out.mrc
+text 2 golden/af_list.rc
+0
+
+sha256 22ed821ae03aa80aa1d3858751b17bf73e70fa1c30cdaf927d3a0811dde72ede 694 golden/af_list.stdout
+sha256 c6021bf72816a947c189e027457ce71db38da1a74dbc0cf258bc0a853075774e 25612 golden/af_mdoc.out.out.mrc
+text 2 golden/af_mdoc.rc
+0
+
+sha256 8eaf7c25e3dbc49d1a82db098cdbbca270dd4f246b1e4778e52805199448f68e 704 golden/af_mdoc.stdout
+sha256 46b8837aa7cc3912335a4d4d5dc6843fff5513393ab34826f946711c6db11ef4 7180 golden/af_mdoc_adjust.out.out.mrc
+sha256 7c6b538ab87e54081104b962b1ddd951a9ed3402ba34b94d34714b18263cdc5b 854 golden/af_mdoc_adjust.out.out.mrc.mdoc
+text 2 golden/af_mdoc_adjust.rc
+0
+
+sha256 799851973f47545a62175b13b8ccacb3966226983b8029bc18b13494aa832e4c 778 golden/af_mdoc_adjust.stdout
+sha256 475a6b190d6b602b3ba8501ce0ec9dfd80b4aef56f6d29401e6e31a8289e2556 25612 golden/af_mdoc_bin2.out.out.mrc
+sha256 5c91f354657a90a8f9f600a354d9c61c281a0b449237838e7f9a88561cc37ae1 855 golden/af_mdoc_bin2.out.out.mrc.mdoc
+text 2 golden/af_mdoc_bin2.rc
+0
+
+sha256 a9d6340adcc705a9f22b685c68332ecbe96d8467d9f26e539a24bb809dae204f 832 golden/af_mdoc_bin2.stdout
+sha256 4c66aaab1c324c8eec6a230afbdf952b22e59c60441897cecb6b9a7bc02df314 17416 golden/af_mdoc_ddrop.out.out.mrc
+text 2 golden/af_mdoc_ddrop.rc
+0
+
+sha256 8a55261d77e4e1bf84876f4208420ca748c98ff03b859a878ec1f2fa53bb2be3 563 golden/af_mdoc_ddrop.stdout
+sha256 cabd2a34aa17c15c33bf09997d7b4f1377d11da139fd6e9a699002065ec5d7c8 25600 golden/af_mdoc_dfile4.out.out.mrc
+text 2 golden/af_mdoc_dfile4.rc
+0
+
+sha256 0704a5fe0cb5d41fd9dd9efc9d347c97697213f1955a9171ea44e7878c5c7203 725 golden/af_mdoc_dfile4.stdout
+sha256 faaec1cac62076b41aef066ff39e4baa89a180674f6618f1c834742da5656d97 25612 golden/af_mdoc_dtotal.out.out.mrc
+text 2 golden/af_mdoc_dtotal.rc
+0
+
+sha256 4c36d6499574bc4578c1d1213ba871afb6f753ea8abcc3daf058b811e9c9912a 758 golden/af_mdoc_dtotal.stdout
+sha256 9781d9d763b28e26f5f44f23440308807018a4e796a27a3c121b4ea90238f57c 25612 golden/af_mdoc_dtype4.out.out.mrc
+text 2 golden/af_mdoc_dtype4.rc
+0
+
+sha256 4c36d6499574bc4578c1d1213ba871afb6f753ea8abcc3daf058b811e9c9912a 758 golden/af_mdoc_dtype4.stdout
+sha256 56ad8be08cd783d648680499e432343c9fbbaf7c19494d59aaef3a993a044354 25612 golden/af_mdoc_fei.out.out.mrc
+text 2 golden/af_mdoc_fei.rc
+0
+
+sha256 8eaf7c25e3dbc49d1a82db098cdbbca270dd4f246b1e4778e52805199448f68e 704 golden/af_mdoc_fei.stdout
+sha256 63901ac40feab7246e54da3a95422e5ec9fa82e275fa06ade0e68b27946cd63b 25612 golden/af_mdoc_fei_axis.out.out.mrc
+text 2 golden/af_mdoc_fei_axis.rc
+0
+
+sha256 8eaf7c25e3dbc49d1a82db098cdbbca270dd4f246b1e4778e52805199448f68e 704 golden/af_mdoc_fei_axis.stdout
+sha256 0867ba8022b55b314c8ded196a76ed0655aa4de4acd79f68508f176a7c33e6df 25612 golden/af_mdoc_fs.out.out.mrc
+text 2 golden/af_mdoc_fs.rc
+0
+
+sha256 8eaf7c25e3dbc49d1a82db098cdbbca270dd4f246b1e4778e52805199448f68e 704 golden/af_mdoc_fs.stdout
+sha256 8f1c57aec41501cdeafccca1cd2fba24af84f871d31b8e536896a968c5635797 25612 golden/af_mdoc_ignore.out.out.mrc
+text 2 golden/af_mdoc_ignore.rc
+0
+
+sha256 3a9121cd14108cdd6a691652f46d62adf2211b6e9630d75ccacc55e597fa0b89 704 golden/af_mdoc_ignore.stdout
+sha256 4c66aaab1c324c8eec6a230afbdf952b22e59c60441897cecb6b9a7bc02df314 17416 golden/af_mdoc_mdrop.out.out.mrc
+text 2 golden/af_mdoc_mdrop.rc
+0
+
+sha256 90e1180af65d44ebc5a4a2aebcf3a8e0da708ccf12be7741e897f6c02d3896a6 563 golden/af_mdoc_mdrop.stdout
+sha256 55379772c85880004e7caf1a8fdf3365e41528effce924ae04c31810676c1a0b 25612 golden/af_mdoc_reorder.out.out.mrc
+sha256 b29773608f5abcc55f024b7028730800ca27476ead64677e591d90ea2bf8b42d 852 golden/af_mdoc_reorder.out.out.mrc.mdoc
+text 2 golden/af_mdoc_reorder.rc
+0
+
+sha256 cf66d53b9a6cba13c594f1f90041517b734318f1273b3453ef4e31d1945e0603 704 golden/af_mdoc_reorder.stdout
+sha256 7e20796da68b2982d43b8513111cd997b631d35b190414bbfcc83d82ee54ce72 25600 golden/af_stack.out.out.mrc
+text 2 golden/af_stack.rc
+0
+
+sha256 b8fce8d76da8c04fb687d19f8f3db5f51e2e33c7c9e3c179eef183d8145746de 753 golden/af_stack.stdout
+sha256 0e6943bfe043fed5c079729da981b6fd17a82a56e49c2f694070e5925a316308 25612 golden/af_tilt_axis.out.out.mrc
+text 2 golden/af_tilt_axis.rc
+0
+
+sha256 cf66d53b9a6cba13c594f1f90041517b734318f1273b3453ef4e31d1945e0603 704 golden/af_tilt_axis.stdout
+sha256 49ce04030750234bfd8f577855ee0807198bc37f68f6bc1fe530bcc3e58c5797 25612 golden/af_tilt_dtype1.out.out.mrc
+text 2 golden/af_tilt_dtype1.rc
+0
+
+sha256 4c36d6499574bc4578c1d1213ba871afb6f753ea8abcc3daf058b811e9c9912a 758 golden/af_tilt_dtype1.stdout
+sha256 49ce04030750234bfd8f577855ee0807198bc37f68f6bc1fe530bcc3e58c5797 25612 golden/af_tilt_dtype2.out.out.mrc
+text 2 golden/af_tilt_dtype2.rc
+0
+
+sha256 8eaf7c25e3dbc49d1a82db098cdbbca270dd4f246b1e4778e52805199448f68e 704 golden/af_tilt_dtype2.stdout
+sha256 49ce04030750234bfd8f577855ee0807198bc37f68f6bc1fe530bcc3e58c5797 25612 golden/af_tilt_dtype3.out.out.mrc
+text 2 golden/af_tilt_dtype3.rc
+0
+
+sha256 4c36d6499574bc4578c1d1213ba871afb6f753ea8abcc3daf058b811e9c9912a 758 golden/af_tilt_dtype3.stdout
+sha256 344a38f8571736f9c4751ddd9e30472d16539013ae40cb2cf2ddb6e4d1a87f7a 9216 golden/af_titles.out.out.mrc
+text 2 golden/af_titles.rc
+0
+
+text 306 golden/af_titles.stdout
+Selected the default binning of 2 for this image size
+Number of sets of frames to align = 1                           [ALF1]
+File 1 (tst.mrc): 6 frames
+  Wgtd resid mean = 0.028, mean max = 0.06, max max = 0.06  l-o err = 0.075
+  Max unweighted resid mean = 0.22, max = 0.22   Dist = 5.81, smoothed = 5.50
+
+sha256 1a8ecd3d3224499ec1f1c608329f7e5031a6e7f4ea2b454b1dc0b5e5368c5bf1 9216 golden/af_titles_total.out.out.mrc
+text 2 golden/af_titles_total.rc
+0
+
+text 306 golden/af_titles_total.stdout
+Selected the default binning of 2 for this image size
+Number of sets of frames to align = 1                           [ALF1]
+File 1 (tst.mrc): 6 frames
+  Wgtd resid mean = 0.028, mean max = 0.06, max max = 0.06  l-o err = 0.075
+  Max unweighted resid mean = 0.22, max = 0.22   Dist = 5.81, smoothed = 5.50
+

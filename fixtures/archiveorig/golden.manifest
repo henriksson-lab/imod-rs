@@ -1,0 +1,202 @@
+# imod-rs native golden manifest for fixtures/archiveorig; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh archiveorig; do not edit by hand.
+text 34 golden/archive.files
+st.mrc
+st_orig.mrc
+st_xray.mrc.gz
+
+text 201 golden/archive.out
+Getting difference image ...
+Compressing st_xray.mrc ...
+Compressed difference file  st_xray.mrc.gz  has size 0.01 MB
+It is now safe to delete st_orig.mrc
+To restore it, enter:   archiveorig -r st.mrc
+
+text 2 golden/archive.rc
+0
+
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/archive/st_xray.mrc.gz
+text 50 golden/archive_backup.files
+st.mrc
+st_orig.mrc
+st_xray.mrc.gz
+st_xray.mrc.gz~
+
+text 201 golden/archive_backup.out
+Getting difference image ...
+Compressing st_xray.mrc ...
+Compressed difference file  st_xray.mrc.gz  has size 0.01 MB
+It is now safe to delete st_orig.mrc
+To restore it, enter:   archiveorig -r st.mrc
+
+text 2 golden/archive_backup.rc
+0
+
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/archive_backup/st_xray.mrc.gz
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/archive_backup/st_xray.mrc.gz~
+text 22 golden/archive_delete.files
+st.mrc
+st_xray.mrc.gz
+
+text 189 golden/archive_delete.out
+Getting difference image ...
+Compressing st_xray.mrc ...
+Compressed difference file  st_xray.mrc.gz  has size 0.01 MB
+Deleting st_orig.mrc ...
+To restore it, enter:   archiveorig -r st.mrc
+
+text 2 golden/archive_delete.rc
+0
+
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/archive_delete/st_xray.mrc.gz
+text 34 golden/archive_xray_exists.files
+st.mrc
+st_orig.mrc
+st_xray.mrc.gz
+
+text 201 golden/archive_xray_exists.out
+Getting difference image ...
+Compressing st_xray.mrc ...
+Compressed difference file  st_xray.mrc.gz  has size 0.01 MB
+It is now safe to delete st_orig.mrc
+To restore it, enter:   archiveorig -r st.mrc
+
+text 2 golden/archive_xray_exists.rc
+0
+
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/archive_xray_exists/st_xray.mrc.gz
+text 0 golden/help.files
+
+text 371 golden/help.out
+Usage: archiveorig [Options] input_file
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -r
+    Restore setname_orig.ext from setname.st and setname_xray.ext.gz
+ -d
+    Delete setname_orig.ext after computing difference
+ -n   Int
+    Number of levels of archives to restore
+ -PID
+    Print process ID
+ -h
+    Print usage and exit
+
+text 2 golden/help.rc
+0
+
+text 7 golden/no_orig.files
+st.mrc
+
+text 53 golden/no_orig.out
+ERROR: archiveorig - File st_orig.mrc does not exist
+
+text 2 golden/no_orig.rc
+1
+
+text 0 golden/noargs.files
+
+text 371 golden/noargs.out
+Usage: archiveorig [Options] input_file
+Options can be abbreviated, current short name abbreviations are in parentheses
+Options:
+ -r
+    Restore setname_orig.ext from setname.st and setname_xray.ext.gz
+ -d
+    Delete setname_orig.ext after computing difference
+ -n   Int
+    Number of levels of archives to restore
+ -PID
+    Print process ID
+ -h
+    Print usage and exit
+
+text 2 golden/noargs.rc
+0
+
+text 0 golden/nonexist.files
+
+text 54 golden/nonexist.out
+ERROR: archiveorig - File nonexist.mrc does not exist
+
+text 2 golden/nonexist.rc
+1
+
+text 38 golden/restore.files
+st.mrc
+st_orig.mrc
+st_xray.mrc.gz.old
+
+text 64 golden/restore.out
+Restoring st_orig.mrc ...
+Uncompressing st_xray.mrc.gz ...
+DONE
+
+text 2 golden/restore.rc
+0
+
+sha256 4f4ac16789d7733c895eb4caafd5bf218dcb3cac738258c2a61a25b95ff50105 62464 golden/restore/st_orig.mrc
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/restore/st_xray.mrc.gz.old
+text 58 golden/restore_backup.files
+st.mrc
+st_orig.mrc
+st_xray.mrc.gz.old
+st_xray.mrc.gz.old~
+
+text 64 golden/restore_backup.out
+Restoring st_orig.mrc ...
+Uncompressing st_xray.mrc.gz ...
+DONE
+
+text 2 golden/restore_backup.rc
+0
+
+sha256 4f4ac16789d7733c895eb4caafd5bf218dcb3cac738258c2a61a25b95ff50105 62464 golden/restore_backup/st_orig.mrc
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/restore_backup/st_xray.mrc.gz.old
+sha256 165ebded8b731a9634624d4ebf433f9f7172fb379016e557b4e7c19cc8b3d6c9 62464 golden/restore_backup/st_xray.mrc.gz.old~
+text 22 golden/restore_bad_gz.files
+st.mrc
+st_xray.mrc.gz
+
+text 109 golden/restore_bad_gz.out
+Restoring st_orig.mrc ...
+Uncompressing st_xray.mrc.gz ...
+ERROR: archiveorig - Uncompressing st_xray.mrc.gz
+
+text 2 golden/restore_bad_gz.rc
+1
+
+text 7 golden/restore_no_gz.files
+st.mrc
+
+text 56 golden/restore_no_gz.out
+ERROR: archiveorig - File st_xray.mrc.gz does not exist
+
+text 2 golden/restore_no_gz.rc
+1
+
+text 38 golden/restore_one_level.files
+st.mrc
+st_orig.mrc
+st_xray.mrc.gz.old
+
+text 64 golden/restore_one_level.out
+Restoring st_orig.mrc ...
+Uncompressing st_xray.mrc.gz ...
+DONE
+
+text 2 golden/restore_one_level.rc
+0
+
+sha256 4f4ac16789d7733c895eb4caafd5bf218dcb3cac738258c2a61a25b95ff50105 62464 golden/restore_one_level/st_orig.mrc
+sha256 dcdc997945654b43388d7c7186656543c19a7d51f2fce5a647bcd32342744fa6 62474 golden/restore_one_level/st_xray.mrc.gz.old
+text 22 golden/restore_too_many_levels.files
+st.mrc
+st_xray.mrc.gz
+
+text 80 golden/restore_too_many_levels.out
+ERROR: archiveorig - There are not enough xray.mrc.gz files to restore 2 levels
+
+text 2 golden/restore_too_many_levels.rc
+1
+

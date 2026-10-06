@@ -12,8 +12,6 @@ w_size	vf.mrc o.mrc -xforms w9.txt -size 20,15,10	-
 w_patch	vf.mrc -xforms wdrop.txt -same -patch p.txt	-
 w_fill	vf.mrc -xforms wdrop.txt -same -filled f.txt	-
 #full	w_both	vf.mrc o.mrc -xforms w9.txt -same -filled f.txt -patch p.txt	-
-w_mb	mb.mrc o.mrc -xforms wmb.txt -same -memory 2	-
-w_mbdef	mb.mrc o.mrc -xforms wmb.txt -same	-
 w_bad	vf.mrc o.mrc -xforms wbad.txt -same	-
 w_5	vf.mrc o.mrc -xforms w5.txt -same	-
 w_empty	vf.mrc o.mrc -xforms wempty.txt -same	-

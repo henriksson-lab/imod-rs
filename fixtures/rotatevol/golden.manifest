@@ -1,0 +1,37 @@
+# imod-rs native golden manifest for fixtures/rotatevol; see fixtures/README.md.
+# Regenerate with fixtures/regen-golden.sh rotatevol; do not edit by hand.
+sha256 353c8ebe0fa9fa57c1d91f60413a31c7a371547b2500b07f5dd997db99293823 13312 golden/rv_angles.out.o.mrc
+text 2 golden/rv_angles.rc
+0
+
+sha256 225d4961d9f69c0dbab719ae19e403d84a72084535a059d033e288b7fc8015ff 1130 golden/rv_angles.stdout
+sha256 15cb94fdb10aa2c12a2f82cdb0564bf68aa778e8c187d10dfb83cfd4197c43b6 13312 golden/rv_back.out.o.mrc
+text 2 golden/rv_back.rc
+0
+
+sha256 225d4961d9f69c0dbab719ae19e403d84a72084535a059d033e288b7fc8015ff 1130 golden/rv_back.stdout
+text 2 golden/rv_badsize.rc
+1
+
+sha256 7414d31e5bfa26fbe4d122f9b5030be0997b22cd0062642286caca250fdcbf95 1043 golden/rv_badsize.stdout
+sha256 731df38035a18ec1d0b338ad5fc8701b34f3513654fb90c5b90b1c502989fca0 9024 golden/rv_interactive.out.o.mrc
+text 2 golden/rv_interactive.rc
+0
+
+sha256 9d5c97fb462b4ccb9e75935eaa9c93baa070289ff68d92c80fc881465a2476a8 1619 golden/rv_interactive.stdout
+sha256 b5ed2d2088be86ea857781a6824aac5cd2658e1fd5975eb7527ce5ac893b4155 13312 golden/rv_linear.out.o.mrc
+text 2 golden/rv_linear.rc
+0
+
+sha256 225d4961d9f69c0dbab719ae19e403d84a72084535a059d033e288b7fc8015ff 1130 golden/rv_linear.stdout
+text 2 golden/rv_query.rc
+0
+
+text 25 golden/rv_query.stdout
+      35      35      25
+
+sha256 a60853804d9cf49d5e73c2055d857458b318bd104945f792f9e96ee8550eb43c 5704 golden/rv_short90.out.o.mrc
+text 2 golden/rv_short90.rc
+0
+
+sha256 7eb1e86a8c0583bee3283f03f00aea01a409e2b9ea6e8ad514757c5a8ae8ed75 1130 golden/rv_short90.stdout
