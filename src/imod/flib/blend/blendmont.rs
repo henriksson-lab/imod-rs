@@ -1854,12 +1854,7 @@ pub fn blendmont() {
                 }
                 let _ = crate::imod::commands::run_in_process(clip, argv, None, false);
             } else {
-                use std::os::unix::process::CommandExt;
-                let _ = std::process::Command::new("/bin/sh")
-                    .arg0("sh")
-                    .arg("-c")
-                    .arg(line)
-                    .status();
+                let _ = crate::imod::libcfshr::b3dutil::shell_command(&line).status();
             }
             exist = std::path::Path::new(other_grad_file.trim_end_matches(' ')).exists();
             if !exist {

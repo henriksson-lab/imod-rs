@@ -16,6 +16,7 @@ fn imodkillgroup_matches_native_goldens() {
 
 /// Kills a process group, and a process tree with `-t`, that the test
 /// started; every process is gone afterwards and the status is 0.
+#[cfg(unix)]
 #[test]
 fn kills_a_group_and_a_tree() {
     use std::os::unix::process::CommandExt as _;

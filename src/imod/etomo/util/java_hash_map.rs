@@ -589,7 +589,7 @@ impl JavaHashCode for EnvironmentVariable {
 /// drops an entry whose only `=` is its first byte, which Java keeps with an empty
 /// name; no shell produces one.
 pub fn java_lang_system_getenv() -> Vec<(String, String)> {
-    use std::os::unix::ffi::OsStrExt;
+    use crate::imod::libcfshr::b3dutil::OsStrExt;
     process_environment_order(
         std::env::vars_os()
             .map(|(key, value)| (key.as_bytes().to_vec(), value.as_bytes().to_vec()))

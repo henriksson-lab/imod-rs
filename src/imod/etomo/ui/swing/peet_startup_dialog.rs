@@ -399,8 +399,7 @@ impl PeetStartupDialog {
 /// `java.io.File.canRead()`.
 fn can_read(file: &std::path::Path) -> bool {
     std::fs::metadata(file).is_ok_and(|metadata| {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o444 != 0
+        crate::imod::libcfshr::b3dutil::py_st_mode(&metadata, file) & 0o444 != 0
     }) && (std::fs::read_dir(file).is_ok() || std::fs::File::open(file).is_ok())
 }
 

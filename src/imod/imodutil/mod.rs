@@ -10,6 +10,9 @@ pub mod imodjoin;
 pub mod imodmesh;
 pub mod imodmop;
 pub mod imodtrans;
+// Windows-only in the source (`<windows.h>`, ATL).
+#[cfg(windows)]
+pub mod imodwincpu;
 pub mod nogputxc;
 pub mod patch2imod;
 pub mod pickbestseed;

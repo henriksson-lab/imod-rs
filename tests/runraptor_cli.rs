@@ -31,7 +31,13 @@ fn install(root: &Path) -> PathBuf {
     let bin = root.join("imod/bin");
     std::fs::create_dir_all(&bin).unwrap();
     for command in ["runraptor", "xfmodel", "header"] {
+        #[cfg(unix)]
         let _ = std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_imod"), bin.join(command));
+        #[cfg(not(unix))]
+        let _ = std::fs::hard_link(
+            env!("CARGO_BIN_EXE_imod"),
+            bin.join(format!("{command}{}", std::env::consts::EXE_SUFFIX)),
+        );
     }
     root.join("imod")
 }

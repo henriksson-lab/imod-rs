@@ -183,9 +183,10 @@ pub fn splitcombine(arguments: &[OsString]) -> i32 {
 
     if !sumdir.is_empty() {
         // `os.access(sumdir, os.W_OK)`: the POSIX `access` call itself
-        let writable = std::ffi::CString::new(sumdir.as_bytes())
-            .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-            .unwrap_or(false);
+        let writable = crate::imod::libcfshr::b3dutil::os_access(
+            &sumdir,
+            crate::imod::libcfshr::b3dutil::W_OK,
+        );
         if !Path::new(&sumdir).is_dir() || !writable {
             exit_error(&format!("Unable to write sum*.rec to directory {sumdir}"));
         }

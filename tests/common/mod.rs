@@ -48,8 +48,15 @@ pub fn imod_link(command: &str) -> PathBuf {
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => panic!("create {}: {error}", directory.display()),
     }
-    let link = directory.join(command);
-    match std::os::unix::fs::symlink(&binary, &link) {
+    let link = directory.join(format!("{command}{}", std::env::consts::EXE_SUFFIX));
+    // Windows: a hard link (or, across volumes, a copy) of `imod.exe` named
+    // `<command>.exe`; symbolic links there need a privilege.
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(&binary, &link);
+    #[cfg(not(unix))]
+    let made =
+        std::fs::hard_link(&binary, &link).or_else(|_| std::fs::copy(&binary, &link).map(|_| ()));
+    match made {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
         Err(error) => panic!("link {}: {error}", link.display()),

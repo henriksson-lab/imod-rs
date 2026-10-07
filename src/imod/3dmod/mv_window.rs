@@ -1384,19 +1384,42 @@ impl ImodvNativeGl {
         // `get_proc_address` does not serve, so it is opened by name.  The
         // fixed-function sphere and polygon tessellation of `mv_ogl.cpp` have
         // no other implementation, so a missing entry point is an error.
+        // Each platform's GLU: `libGLU.so.1`, the OpenGL framework on macOS
+        // (which carries GLU), and `glu32.dll` on Windows.
+        #[cfg(windows)]
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn LoadLibraryA(name: *const std::ffi::c_char) -> *mut std::ffi::c_void;
+            fn GetProcAddress(
+                module: *mut std::ffi::c_void,
+                name: *const std::ffi::c_char,
+            ) -> *mut std::ffi::c_void;
+        }
+        #[cfg(target_os = "macos")]
+        let glu_library = c"/System/Library/Frameworks/OpenGL.framework/OpenGL";
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let glu_library = c"libGLU.so.1";
+        #[cfg(windows)]
+        let glu_library = c"glu32.dll";
+        #[cfg(unix)]
         let glu_handle =
-            unsafe { libc::dlopen(c"libGLU.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+            unsafe { libc::dlopen(glu_library.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+        #[cfg(windows)]
+        let glu_handle = unsafe { LoadLibraryA(glu_library.as_ptr()) };
         if glu_handle.is_null() {
-            return Err(
-                "3dmodv: libGLU.so.1 could not be opened, and gluSphere and the polygon \
-                 tessellator in mv_ogl.cpp require it"
-                    .to_string(),
-            );
+            return Err(format!(
+                "3dmodv: {} could not be opened, and gluSphere and the polygon \
+                 tessellator in mv_ogl.cpp require it",
+                glu_library.to_string_lossy()
+            ));
         }
         macro_rules! glu_entry {
             ($name:literal, $signature:ty) => {{
                 let symbol = std::ffi::CString::new($name).expect("literal entry-point name");
+                #[cfg(unix)]
                 let address = unsafe { libc::dlsym(glu_handle, symbol.as_ptr()) };
+                #[cfg(windows)]
+                let address = unsafe { GetProcAddress(glu_handle, symbol.as_ptr()) };
                 if address.is_null() {
                     return Err(format!(
                         "3dmodv: libGLU does not provide {}, which the fixed-function drawing \

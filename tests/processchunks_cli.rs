@@ -8,6 +8,9 @@
 //! from the native binary
 //! (`/tmp/imod-reference-build/qttools/processchunks/processchunks`) run
 //! against the same stubs.
+//!
+//! The stubs are shell scripts, so the suite is Unix only.
+#![cfg(unix)]
 
 mod common;
 

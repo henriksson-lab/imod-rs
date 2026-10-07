@@ -104,8 +104,10 @@ pub fn pip_parse_entries(num_opt_arg: &mut i32, num_non_opt_arg: &mut i32) -> i3
             // `call getarg(i, string)` into `character*(bufferSize)`, then
             // `PipNextArg(string)` which trims the blank padding back off in
             // `pipf2cstr`; both truncation and the trim are reproduced here.
-            let mut bytes =
-                std::os::unix::ffi::OsStrExt::as_bytes(arguments[i as usize].as_os_str()).to_vec();
+            let mut bytes = crate::imod::libcfshr::b3dutil::OsStrExt::as_bytes(
+                arguments[i as usize].as_os_str(),
+            )
+            .to_vec();
             bytes.truncate(BUFFER_SIZE);
             let mut len_trim = bytes.len();
             while len_trim > 0 && bytes[len_trim - 1] == b' ' {

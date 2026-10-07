@@ -1002,7 +1002,7 @@ impl SlicerFuncs {
             new_screen_zoom: 0.,
             user_screen_change: 0,
             dev_pix_varies: false,
-            is_windows: false,
+            is_windows: cfg!(windows),
             left_mouse_down: false,
             ignore_cur_pt_chg: false,
             zslast: 1.,

@@ -186,7 +186,31 @@ pub fn cvttss2si(x: f32) -> i32 {
     }
     #[cfg(not(target_arch = "x86_64"))]
     {
-        x as i32
+        if x >= -2147483648.0 && x < 2147483648.0 {
+            x as i32
+        } else {
+            i32::MIN
+        }
+    }
+}
+
+/// x86 `CVTTSD2SI`, the `real*8`/`double` form of [`cvttss2si`]: truncation
+/// toward zero, and `i32::MIN` for NaN or a value outside `int` range.  Off
+/// x86_64 the scalar arm computes the same answer, so every target gives the
+/// Linux x86_64 result (`PORTABILITY.md`).
+pub fn cvttsd2si(x: f64) -> i32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY: SSE2 is part of the x86-64 baseline.
+        unsafe { core::arch::x86_64::_mm_cvttsd_si32(core::arch::x86_64::_mm_set_sd(x)) }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        if x > -2147483649.0 && x < 2147483648.0 {
+            x as i32
+        } else {
+            i32::MIN
+        }
     }
 }
 

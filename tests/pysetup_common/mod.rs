@@ -197,8 +197,11 @@ pub fn run_cases(script: &str) -> Vec<String> {
                 format!("#!/bin/sh\ncat '{}'\n", printed.display()),
             )
             .unwrap();
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt as _;
+                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
             command.env(
                 "PATH",
                 format!(

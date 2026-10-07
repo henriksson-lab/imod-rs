@@ -11,9 +11,12 @@
 //! `imodpy::run_cmd`, which runs them in process or as a child of our own
 //! binary.  `getmrcsize` is the direct `imodpy::get_mrc_size`.  `uname -a`,
 //! `ls -lrt` and `ls -ld .` are system tools and stay processes (through
-//! `run_cmd`'s `sh -c`).  The Windows-only `cygcheck` runs, `dir /OD` and
-//! the `sys.getwindowsversion()` report are not translated (the
-//! `win32`/`cygwin` platform tests are false here).
+//! `run_cmd`'s `sh -c`).  On Windows the script's `win32` arms are
+//! translated: `cygcheck -h` decides whether Cygwin is present; without it
+//! the uname output is the `sys.getwindowsversion()` report (read with
+//! `RtlGetVersion`, the true version Python reports) and the listing is
+//! `dir /OD`; with it, `cygcheck -s -v -r` is added.  The `cygwin` arms
+//! (Cygwin Python) are not translated.
 //!
 //! **The tar file.**  Python's `tarfile.open(outFile, 'w|gz')` is written in
 //! process, as the Python 3.12 `tarfile` module writes it: the default PAX
@@ -52,7 +55,8 @@ use super::pip::{
 use super::pysed::{PysedSrc, pysed};
 use std::ffi::{CString, OsString};
 use std::io::Write as _;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 const PROGNAME: &str = "tomosnapshot";
@@ -161,9 +165,9 @@ fn copystat(from_file: &str, to_file: &str) -> std::io::Result<()> {
         .write(true)
         .open(to_file)?
         .set_times(times)?;
-    std::fs::set_permissions(
+    crate::imod::libcfshr::b3dutil::py_chmod(
         to_file,
-        std::fs::Permissions::from_mode(meta.mode() & 0o7777),
+        crate::imod::libcfshr::b3dutil::py_st_mode(&meta, Path::new(from_file)) & 0o7777,
     )
 }
 
@@ -234,7 +238,7 @@ impl Snapshot {
         if self.tempdir != "." || !base.ends_with(".log") {
             self.tarlist.push(base);
         }
-        if std::fs::set_permissions(&copied_file, std::fs::Permissions::from_mode(0o644)).is_err() {
+        if crate::imod::libcfshr::b3dutil::py_chmod(&copied_file, 0o644).is_err() {
             warning(&format!("Failed to change mode of {copied_file}"));
         }
     }
@@ -331,7 +335,7 @@ fn mkdtemp(prefix: &str, dir: &str) -> std::io::Result<String> {
             name.push(characters[(seed % characters.len() as u64) as usize] as char);
         }
         let file = join(dir, &name);
-        match std::fs::DirBuilder::new().mode(0o700).create(&file) {
+        match crate::imod::libcfshr::b3dutil::py_mkdir(&file, 0o700) {
             Ok(()) => return Ok(super::imodpy::os_path_abspath(&file)),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(error) => return Err(error),
@@ -461,8 +465,13 @@ impl TarStream {
             // Not reached: only regular files and the com directory are added
             return Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
         };
-        let uname = user_name(meta.uid());
-        let gname = group_name(meta.gid());
+        // `st_uid`/`st_gid` are 0 on Windows, as CPython reports them.
+        #[cfg(unix)]
+        let (st_uid, st_gid) = (meta.uid(), meta.gid());
+        #[cfg(not(unix))]
+        let (st_uid, st_gid) = (0_u32, 0_u32);
+        let uname = user_name(st_uid);
+        let gname = group_name(st_gid);
 
         // `create_pax_header`: a string field that is too long or not ASCII,
         // and the float mtime, go into a pax header
@@ -476,12 +485,12 @@ impl TarStream {
                 records.push((hname.to_owned(), value.to_owned()));
             }
         }
-        let mut uid = meta.uid() as u64;
-        let mut gid = meta.gid() as u64;
+        let mut uid = st_uid as u64;
+        let mut gid = st_gid as u64;
         let mut size_field = size;
         for (field, value, digits, hname) in [
-            (&mut uid, meta.uid() as u64, 8u32, "uid"),
-            (&mut gid, meta.gid() as u64, 8, "gid"),
+            (&mut uid, st_uid as u64, 8u32, "uid"),
+            (&mut gid, st_gid as u64, 8, "gid"),
             (&mut size_field, size, 12, "size"),
         ] {
             if value >= 8u64.pow(digits - 1) {
@@ -490,7 +499,7 @@ impl TarStream {
             }
         }
         // `st_mtime` is `sec + nsec * 1e-9`, a float, so it is always recorded
-        let mtime_float = meta.mtime() as f64 + meta.mtime_nsec() as f64 * 1e-9;
+        let mtime_float = crate::imod::libcfshr::b3dutil::py_st_mtime(&meta);
         let mut mtime = py_round(mtime_float) as i64;
         if !(0..8i64.pow(11)).contains(&mtime) {
             mtime = 0;
@@ -528,7 +537,7 @@ impl TarStream {
         self.payload(&text)?;
         let header = Self::header_block(
             &arcname,
-            meta.mode(),
+            crate::imod::libcfshr::b3dutil::py_st_mode(&meta, Path::new(name)),
             uid,
             gid,
             size_field,
@@ -571,7 +580,15 @@ impl TarStream {
     }
 }
 
+/// `pwd.getpwuid(uid)[0]`, or '' when there is none.  Windows Python has no
+/// `pwd` module, so `tarfile` leaves the name empty there.
+#[cfg(not(unix))]
+fn user_name(_uid: u32) -> String {
+    String::new()
+}
+
 /// `pwd.getpwuid(uid)[0]`, or '' when there is none
+#[cfg(unix)]
 fn user_name(uid: u32) -> String {
     // SAFETY: getpwuid returns a pointer into static storage or null; the
     // name is copied out at once.
@@ -586,7 +603,14 @@ fn user_name(uid: u32) -> String {
     }
 }
 
+/// `grp.getgrgid(gid)[0]`; no `grp` module on Windows, as for `user_name`.
+#[cfg(not(unix))]
+fn group_name(_gid: u32) -> String {
+    String::new()
+}
+
 /// `grp.getgrgid(gid)[0]`, or '' when there is none
+#[cfg(unix)]
 fn group_name(gid: u32) -> String {
     // SAFETY: as for `user_name`
     unsafe {
@@ -882,15 +906,15 @@ pub fn tomosnapshot(arguments: &[OsString]) -> i32 {
 
     snap.do_thumbnails = pip_get_boolean("Thumbnails", 0).unwrap_or(0) != 0;
     let writeable_dir = pip_get_string("WriteableDirectory", ".").unwrap_or_default();
-    let _skip_cygcheck = pip_get_boolean("SkipCygcheck", 0).unwrap_or(0);
+    let skip_cygcheck = pip_get_boolean("SkipCygcheck", 0).unwrap_or(0);
 
     if !Path::new(&writeable_dir).is_dir() {
         exit_error(&format!("{writeable_dir} is not a directory"));
     }
-    let writable = CString::new(writeable_dir.as_str())
-        // SAFETY: a NUL-terminated path for access(2)
-        .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-        .unwrap_or(false);
+    let writable = crate::imod::libcfshr::b3dutil::os_access(
+        &writeable_dir,
+        crate::imod::libcfshr::b3dutil::W_OK,
+    );
     if !writable {
         exit_error(&format!(
             "You do not have permission to write in the directory {writeable_dir}"
@@ -1043,7 +1067,18 @@ pub fn tomosnapshot(arguments: &[OsString]) -> i32 {
     // Find out if there is no cygwin: i.e., it is windows python and cygcheck or uname fails
     // 9/16/21: Reinhard Rechel had a machine where uname ran, so do cygcheck first
     let mut uname_out: Vec<String> = Vec::new();
-    if let Ok(lines) = run_cmd("uname -a", None, None, Some("stdout"), &[]) {
+    let windows = cfg!(windows);
+    let mut win_only = false;
+    let cygcheck = if windows {
+        run_cmd("cygcheck -h", None, None, Some("stdout"), &[]).map(|_| ())
+    } else {
+        Ok(())
+    };
+    let uname = cygcheck.and_then(|()| run_cmd("uname -a", None, None, Some("stdout"), &[]));
+    if uname.is_err() {
+        win_only = windows;
+    }
+    if let Ok(lines) = uname {
         uname_out = lines.unwrap_or_default();
         // `unameOut[0]` of an empty output is an IndexError, caught by the
         // same `except Exception`
@@ -1054,6 +1089,47 @@ pub fn tomosnapshot(arguments: &[OsString]) -> i32 {
                 utrim.extend_from_slice(&usplit[2..]);
                 uname_out = vec![utrim.join(" ")];
             }
+        }
+    }
+
+    if win_only {
+        // `sys.getwindowsversion()`: major, minor, build, platform and
+        // service pack
+        #[cfg(windows)]
+        {
+            #[repr(C)]
+            struct OsVersionInfoExW {
+                size: u32,
+                major: u32,
+                minor: u32,
+                build: u32,
+                platform: u32,
+                csd_version: [u16; 128],
+                service_pack_major: u16,
+                service_pack_minor: u16,
+                suite_mask: u16,
+                product_type: u8,
+                reserved: u8,
+            }
+            #[link(name = "ntdll")]
+            unsafe extern "system" {
+                fn RtlGetVersion(info: *mut OsVersionInfoExW) -> i32;
+            }
+            // SAFETY: a correctly sized structure with its size set.
+            let mut info: OsVersionInfoExW = unsafe { std::mem::zeroed() };
+            info.size = std::mem::size_of::<OsVersionInfoExW>() as u32;
+            unsafe { RtlGetVersion(&mut info) };
+            let end = info.csd_version.iter().position(|&c| c == 0).unwrap_or(128);
+            uname_out = vec![super::imodpy::fmtstr(
+                "Windows version: {} - {} - {} - {} - {}",
+                &[
+                    info.major.to_string(),
+                    info.minor.to_string(),
+                    info.build.to_string(),
+                    info.platform.to_string(),
+                    String::from_utf16_lossy(&info.csd_version[..end]),
+                ],
+            )];
         }
     }
 
@@ -1135,7 +1211,15 @@ pub fn tomosnapshot(arguments: &[OsString]) -> i32 {
         snap.priv_sed.push(format!("|{nwuser_name}|s||XXXX|g"));
     }
 
-    // (The registry dump with `cygcheck -s -v -r` is for Cygwin and Windows only)
+    // Should we do the registry with -r?  It takes 3 seconds
+    if windows && !win_only && skip_cygcheck == 0 {
+        match run_cmd("cygcheck -s -v -r", None, None, Some("stdout"), &[]) {
+            Ok(lines) => uname_out.extend(lines.unwrap_or_default()),
+            Err(_) => warning(
+                "Failed to run cygcheck even though uname ran, indicating Cygwin was present",
+            ),
+        }
+    }
 
     // Type-specific additions to lists here:
     //
@@ -1320,20 +1404,28 @@ pub fn tomosnapshot(arguments: &[OsString]) -> i32 {
         }
     }
     // Not caught in the source: a failure is a traceback and status 1
-    let mut lslrt = match run_cmd("ls -lrt", None, None, None, &[]) {
-        Ok(lines) => lines.unwrap_or_default(),
-        Err(_) => exit_from_imod_error(PROGNAME),
+    let lslrt = if win_only {
+        match run_cmd("dir /OD", None, None, None, &[]) {
+            Ok(lines) => lines.unwrap_or_default(),
+            Err(_) => exit_from_imod_error(PROGNAME),
+        }
+    } else {
+        let mut lslrt = match run_cmd("ls -lrt", None, None, None, &[]) {
+            Ok(lines) => lines.unwrap_or_default(),
+            Err(_) => exit_from_imod_error(PROGNAME),
+        };
+        match run_cmd("ls -ld .", None, None, None, &[]) {
+            Ok(lines) => lslrt.extend(lines.unwrap_or_default()),
+            Err(_) => exit_from_imod_error(PROGNAME),
+        }
+        let lsplit: Vec<String> = lslrt
+            .last()
+            .map(|line| line.split_whitespace().map(str::to_owned).collect())
+            .unwrap_or_default();
+        let owner = lsplit.get(2).cloned().unwrap_or_default();
+        snap.priv_sed.push(format!("|{owner}|s||YYYY|g"));
+        lslrt
     };
-    match run_cmd("ls -ld .", None, None, None, &[]) {
-        Ok(lines) => lslrt.extend(lines.unwrap_or_default()),
-        Err(_) => exit_from_imod_error(PROGNAME),
-    }
-    let lsplit: Vec<String> = lslrt
-        .last()
-        .map(|line| line.split_whitespace().map(str::to_owned).collect())
-        .unwrap_or_default();
-    let owner = lsplit.get(2).cloned().unwrap_or_default();
-    snap.priv_sed.push(format!("|{owner}|s||YYYY|g"));
     if list_dir.is_some() {
         let _ = std::env::set_current_dir(&cur_dir);
     }
@@ -1373,10 +1465,10 @@ pub fn tomosnapshot(arguments: &[OsString]) -> i32 {
         }
     }
     if let Some(log_dir) = log_dir.filter(|dir| !dir.is_empty()) {
-        let readable = CString::new(log_dir.as_str())
-            // SAFETY: a NUL-terminated path for access(2)
-            .map(|path| unsafe { libc::access(path.as_ptr(), libc::R_OK) } == 0)
-            .unwrap_or(false);
+        let readable = crate::imod::libcfshr::b3dutil::os_access(
+            &log_dir,
+            crate::imod::libcfshr::b3dutil::R_OK,
+        );
         if Path::new(&log_dir).exists() && Path::new(&log_dir).is_dir() && readable {
             let errlogs = glob_glob(&join(&log_dir, "etomo_err*.log"));
             let numlogs = errlogs.len();
@@ -1390,7 +1482,7 @@ pub fn tomosnapshot(arguments: &[OsString]) -> i32 {
                         Ok(meta) => meta,
                         Err(_) => exit_error(&format!("Getting time of {}", errlogs[i])),
                     };
-                    mtimes.push(meta.mtime() as f64 + meta.mtime_nsec() as f64 * 1e-9);
+                    mtimes.push(crate::imod::libcfshr::b3dutil::py_st_mtime(&meta));
                 }
                 if numlogs > 1 {
                     for i in 0..numlogs - 1 {

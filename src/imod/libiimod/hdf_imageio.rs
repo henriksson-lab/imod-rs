@@ -904,7 +904,8 @@ unsafe fn cleanup_tmp(
     }
 }
 
-#[cfg(test)]
+// The HDF5 library is linked by its Linux name and only loaded on Linux.
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 

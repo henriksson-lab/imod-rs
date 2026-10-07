@@ -74,7 +74,10 @@ unsafe fn errno_location() -> *mut i32 {
 #[cfg(windows)]
 #[inline]
 unsafe fn errno_location() -> *mut i32 {
-    unsafe { libc::_errno() }
+    unsafe extern "C" {
+        fn _errno() -> *mut i32;
+    }
+    unsafe { _errno() }
 }
 
 unsafe extern "C" {

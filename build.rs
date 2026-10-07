@@ -6,7 +6,12 @@ fn main() {
     // `header` are dominated by start-up, where native IMOD's small
     // executables pay none of it.  Code generation is unchanged (still
     // position-independent code); only the final link differs.
-    println!("cargo:rustc-link-arg-bins=-no-pie");
+    // `-no-pie` is a GNU ld/gold/lld spelling: macOS ld calls it `-no_pie`
+    // (and deprecates it on arm64) and MSVC link.exe has neither, so it is
+    // passed on Linux only.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rustc-link-arg-bins=-no-pie");
+    }
     // Without these, cargo reruns this script — and so recompiles the whole
     // library with a new timestamp — whenever *any* file in the package
     // changes, fixtures included: recording a golden manifest

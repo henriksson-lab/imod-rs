@@ -2141,42 +2141,50 @@ pub fn ivw_get_image_padding(
     if blank_x || blank_y || blank_z { 1 } else { 0 }
 }
 
-/// `ivwGetFileStartPos` (`imodview.cpp:903`).
+/// `ivwGetFileStartPos` (`imodview.cpp:903`).  The body is `#ifdef __linux`
+/// in the source; elsewhere the function does nothing.
 pub fn ivw_get_file_start_pos(image: &ImodImageFile) {
-    S_SKIP_DUMPING.with(|s| s.set(std::env::var_os("IMOD_DUMP_FSCACHE").is_none()));
-    if S_SKIP_DUMPING.with(|s| s.get())
-        || image.fp.is_none()
-        || (image.file != IIFILE_MRC && image.file != IIFILE_RAW)
+    #[cfg(target_os = "linux")]
     {
-        return;
+        S_SKIP_DUMPING.with(|s| s.set(std::env::var_os("IMOD_DUMP_FSCACHE").is_none()));
+        if S_SKIP_DUMPING.with(|s| s.get())
+            || image.fp.is_none()
+            || (image.file != IIFILE_MRC && image.file != IIFILE_RAW)
+        {
+            return;
+        }
+        S_START_POS.with(|s| s.set(image.fp.clone().unwrap().tell()));
     }
-    S_START_POS.with(|s| s.set(image.fp.clone().unwrap().tell()));
 }
 
-/// `ivwDumpFileSysCache` (`imodview.cpp:914`).
+/// `ivwDumpFileSysCache` (`imodview.cpp:914`).  `#ifdef __linux` in the
+/// source, as for `ivwGetFileStartPos`.
 pub fn ivw_dump_file_sys_cache(image: &ImodImageFile) {
-    if S_SKIP_DUMPING.with(|s| s.get())
-        || image.fp.is_none()
-        || (image.file != IIFILE_MRC && image.file != IIFILE_RAW)
+    #[cfg(target_os = "linux")]
     {
-        return;
-    }
-    let filedes = image.fp.as_ref().unwrap().fileno();
-    let end = image.fp.clone().unwrap().tell();
-    let start = S_START_POS.with(|s| s.get());
-    if end <= start {
-        return;
-    }
-    let diff = end - start;
-    // POSIX owns the file-descriptor cache policy; all Rust image state above
-    // is borrowed and validated before crossing this OS boundary.
-    unsafe {
-        libc::posix_fadvise(
-            filedes,
-            start as libc::off_t,
-            diff as libc::off_t,
-            libc::POSIX_FADV_DONTNEED,
-        );
+        if S_SKIP_DUMPING.with(|s| s.get())
+            || image.fp.is_none()
+            || (image.file != IIFILE_MRC && image.file != IIFILE_RAW)
+        {
+            return;
+        }
+        let filedes = image.fp.as_ref().unwrap().fileno();
+        let end = image.fp.clone().unwrap().tell();
+        let start = S_START_POS.with(|s| s.get());
+        if end <= start {
+            return;
+        }
+        let diff = end - start;
+        // POSIX owns the file-descriptor cache policy; all Rust image state above
+        // is borrowed and validated before crossing this OS boundary.
+        unsafe {
+            libc::posix_fadvise(
+                filedes,
+                start as libc::off_t,
+                diff as libc::off_t,
+                libc::POSIX_FADV_DONTNEED,
+            );
+        }
     }
 }
 

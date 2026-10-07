@@ -343,9 +343,14 @@ mod tests {
     );
 
     fn load_reference() -> Option<DspsvFn> {
+        // The reference build is a Linux tree of `.so` files.
+        #[cfg(not(target_os = "linux"))]
+        return None;
+        #[cfg(target_os = "linux")]
         let dir = "/tmp/imod-reference-build/buildlib";
         // SAFETY: test-only foreign boundary; the libraries are the reference
         // build's own gfortran LAPACK/BLAS and stay loaded for the process.
+        #[cfg(target_os = "linux")]
         unsafe {
             // The reference libraries leave the gfortran runtime unresolved
             // (XERBLA's WRITE/STOP); the reference executables link it.

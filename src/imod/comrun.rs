@@ -1146,14 +1146,7 @@ impl Interp {
             "str" => Ok(Value::Str(arg_str(0))),
             "sys.exc_info" => Ok(Value::ExcInfo),
             "os.getpid" => Ok(Value::Int(std::process::id() as i64)),
-            "socket.gethostname" => {
-                let mut buffer = [0u8; 256];
-                unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
-                let end = buffer.iter().position(|&b| b == 0).unwrap_or(buffer.len());
-                Ok(Value::Str(
-                    String::from_utf8_lossy(&buffer[..end]).into_owned(),
-                ))
-            }
+            "socket.gethostname" => Ok(Value::Str(crate::imod::libcfshr::b3dutil::host_name())),
             "os.path.exists" => {
                 if args.is_empty() {
                     return missing(1);
@@ -1170,13 +1163,12 @@ impl Interp {
                 Ok(Value::None)
             }
             "os.mkdir" => {
-                use std::os::unix::fs::DirBuilderExt as _;
                 let mode = match args.get(1) {
                     Some(Value::Int(mode)) => *mode as u32,
                     _ => 0o777,
                 };
                 let path = arg_str(0);
-                match std::fs::DirBuilder::new().mode(mode).create(&path) {
+                match crate::imod::libcfshr::b3dutil::py_mkdir(&path, mode) {
                     Ok(()) => Ok(Value::None),
                     Err(error) => raise("OSError", os_error_text(&error, &path)),
                 }
@@ -1391,7 +1383,12 @@ impl Interp {
                     .take_while(|w| w.starts_with('-'))
                     .any(|w| w == "-g");
             if name == "sync" && words.len() == 1 {
-                unsafe { libc::sync() };
+                // `sync` flushes nothing on Windows that a later reader
+                // could miss; the source never runs there (`vmstocsh`).
+                #[cfg(unix)]
+                unsafe {
+                    libc::sync()
+                };
                 return (0, RunMode::InProcess);
             }
             if let Some(entry) = commands::find(name)
@@ -1409,19 +1406,19 @@ impl Interp {
                 }
                 // Another of our commands: our own binary, when this is it
                 if let Ok(exe) = std::env::current_exe()
-                    && exe.file_name().is_some_and(|base| base == "imod")
+                    && exe.file_name().is_some_and(|base| {
+                        base.to_string_lossy() == format!("imod{}", std::env::consts::EXE_SUFFIX)
+                    })
                 {
                     let mut process = std::process::Command::new(&exe);
-                    std::os::unix::process::CommandExt::arg0(&mut process, &argv[0]);
+                    crate::imod::libcfshr::b3dutil::command_arg0(&mut process, &argv[0]);
                     process.args(&argv[1..]);
                     return (self.spawn(process, input), RunMode::OwnBinary);
                 }
             }
         }
         // `Popen(cmd, shell=True)` runs `/bin/sh -c cmd` with `argv[0]` "sh"
-        let mut process = std::process::Command::new("/bin/sh");
-        std::os::unix::process::CommandExt::arg0(&mut process, "sh");
-        process.arg("-c").arg(command);
+        let process = crate::imod::libcfshr::b3dutil::shell_command(command);
         (self.spawn(process, input), RunMode::Shell)
     }
 
@@ -1464,7 +1461,7 @@ impl Interp {
         }
         match status {
             Ok(status) => status.code().unwrap_or_else(|| {
-                std::os::unix::process::ExitStatusExt::signal(&status).map_or(1, |s| -s)
+                crate::imod::libcfshr::b3dutil::exit_signal(&status).map_or(1, |s| -s)
             }),
             Err(_) => 1,
         }
@@ -1478,22 +1475,18 @@ impl Interp {
         argv: Vec<OsString>,
         input: &[u8],
     ) -> i32 {
-        use std::os::fd::AsRawFd as _;
         unsafe { libc::fflush(std::ptr::null_mut()) };
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
-        let log_fd = self.log.as_raw_fd();
         let saved_out = unsafe { libc::dup(1) };
         let saved_err = if self.stderr_to_log {
             unsafe { libc::dup(2) }
         } else {
             -1
         };
-        unsafe {
-            libc::dup2(log_fd, 1);
-            if saved_err >= 0 {
-                libc::dup2(log_fd, 2);
-            }
+        crate::imod::libcfshr::b3dutil::dup2_file(&self.log, 1);
+        if saved_err >= 0 {
+            crate::imod::libcfshr::b3dutil::dup2_file(&self.log, 2);
         }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             commands::run_in_process(entry, argv, Some(input), false)
@@ -1668,9 +1661,9 @@ pub fn runcom() {
             "-n" => {
                 let text = value();
                 match imodpy::py_int(&text).and_then(|nice| i32::try_from(nice).ok()) {
-                    Some(nice) => unsafe {
-                        libc::nice(nice);
-                    },
+                    Some(nice) => {
+                        imodpy::imod_nice(nice);
+                    }
                     None => fail("Converting \"nice\" value to integer"),
                 }
             }

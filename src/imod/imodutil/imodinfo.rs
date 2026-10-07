@@ -6,6 +6,7 @@
 //! separate command-only model representation.
 use std::cell::RefCell;
 use std::io::Write;
+#[cfg(unix)]
 use std::os::fd::BorrowedFd;
 
 use crate::imod::libcfshr::b3dutil::set_or_clear_flags;
@@ -444,11 +445,16 @@ pub fn imodinfo() {
                 // it preserves the shared kernel file description and turns
                 // the duplicate into owned Rust state before this routine
                 // resumes normal I/O.
-                let borrowed = unsafe { BorrowedFd::borrow_raw(fout.fileno()) };
-                let Ok(owned) = borrowed.try_clone_to_owned() else {
+                #[cfg(unix)]
+                let duplicate = unsafe { BorrowedFd::borrow_raw(fout.fileno()) }
+                    .try_clone_to_owned()
+                    .map(std::fs::File::from);
+                #[cfg(windows)]
+                let duplicate = fout.try_clone_file();
+                let Ok(owned) = duplicate else {
                     exit_error(b"Could not duplicate output file descriptor");
                 };
-                let mut out = ImodFile::from_std(std::fs::File::from(owned));
+                let mut out = ImodFile::from_std(owned);
                 imod_write_ascii(&model, &mut out);
                 let _ = out.flush();
             }

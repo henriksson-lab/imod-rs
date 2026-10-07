@@ -565,15 +565,19 @@ impl SystemProgram {
         self.done.store(true, Ordering::SeqCst);
     }
 
-    /// Java `destroy`: `Process.destroy()` sends `SIGTERM`.
+    /// Java `destroy`: `Process.destroy()` sends `SIGTERM` on Unix and is
+    /// `TerminateProcess(handle, 1)` on Windows.
     pub fn destroy(&self) {
         let Some(pid) = *self.process.lock().unwrap() else {
             return;
         };
         // SAFETY: signalling a child this program started.
+        #[cfg(unix)]
         unsafe {
             libc::kill(pid as libc::pid_t, libc::SIGTERM);
         }
+        #[cfg(windows)]
+        crate::imod::libcfshr::b3dutil::terminate_process(pid as u32, 1);
     }
 
     /// Java private `newOutputBufferManager` / `newErrorBufferManager`.
@@ -614,7 +618,7 @@ impl SystemProgram {
         // `Process.exitValue()`: a child killed by a signal reports 128 + signal.
         match status {
             Ok(status) => status.code().unwrap_or_else(|| {
-                128 + std::os::unix::process::ExitStatusExt::signal(&status).unwrap_or(0)
+                128 + crate::imod::libcfshr::b3dutil::exit_signal(&status).unwrap_or(0)
             }),
             Err(_) => 1,
         }
@@ -819,9 +823,11 @@ pub fn set_imod_executable(path: PathBuf) {
 pub(crate) fn imod_executable() -> Option<&'static Path> {
     IMOD_EXECUTABLE
         .get_or_init(|| {
-            std::env::current_exe()
-                .ok()
-                .filter(|exe| exe.file_name().is_some_and(|base| base == "imod"))
+            std::env::current_exe().ok().filter(|exe| {
+                exe.file_name().is_some_and(|base| {
+                    base.to_string_lossy() == format!("imod{}", std::env::consts::EXE_SUFFIX)
+                })
+            })
         })
         .as_deref()
 }
@@ -901,7 +907,7 @@ pub fn runtime_exec(
     let (program, argv0, arguments) = resolve_command_array(command_array, std_input);
     let mut process = std::process::Command::new(&program);
     if let Some(argv0) = argv0 {
-        std::os::unix::process::CommandExt::arg0(&mut process, argv0);
+        crate::imod::libcfshr::b3dutil::command_arg0(&mut process, argv0);
     }
     process
         .args(arguments)

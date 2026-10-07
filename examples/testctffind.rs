@@ -5,7 +5,7 @@
 //! program `ctfplotter`.
 fn main() {
     let argv: Vec<Vec<u8>> = std::env::args_os()
-        .map(|arg| std::os::unix::ffi::OsStrExt::as_bytes(arg.as_os_str()).to_vec())
+        .map(|arg| imod_rs::imod::libcfshr::b3dutil::OsStrExt::as_bytes(arg.as_os_str()).to_vec())
         .collect();
     std::process::exit(imod_rs::imod::librgctf::testctffind::main(&argv));
 }

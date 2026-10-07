@@ -10,9 +10,9 @@
 //! so its native reference is compiled from the vendored `mrcinfo.c` against
 //! the reference `libiimod` (see `fixtures/mrcinfo/make-goldens.sh`).
 
+use crate::imod::libcfshr::b3dutil::OsStrExt as _;
 use std::ffi::OsString;
 use std::io::Write as _;
-use std::os::unix::ffi::OsStrExt as _;
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, c_format_bytes, exit};
 use crate::imod::libiimod::mrcfiles::{

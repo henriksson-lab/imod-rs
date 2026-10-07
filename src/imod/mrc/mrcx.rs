@@ -34,9 +34,9 @@
 //! reading stream always stays ahead of the writing one; two [`ImodFile`]s
 //! reproduce that, and the file keeps any bytes past the image data.
 
+use crate::imod::libcfshr::b3dutil::OsStrExt as _;
 use std::ffi::OsString;
 use std::io::{Seek as _, SeekFrom, Write as _};
-use std::os::unix::ffi::OsStrExt as _;
 
 use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, b3d_fread, b3d_fwrite, b3d_rewind, c_format_bytes, exit, imod_prog_name,

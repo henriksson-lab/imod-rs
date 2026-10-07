@@ -753,9 +753,10 @@ pub fn makecomfile(arguments: &[OsString]) -> i32 {
     let writable_dir = |directory: &str| -> bool {
         Path::new(directory).exists()
             && Path::new(directory).is_dir()
-            && std::ffi::CString::new(directory)
-                .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-                .unwrap_or(false)
+            && crate::imod::libcfshr::b3dutil::os_access(
+                &directory,
+                crate::imod::libcfshr::b3dutil::W_OK,
+            )
     };
 
     if !base_changes.is_empty() || !final_changes.is_empty() || !change_list.is_empty() {

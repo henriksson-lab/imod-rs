@@ -23,8 +23,8 @@
 //! [`b3d_fwrite`] return the item count as the C calls do and keep no error,
 //! so the system line is not printed for those two; every realistic failure
 //! here is end of file, where C prints no system line either.
+use crate::imod::libcfshr::b3dutil::OsStrExt;
 use std::cell::RefCell;
-use std::os::unix::ffi::OsStrExt;
 
 use crate::imod::libcfshr::b3dutil::{
     ImodFile, SEEK_CUR, SEEK_SET, b3d_fread, b3d_fseek, b3d_fwrite, mrc_big_seek, mrc_huge_seek,

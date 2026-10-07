@@ -64,7 +64,6 @@ use super::pysed::{PysedSrc, pysed};
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::Write as _;
-use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -119,7 +118,7 @@ fn join(parts: &[&str]) -> String {
 /// `os.path.getmtime`: a float of seconds
 fn getmtime(path: &str) -> std::io::Result<f64> {
     let meta = std::fs::metadata(path)?;
-    Ok(meta.mtime() as f64 + meta.mtime_nsec() as f64 * 1e-9)
+    Ok(crate::imod::libcfshr::b3dutil::py_st_mtime(&meta))
 }
 
 /// `time.time()`

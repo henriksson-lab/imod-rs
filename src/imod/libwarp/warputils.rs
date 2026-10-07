@@ -59,7 +59,7 @@ pub fn interpolate_grid(
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
-            xgrid as i32
+            crate::imod::flib::subrs::compat::gfortran_rt::cvttss2si(xgrid)
         }
     };
     ixg = {
@@ -86,7 +86,7 @@ pub fn interpolate_grid(
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
-            ygrid as i32
+            crate::imod::flib::subrs::compat::gfortran_rt::cvttss2si(ygrid)
         }
     };
     iyg = {

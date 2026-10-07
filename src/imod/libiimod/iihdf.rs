@@ -203,6 +203,14 @@ impl HdfScanState {
 /// unchanged: same symbols, same signatures, same library.
 pub(crate) fn hdf5_symbol(name: &str) -> *mut c_void {
     static HANDLE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    // Only reached on Linux: elsewhere the entry points take the source's
+    // `NO_HDF_LIB` arms and return before any HDF5 call.
+    #[cfg(not(unix))]
+    panic!(
+        "cannot load the HDF5 library {}",
+        name.trim_end_matches('\0')
+    );
+    #[cfg(unix)]
     let handle = *HANDLE.get_or_init(|| {
         for library in [c"libhdf5_serial.so.103", c"libhdf5_serial.so"] {
             // SAFETY: dlopen of a system library by name; the handle is kept
@@ -216,12 +224,15 @@ pub(crate) fn hdf5_symbol(name: &str) -> *mut c_void {
         panic!("cannot load the HDF5 library libhdf5_serial.so.103");
     });
     // SAFETY: `name` is NUL-terminated by the `hdf5_lazy!` expansion.
+    #[cfg(unix)]
     let symbol = unsafe { libc::dlsym(handle as *mut c_void, name.as_ptr().cast()) };
+    #[cfg(unix)]
     assert!(
         !symbol.is_null(),
         "HDF5 library has no symbol {}",
         name.trim_end_matches('\0')
     );
+    #[cfg(unix)]
     symbol
 }
 
@@ -382,6 +393,10 @@ hdf5_lazy! {
 
 /// C `iiTestIfHDF` (`iihdf.c:125`).
 pub fn ii_test_if_hdf(filename: &[u8]) -> i32 {
+    // `iimage.c:1551`: the source's `NO_HDF_LIB` arm.  The HDF5 library is loaded by
+    // its Linux soname (`hdf5_symbol`), so elsewhere this is a no-HDF build.
+    #[cfg(not(target_os = "linux"))]
+    return -2;
     // H5Fis_hdf5 is intentionally an HDF5 ABI call, and it takes the file name
     // as `char *`.
     let name = std::ffi::CString::new(filename).unwrap();
@@ -389,6 +404,10 @@ pub fn ii_test_if_hdf(filename: &[u8]) -> i32 {
 }
 /// C `iiHDFCheck` (`iihdf.c:133`).
 pub fn ii_hdf_check(in_file: &mut ImodImageFile) -> i32 {
+    // `iimage.c:1514`: the source's `NO_HDF_LIB` arm.  The HDF5 library is loaded by
+    // its Linux soname (`hdf5_symbol`), so elsewhere this is a no-HDF build.
+    #[cfg(not(target_os = "linux"))]
+    return IIERR_NO_SUPPORT;
     // HDF5 handles and the legacy volume cursor table are an ABI boundary.
     // The image itself is borrowed for the entire native lifecycle operation.
     unsafe {
@@ -1509,6 +1528,10 @@ unsafe fn scan_group(
 }
 /// C `iiHDFopenNew` (`iihdf.c:979`).
 pub fn ii_hdf_open_new(in_file: &mut ImodImageFile, mode: &str) -> i32 {
+    // `iimage.c:1519`: the source's `NO_HDF_LIB` arm.  The HDF5 library is loaded by
+    // its Linux soname (`hdf5_symbol`), so elsewhere this is a no-HDF build.
+    #[cfg(not(target_os = "linux"))]
+    return IIERR_NO_SUPPORT;
     // HDF5 calls and the legacy multi-volume cursor table remain local to this
     // boundary; callers keep an ordinary mutable image borrow.
     unsafe {
@@ -1996,6 +2019,10 @@ unsafe fn hdf_write_header(in_file: *mut ImodImageFile) -> i32 {
 }
 /// C `hdfWriteGlobalAdoc` (`iihdf.c:1412`).
 pub fn hdf_write_global_adoc(in_file: &mut ImodImageFile) -> i32 {
+    // `iimage.c:1531`: the source's `NO_HDF_LIB` arm.  The HDF5 library is loaded by
+    // its Linux soname (`hdf5_symbol`), so elsewhere this is a no-HDF build.
+    #[cfg(not(target_os = "linux"))]
+    return 1;
     // Attribute writes call the HDF5 C ABI, while the image lifecycle stays a
     // regular mutable Rust borrow.
     unsafe {
@@ -2262,6 +2289,10 @@ unsafe fn hdf_write_section_float(in_file: *mut ImodImageFile, buf: *mut u8, cz:
 }
 /// C `hdfWriteDummySection` (`iihdf.c:1641`).
 pub unsafe fn hdf_write_dummy_section(in_file: *mut ImodImageFile, buf: *mut u8, cz: i32) -> i32 {
+    // `iimage.c:1541`: the `NO_HDF_LIB` arm (see `ii_hdf_check`).
+    #[cfg(not(target_os = "linux"))]
+    return 1;
+    #[cfg(target_os = "linux")]
     hdf_write_section_any(in_file, buf, cz, -1)
 }
 /// C `setIOFuncsPlus` (`iihdf.c:1649`).

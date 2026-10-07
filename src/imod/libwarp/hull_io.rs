@@ -95,6 +95,12 @@ pub fn efopen(file: &str, mode: &str) -> ImodFile {
 /// A `popen` is a process boundary, so it is a `std::process::Command` here.
 /// Its only caller is `off_out`, which this platform does not compile.
 pub fn epopen(com: &str, mode: &str) -> Option<std::process::Child> {
+    // `#ifndef _WIN32` around the whole body: Windows returns 0 at once.
+    #[cfg(windows)]
+    {
+        let _ = (com, mode);
+        return None;
+    }
     /* DNM: add suggested parens */
     let child = std::process::Command::new("sh")
         .arg("-c")

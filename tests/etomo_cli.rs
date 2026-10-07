@@ -1,3 +1,5 @@
+// The fixture is a shell-script stand-in for `java`: Unix only.
+#![cfg(unix)]
 mod common;
 
 #[test]

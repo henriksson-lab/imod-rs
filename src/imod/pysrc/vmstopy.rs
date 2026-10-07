@@ -336,16 +336,18 @@ pub fn vmstopy(arguments: &[OsString]) -> i32 {
 
     let mut retval = 0;
     if set_perm && let Some(name) = outfile.as_ref().filter(|_| !usetemp) {
-        use std::os::unix::fs::PermissionsExt as _;
         let result = std::fs::metadata(name).and_then(|meta| {
-            let mut mode = (meta.permissions().mode() & 0o7777) | 0o100;
+            let mut mode =
+                (crate::imod::libcfshr::b3dutil::py_st_mode(&meta, std::path::Path::new(name))
+                    & 0o7777)
+                    | 0o100;
             if mode & 0o040 != 0 {
                 mode |= 0o010;
             }
             if mode & 0o004 != 0 {
                 mode |= 0o001;
             }
-            std::fs::set_permissions(name, std::fs::Permissions::from_mode(mode))
+            crate::imod::libcfshr::b3dutil::py_chmod(name, mode)
         });
         if result.is_err()
             && std::env::var_os("IMOD_PERMISSION_ERROR_OK").is_none_or(|value| value.is_empty())
@@ -368,9 +370,7 @@ pub fn vmstopy(arguments: &[OsString]) -> i32 {
         // executed by the in-process runner instead of `python -u`.  Its
         // `imodNice(n)` is applied here, to this process, which is the job.
         if let Some(nice) = options.nice_val {
-            unsafe {
-                libc::nice(nice as libc::c_int);
-            }
+            super::imodpy::imod_nice(nice as i32);
         }
         let script = std::fs::read_to_string(name).unwrap_or_default();
         let run = crate::imod::comrun::run_script(

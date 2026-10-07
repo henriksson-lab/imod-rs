@@ -1,7 +1,7 @@
 //! Translation of `IMOD/mrc/raw2mrc.c`.
 
+use crate::imod::libcfshr::b3dutil::OsStrExt as _;
 use std::io::Write as _;
-use std::os::unix::ffi::OsStrExt as _;
 
 use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, SEEK_SET, b3d_fread, c_format_bytes, imod_backup_file, imod_prog_name,

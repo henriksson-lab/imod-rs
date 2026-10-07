@@ -30,8 +30,8 @@
 //! Upstream defects fixed in the translation are listed in `BUGS.md`,
 //! section "`alignframes` (2026-10-05)", and marked in place.
 
+use crate::imod::libcfshr::b3dutil::OsStrExt as _;
 use std::io::Write as _;
-use std::os::unix::ffi::OsStrExt as _;
 use std::rc::Rc;
 
 use crate::imod::clip::correct_defects::{

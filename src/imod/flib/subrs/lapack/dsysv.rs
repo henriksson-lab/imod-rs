@@ -119,6 +119,10 @@ mod tests {
     );
 
     fn load_reference() -> Option<DsysvFn> {
+        // The reference build is a Linux tree of `.so` files.
+        #[cfg(not(target_os = "linux"))]
+        return None;
+        #[cfg(target_os = "linux")]
         // SAFETY: test-only foreign boundary; the reference build's own
         // gfortran LAPACK/BLAS, loaded for the rest of the process.
         unsafe {
@@ -202,7 +206,19 @@ mod tests {
                 let (mut ours_q, mut info) = ([0.0; 1], 0);
                 let mut ipiv = vec![0; n as usize];
                 let (mut a1, mut b1) = (a.clone(), y.clone());
-                dsysv("U", n, 1, &mut a1, n, &mut ipiv, &mut b1, n, &mut ours_q, -1, &mut info);
+                dsysv(
+                    "U",
+                    n,
+                    1,
+                    &mut a1,
+                    n,
+                    &mut ipiv,
+                    &mut b1,
+                    n,
+                    &mut ours_q,
+                    -1,
+                    &mut info,
+                );
                 let mut ref_q = [0.0f64; 1];
                 let mut rinfo = 0;
                 let mut ripiv = vec![0; n as usize];
@@ -227,7 +243,9 @@ mod tests {
                 assert_eq!(ours_q[0], ref_q[0], "workspace query n={n}");
                 let lwork = ref_q[0] as i32;
                 let mut work = vec![0.0; lwork as usize];
-                dsysv("U", n, 1, &mut a1, n, &mut ipiv, &mut b1, n, &mut work, lwork, &mut info);
+                dsysv(
+                    "U", n, 1, &mut a1, n, &mut ipiv, &mut b1, n, &mut work, lwork, &mut info,
+                );
                 let mut rwork = vec![0.0; lwork as usize];
                 unsafe {
                     reference(
@@ -247,7 +265,10 @@ mod tests {
                 }
                 assert_eq!(info, rinfo, "INFO n={n} lambda={lambda}");
                 let scale = b2.iter().fold(0f64, |m, v| m.max(v.abs()));
-                let diff = b1.iter().zip(&b2).fold(0f64, |m, (x, r)| m.max((x - r).abs()));
+                let diff = b1
+                    .iter()
+                    .zip(&b2)
+                    .fold(0f64, |m, (x, r)| m.max((x - r).abs()));
                 let rel = diff / scale.max(f64::MIN_POSITIVE);
                 worst = worst.max(rel);
                 assert!(rel <= 1e-9, "n={n} lambda={lambda}: rel {rel:e}");

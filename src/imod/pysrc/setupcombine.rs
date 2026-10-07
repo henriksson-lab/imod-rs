@@ -936,9 +936,10 @@ pub fn setupcombine(arguments: &[OsString]) -> i32 {
             exit_error(&format!("{tmproot} does not exist or is not a directory"));
         }
         // `os.access(tmproot, os.W_OK)`: the POSIX `access` call itself
-        let writable = std::ffi::CString::new(tmproot.as_bytes())
-            .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-            .unwrap_or(false);
+        let writable = crate::imod::libcfshr::b3dutil::os_access(
+            &tmproot,
+            crate::imod::libcfshr::b3dutil::W_OK,
+        );
         if !writable {
             exit_error(&format!(
                 " You do not have permission to write in {tmproot}"

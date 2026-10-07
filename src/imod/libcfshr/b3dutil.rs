@@ -25,10 +25,72 @@ use std::sync::Mutex;
 // prompts off it with `getc`, and two different buffers over one descriptor
 // lose data. When the last `printf` in a program is gone these arms can move
 // to `std::io`; until then this is the correct boundary and it is one file.
+//
+// The MSVC runtime (UCRT) has no `stdin`/`stdout`/`stderr` objects: its
+// `<stdio.h>` macros expand to `__acrt_iob_func(0/1/2)`, so on Windows the three
+// names are that call.  `clearerr` is likewise missing from the `libc` crate's
+// Windows list.
+#[cfg(not(windows))]
 unsafe extern "C" {
     static stderr: *mut libc::FILE;
     static stdout: *mut libc::FILE;
     static stdin: *mut libc::FILE;
+}
+#[cfg(not(windows))]
+use libc::clearerr;
+#[cfg(windows)]
+unsafe extern "C" {
+    fn __acrt_iob_func(index: u32) -> *mut libc::FILE;
+    fn clearerr(stream: *mut libc::FILE);
+}
+/// The C stream `stdin`/`stdout`/`stderr` on every platform.
+#[cfg(not(windows))]
+macro_rules! c_stream {
+    ($s:ident) => {
+        $s
+    };
+}
+#[cfg(windows)]
+macro_rules! c_stream {
+    (stdin) => {
+        __acrt_iob_func(0)
+    };
+    (stdout) => {
+        __acrt_iob_func(1)
+    };
+    (stderr) => {
+        __acrt_iob_func(2)
+    };
+}
+
+/// The byte view of an `OsStr` that C code has of every `char *` path,
+/// environment value and `argv` entry.  On Unix this *is*
+/// `std::os::unix::ffi::OsStrExt`, re-exported unchanged.  Elsewhere
+/// (Windows) an `OsStr` is WTF-8 inside, which `as_encoded_bytes` exposes, and
+/// bytes are turned back into an `OsStr` as UTF-8; a byte string that is not
+/// UTF-8 (only possible from file contents, never from `argv` or the
+/// environment) is converted lossily and the result leaked, which is the one
+/// cost of keeping the borrowed signature.
+#[cfg(unix)]
+pub use std::os::unix::ffi::OsStrExt;
+#[cfg(not(unix))]
+pub trait OsStrExt {
+    fn from_bytes(slice: &[u8]) -> &Self;
+    fn as_bytes(&self) -> &[u8];
+}
+#[cfg(not(unix))]
+impl OsStrExt for std::ffi::OsStr {
+    fn from_bytes(slice: &[u8]) -> &Self {
+        match std::str::from_utf8(slice) {
+            Ok(text) => std::ffi::OsStr::new(text),
+            Err(_) => std::ffi::OsStr::new(Box::leak(
+                String::from_utf8_lossy(slice).into_owned().into_boxed_str(),
+            )),
+        }
+    }
+    fn as_bytes(&self) -> &[u8] {
+        self.as_encoded_bytes()
+    }
 }
 
 /// `b3dutil.h:27`.
@@ -464,6 +526,7 @@ impl ImodFile {
     /// The file descriptor behind the handle, for the POSIX services that have
     /// no `std::io` expression — advisory record locking through `fcntl` is the
     /// only one this module needs.
+    #[cfg(unix)]
     pub fn fileno(&self) -> i32 {
         use std::os::fd::AsRawFd;
         match self {
@@ -478,6 +541,32 @@ impl ImodFile {
             ImodFile::Stdout => 1,
             ImodFile::Stderr => 2,
             ImodFile::Token(_) => -1,
+        }
+    }
+
+    /// Windows stand-in for `dup(fileno(fp))`: an owned duplicate of the
+    /// handle behind the stream, sharing its file position (the Windows
+    /// counterpart of a shared open file description).  Pending output goes
+    /// out first, as for [`ImodFile::fileno`].
+    #[cfg(windows)]
+    pub fn try_clone_file(&self) -> std::io::Result<std::fs::File> {
+        use std::os::windows::io::AsHandle;
+        match self {
+            ImodFile::File(f) => {
+                let mut c = f.borrow_mut();
+                let _ = c.flush();
+                c.file().try_clone()
+            }
+            ImodFile::Stdin => Ok(std::io::stdin().as_handle().try_clone_to_owned()?.into()),
+            ImodFile::Stdout => {
+                unsafe { libc::fflush(c_stream!(stdout)) };
+                Ok(std::io::stdout().as_handle().try_clone_to_owned()?.into())
+            }
+            ImodFile::Stderr => {
+                unsafe { libc::fflush(c_stream!(stderr)) };
+                Ok(std::io::stderr().as_handle().try_clone_to_owned()?.into())
+            }
+            ImodFile::Token(_) => Err(std::io::Error::from(std::io::ErrorKind::Unsupported)),
         }
     }
 }
@@ -503,7 +592,8 @@ impl Read for ImodFile {
             ImodFile::File(f) => f.borrow_mut().read(buf),
             // The C stream, not `std::io::stdin()` — see the extern block.
             ImodFile::Stdin => {
-                let n = unsafe { libc::fread(buf.as_mut_ptr().cast(), 1, buf.len(), stdin) };
+                let n =
+                    unsafe { libc::fread(buf.as_mut_ptr().cast(), 1, buf.len(), c_stream!(stdin)) };
                 Ok(n)
             }
             _ => Ok(0),
@@ -517,10 +607,10 @@ impl Write for ImodFile {
             ImodFile::File(f) => f.borrow_mut().writer()?.write(buf),
             // The C streams, not `std::io::stdout()` — see the extern block.
             ImodFile::Stdout => {
-                Ok(unsafe { libc::fwrite(buf.as_ptr().cast(), 1, buf.len(), stdout) })
+                Ok(unsafe { libc::fwrite(buf.as_ptr().cast(), 1, buf.len(), c_stream!(stdout)) })
             }
             ImodFile::Stderr => {
-                Ok(unsafe { libc::fwrite(buf.as_ptr().cast(), 1, buf.len(), stderr) })
+                Ok(unsafe { libc::fwrite(buf.as_ptr().cast(), 1, buf.len(), c_stream!(stderr)) })
             }
             ImodFile::Stdin | ImodFile::Token(_) => Ok(0),
         }
@@ -529,11 +619,11 @@ impl Write for ImodFile {
         match self {
             ImodFile::File(f) => f.borrow_mut().flush(),
             ImodFile::Stdout => {
-                unsafe { libc::fflush(stdout) };
+                unsafe { libc::fflush(c_stream!(stdout)) };
                 Ok(())
             }
             ImodFile::Stderr => {
-                unsafe { libc::fflush(stderr) };
+                unsafe { libc::fflush(c_stream!(stderr)) };
                 Ok(())
             }
             ImodFile::Stdin | ImodFile::Token(_) => Ok(()),
@@ -1537,15 +1627,38 @@ pub fn imod_usage_header(program_name: Option<&str>) {
     imod_version(program_name);
     imod_copyright();
 }
-/// Matches C `IMOD_DIR_or_default` (`b3dutil.c:178`).
-///
-/// This is the `#else`/`#else` arm — neither `_WIN32` nor `__APPLE__` — so
-/// `str` has one entry and `strInd` never moves off 0; the `strInd > 1`
-/// correction is therefore unreachable here and is not written out.
+/// Matches C `IMOD_DIR_or_default` (`b3dutil.c:178`).  Each platform's
+/// default install locations: two on Windows and macOS, the first that
+/// exists (or the first, assumed, when neither does), and `/usr/local/IMOD`
+/// elsewhere.
 pub fn imod_dir_or_default(assumed: Option<&mut i32>) -> String {
+    #[cfg(any(windows, target_os = "macos"))]
+    let (str_, str_ind, ass_val) = {
+        #[cfg(windows)]
+        let str_: [&str; 2] = ["C:\\cygwin\\usr\\local\\IMOD", "C:\\Program Files\\IMOD"];
+        #[cfg(target_os = "macos")]
+        let str_: [&str; 2] = ["/Applications/IMOD", "/usr/local/IMOD"];
+        let mut str_ind = 0;
+        let mut ass_val = 1;
+        while str_ind < 2 {
+            if std::path::Path::new(str_[str_ind]).exists() {
+                break;
+            }
+            str_ind += 1;
+        }
+        if str_ind > 1 {
+            str_ind = 0;
+            ass_val = 2;
+        }
+        (str_, str_ind, ass_val)
+    };
+    #[cfg(not(any(windows, target_os = "macos")))]
     let str_: [&str; 1] = ["/usr/local/IMOD"];
+    #[cfg(not(any(windows, target_os = "macos")))]
     let str_ind = 0;
+    #[cfg(not(any(windows, target_os = "macos")))]
     let mut ass_val = 1;
+    #[cfg(not(any(windows, target_os = "macos")))]
     if !std::path::Path::new(str_[0]).exists() {
         ass_val = 2;
     }
@@ -1704,15 +1817,18 @@ pub fn run_in_process<F: FnOnce() + Send + 'static>(
             std::process::id(),
             SEQ.fetch_add(1, Ordering::SeqCst)
         ));
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        // Windows cannot unlink an open file; `FILE_FLAG_DELETE_ON_CLOSE`
+        // removes it when the last handle (the CRT descriptor's included)
+        // is closed, which is what the unlink below gives on Unix.
+        #[cfg(windows)]
+        std::os::windows::fs::OpenOptionsExt::custom_flags(&mut options, 0x0400_0000);
+        let file = options.open(&path)?;
+        #[cfg(unix)]
         let _ = std::fs::remove_file(&path);
         Ok(file)
     };
-    use std::os::fd::AsRawFd;
     flush_all_streams();
     let mut saved_in = -1;
     let mut input_file = None;
@@ -1721,14 +1837,14 @@ pub fn run_in_process<F: FnOnce() + Send + 'static>(
         file.write_all(text)?;
         file.seek(SeekFrom::Start(0))?;
         saved_in = unsafe { libc::dup(0) };
+        dup2_file(&file, 0);
         unsafe {
-            libc::dup2(file.as_raw_fd(), 0);
             // A caller that read its own standard input to the end (a script
             // run with -StandardInput) leaves C `stdin` at EOF, which is
             // sticky: drop what it buffered and clear that EOF, or the
             // command reads nothing from its input
-            libc::fflush(stdin);
-            libc::clearerr(stdin);
+            libc::fflush(c_stream!(stdin));
+            clearerr(c_stream!(stdin));
         }
         input_file = Some(file);
     }
@@ -1737,7 +1853,7 @@ pub fn run_in_process<F: FnOnce() + Send + 'static>(
     if capture {
         let file = temp_file()?;
         saved_out = unsafe { libc::dup(1) };
-        unsafe { libc::dup2(file.as_raw_fd(), 1) };
+        dup2_file(&file, 1);
         output_file = Some(file);
     }
 
@@ -1783,10 +1899,10 @@ pub fn run_in_process<F: FnOnce() + Send + 'static>(
     if let Some(file) = input_file {
         unsafe {
             // Drop what C `stdin` buffered from the file, then clear its EOF.
-            libc::fflush(stdin);
+            libc::fflush(c_stream!(stdin));
             libc::dup2(saved_in, 0);
             libc::close(saved_in);
-            libc::clearerr(stdin);
+            clearerr(c_stream!(stdin));
         }
         drop(file);
     }
@@ -1814,6 +1930,14 @@ pub fn run_in_process<F: FnOnce() + Send + 'static>(
 /// retry loops runs at most once.  The `-2` for a failed `malloc` of the backup
 /// name cannot arise once the name is a `String`.
 pub fn imod_backup_file(filename: &str) -> i32 {
+    let mut rm_tries = 1;
+    let mut mv_tries = 1;
+    #[cfg(windows)]
+    {
+        rm_tries = 10;
+        mv_tries = 10;
+    }
+
     /* If file does not exist, return */
     if std::fs::metadata(filename).is_err() {
         return 0;
@@ -1823,15 +1947,29 @@ pub fn imod_backup_file(filename: &str) -> i32 {
     let backname = format!("{filename}~");
 
     /* If the backup file exists, try to remove it first (Windows/Intel) */
-    if std::fs::metadata(&backname).is_ok() && std::fs::remove_file(&backname).is_err() {
-        return -1;
+    while std::fs::metadata(&backname).is_ok() && std::fs::remove_file(&backname).is_err() {
+        rm_tries -= 1;
+        if rm_tries <= 0 {
+            return -1;
+        }
     }
 
     /* finally, rename file */
-    match std::fs::rename(filename, &backname) {
-        Ok(()) => 0,
-        Err(_) => -1,
+    let mut err;
+    loop {
+        err = match std::fs::rename(filename, &backname) {
+            Ok(()) => 0,
+            Err(_) => -1,
+        };
+        if err == 0 {
+            break;
+        }
+        mv_tries -= 1;
+        if mv_tries <= 0 {
+            break;
+        }
     }
+    err
 }
 /// Matches C `b3dOpenFile` (`b3dutil.c:302`).
 ///
@@ -2076,8 +2214,7 @@ pub fn imodgetenv(var: &[u8], value: &mut [u8]) -> i32 {
     let Some(val_ptr) = std::env::var_os(&cstr) else {
         return 1;
     };
-    use std::os::unix::ffi::OsStrExt;
-    match c2f_string(val_ptr.as_bytes(), value) {
+    match c2f_string(val_ptr.as_encoded_bytes(), value) {
         Ok(()) => 0,
         Err(()) => -1,
     }
@@ -2436,7 +2573,65 @@ pub fn b3d_physical_memory() -> f64 {
             0.
         };
     }
+    // `b3dutil.c:1462-1467`, the `__APPLE__` arm.  The source passes
+    // `lenPhys = sizeof(int)` for a `uint64_t` value, which macOS rejects
+    // with ENOMEM (so native returns 0 there); the length is the value's own
+    // size here (`BUGS.md`, fixed in translation).
+    #[cfg(target_os = "macos")]
+    {
+        let mut temp: u64 = 0;
+        let mut len_phys = core::mem::size_of::<u64>();
+        // SAFETY: `temp` is `len_phys` writable bytes; the name is a C string.
+        if unsafe {
+            libc::sysctlbyname(
+                c"hw.memsize".as_ptr(),
+                (&mut temp as *mut u64).cast(),
+                &mut len_phys,
+                core::ptr::null_mut(),
+                0,
+            )
+        } == 0
+        {
+            return temp as f64;
+        }
+        return 0.;
+    }
+    // `b3dutil.c:1468-1472`, the `_WIN32` arm.
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct MemoryStatusEx {
+            dw_length: u32,
+            dw_memory_load: u32,
+            ull_total_phys: u64,
+            ull_avail_phys: u64,
+            ull_total_page_file: u64,
+            ull_avail_page_file: u64,
+            ull_total_virtual: u64,
+            ull_avail_virtual: u64,
+            ull_avail_extended_virtual: u64,
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+        }
+        let mut status = MemoryStatusEx {
+            dw_length: core::mem::size_of::<MemoryStatusEx>() as u32,
+            dw_memory_load: 0,
+            ull_total_phys: 0,
+            ull_avail_phys: 0,
+            ull_total_page_file: 0,
+            ull_avail_page_file: 0,
+            ull_total_virtual: 0,
+            ull_avail_virtual: 0,
+            ull_avail_extended_virtual: 0,
+        };
+        // SAFETY: a correctly sized `MEMORYSTATUSEX` with its length set.
+        unsafe { GlobalMemoryStatusEx(&mut status) };
+        return status.ull_total_phys as f64;
+    }
     // `sysconf(_SC_PHYS_PAGES)` is an OS service with no `std` expression.
+    #[cfg(not(any(target_os = "macos", windows)))]
     unsafe {
         let pages = libc::sysconf(libc::_SC_PHYS_PAGES);
         let size = libc::sysconf(libc::_SC_PAGE_SIZE);
@@ -2861,16 +3056,37 @@ pub fn balancedgrouplimits(total: &i32, groups: &i32, group: &i32, start: &mut i
 }
 /// Matches C `wallTime` from included `coresprocsthreads.c`.
 pub fn wall_time() -> f64 {
+    // `coresprocsthreads.c:296-302`, the `_WIN32` arm.
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn QueryPerformanceFrequency(frequency: *mut i64) -> i32;
+            fn QueryPerformanceCounter(count: *mut i64) -> i32;
+        }
+        let mut freq: i64 = 0;
+        let mut counts: i64 = 0;
+        // SAFETY: both calls write one `LARGE_INTEGER`.
+        unsafe { QueryPerformanceFrequency(&mut freq) };
+        if freq == 0 {
+            return 0.;
+        }
+        unsafe { QueryPerformanceCounter(&mut counts) };
+        return counts as f64 / freq as f64;
+    }
     // `CLOCK_MONOTONIC` as a f64 of seconds: `std::time::Instant` has no epoch
     // to subtract from, so this stays an OS call.
-    let mut time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    unsafe {
-        libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time);
+    #[cfg(not(windows))]
+    {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        unsafe {
+            libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut time);
+        }
+        time.tv_sec as f64 + time.tv_nsec as f64 / 1.0e9
     }
-    time.tv_sec as f64 + time.tv_nsec as f64 / 1.0e9
 }
 /// Matches C `walltime` (`b3dutil.c:1345`).
 pub fn walltime() -> f64 {
@@ -2880,39 +3096,165 @@ pub fn walltime() -> f64 {
 pub fn b3dmillisleep(milliseconds: &i32) -> i32 {
     b3d_milli_sleep(*milliseconds)
 }
-/// Matches C `numCoresAndLogicalProcs` from included `coresprocsthreads.c` on Linux.
+/// Matches C `numCoresAndLogicalProcs` from included `coresprocsthreads.c`.
+/// Linux reads `/proc/cpuinfo`; the `__APPLE__` and `_WIN32` arms
+/// (`coresprocsthreads.c:63-111`) are translated below it.
 pub fn num_cores_and_logical_procs(physical: &mut i32, logical: &mut i32) -> i32 {
     *physical = 0;
     *logical = 0;
-    let text = match std::fs::read_to_string("/proc/cpuinfo") {
-        Ok(value) => value,
-        Err(_) => return 1,
-    };
-    let mut identifiers = std::collections::BTreeSet::new();
-    let mut physical_id = String::new();
-    let mut core_id = String::new();
-    for paragraph in text.split("\n\n") {
-        for line in paragraph.lines() {
-            if let Some(value) = line.strip_prefix("physical id\t: ") {
-                physical_id = value.to_string();
+    #[cfg(target_os = "macos")]
+    {
+        let mut processor_core_count = 0_i32;
+        let mut logical_processor_count = 0_i32;
+        let mut temp: i32 = 0;
+        let mut len_phys = core::mem::size_of::<i32>();
+        // SAFETY: `temp` is `len_phys` writable bytes; the names are C strings.
+        unsafe {
+            if libc::sysctlbyname(
+                c"hw.physicalcpu".as_ptr(),
+                (&mut temp as *mut i32).cast(),
+                &mut len_phys,
+                core::ptr::null_mut(),
+                0,
+            ) == 0
+            {
+                processor_core_count = temp;
             }
-            if let Some(value) = line.strip_prefix("core id\t\t: ") {
-                core_id = value.to_string();
+            len_phys = 4;
+            if libc::sysctlbyname(
+                c"hw.logicalcpu".as_ptr(),
+                (&mut temp as *mut i32).cast(),
+                &mut len_phys,
+                core::ptr::null_mut(),
+                0,
+            ) == 0
+            {
+                logical_processor_count = temp;
             }
         }
-        if !physical_id.is_empty() || !core_id.is_empty() {
-            identifiers.insert((physical_id.clone(), core_id.clone()));
+        *physical = processor_core_count;
+        *logical = logical_processor_count;
+        return if processor_core_count <= 0 || logical_processor_count < 0 {
+            1
+        } else {
+            0
+        };
+    }
+    #[cfg(windows)]
+    {
+        // `SYSTEM_LOGICAL_PROCESSOR_INFORMATION`: a `ULONG_PTR` mask, the
+        // relationship enum, and a 16-byte union.
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct SystemLogicalProcessorInformation {
+            processor_mask: usize,
+            relationship: i32,
+            union_bytes: [u64; 2],
         }
+        const RELATION_PROCESSOR_CORE: i32 = 0;
+        const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetLogicalProcessorInformation(
+                buffer: *mut SystemLogicalProcessorInformation,
+                return_length: *mut u32,
+            ) -> i32;
+            fn GetLastError() -> u32;
+        }
+        let mut processor_core_count = 0_i32;
+        let mut logical_processor_count = 0_i32;
+        let mut return_length: u32 = 0;
+        let num_bits = usize::BITS;
+        let entry = core::mem::size_of::<SystemLogicalProcessorInformation>();
+        // SAFETY: the first call passes no buffer and only reports the size;
+        // the second gets a buffer of at least that many bytes.
+        unsafe {
+            if GetLogicalProcessorInformation(core::ptr::null_mut(), &mut return_length) == 0
+                && GetLastError() == ERROR_INSUFFICIENT_BUFFER
+                && return_length > 0
+            {
+                let mut buffer = vec![
+                    SystemLogicalProcessorInformation {
+                        processor_mask: 0,
+                        relationship: 0,
+                        union_bytes: [0; 2],
+                    };
+                    (return_length as usize).div_ceil(entry)
+                ];
+                if GetLogicalProcessorInformation(buffer.as_mut_ptr(), &mut return_length) != 0 {
+                    let mut byte_offset = 0_usize;
+                    let mut index = 0_usize;
+                    while byte_offset + entry <= return_length as usize {
+                        let ptr = buffer[index];
+                        if ptr.relationship == RELATION_PROCESSOR_CORE {
+                            processor_core_count += 1;
+                            let mut bit_test: usize = 1;
+                            for _ in 0..num_bits {
+                                if ptr.processor_mask & bit_test != 0 {
+                                    logical_processor_count += 1;
+                                }
+                                bit_test = bit_test.wrapping_mul(2);
+                            }
+                        }
+                        byte_offset += entry;
+                        index += 1;
+                    }
+                }
+            }
+        }
+        *physical = processor_core_count;
+        *logical = logical_processor_count;
+        return if processor_core_count <= 0 || logical_processor_count < 0 {
+            1
+        } else {
+            0
+        };
     }
-    *logical = text.matches("processor\t:").count() as i32;
-    *physical = identifiers.len() as i32;
-    if *physical == 0 {
-        *physical = *logical;
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let text = match std::fs::read_to_string("/proc/cpuinfo") {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let mut identifiers = std::collections::BTreeSet::new();
+        let mut physical_id = String::new();
+        let mut core_id = String::new();
+        for paragraph in text.split("\n\n") {
+            for line in paragraph.lines() {
+                if let Some(value) = line.strip_prefix("physical id\t: ") {
+                    physical_id = value.to_string();
+                }
+                if let Some(value) = line.strip_prefix("core id\t\t: ") {
+                    core_id = value.to_string();
+                }
+            }
+            if !physical_id.is_empty() || !core_id.is_empty() {
+                identifiers.insert((physical_id.clone(), core_id.clone()));
+            }
+        }
+        *logical = text.matches("processor\t:").count() as i32;
+        *physical = identifiers.len() as i32;
+        if *physical == 0 {
+            *physical = *logical;
+        }
+        if *logical == 0 { 1 } else { 0 }
     }
-    if *logical == 0 { 1 } else { 0 }
 }
-/// Matches C `b3dCpuIsAMD` from included `coresprocsthreads.c` on Linux.
+/// Matches C `b3dCpuIsAMD` from included `coresprocsthreads.c`: the
+/// `vendor_id` line of `/proc/cpuinfo` on Linux, 0 on macOS (`:64`), and
+/// `__cpuid(cpuInfo, 0)`'s ECX (`"cAMD"`) on Windows (`:75-78`).
 pub fn b3d_cpu_is_amd() -> i32 {
+    #[cfg(target_os = "macos")]
+    return 0;
+    #[cfg(all(windows, target_arch = "x86_64"))]
+    {
+        // SAFETY: CPUID is available on every x86-64 processor.
+        let leaf = unsafe { core::arch::x86_64::__cpuid(0) };
+        return if leaf.ecx == 0x444d4163 { 1 } else { 0 };
+    }
+    #[cfg(all(windows, not(target_arch = "x86_64")))]
+    return 0;
+    #[cfg(not(any(target_os = "macos", windows)))]
     std::fs::read_to_string("/proc/cpuinfo")
         .map(|text| if text.contains("AuthenticAMD") { 1 } else { 0 })
         .unwrap_or(0)
@@ -2927,12 +3269,39 @@ pub fn b3d_cpu_is_amd() -> i32 {
 /// a different count yields a different noise field.
 ///
 /// `omp_get_num_procs()` is the number of processors available to the process;
-/// `std::thread::available_parallelism` is its closest counterpart.  The
-/// Apple/M1 arm is not translated: this is a Linux target.
+/// `std::thread::available_parallelism` is its closest counterpart.
+///
+/// The `__APPLE__` arm (`:201-208`, `:250-252`) detects an ARM64 kernel and
+/// drops 8 threads to 7.  The source sets its non-`static` `isM1Mac` only on
+/// the first call, so later calls never apply the limit; it is kept in a
+/// `static` here so every call does (`BUGS.md`, fixed in translation).
 pub fn num_omp_threads(optimal_threads: i32) -> i32 {
     static NUM_PROCS: AtomicI32 = AtomicI32::new(-1);
     static OMP_NUM_PROCS: AtomicI32 = AtomicI32::new(-1);
     let mut num_threads = optimal_threads;
+    #[cfg(target_os = "macos")]
+    static IS_M1_MAC: AtomicI32 = AtomicI32::new(0);
+    #[cfg(target_os = "macos")]
+    if NUM_PROCS.load(Ordering::SeqCst) < 0 {
+        let mut buffer = [0_u8; 512];
+        let mut oldlen: usize = 512;
+        // SAFETY: `buffer` is `oldlen` writable bytes; the name is a C string.
+        if unsafe {
+            libc::sysctlbyname(
+                c"kern.version".as_ptr(),
+                buffer.as_mut_ptr().cast(),
+                &mut oldlen,
+                core::ptr::null_mut(),
+                0,
+            )
+        } == 0
+        {
+            let text = &buffer[..buffer.iter().position(|&b| b == 0).unwrap_or(buffer.len())];
+            if text.windows(5).any(|w| w == b"ARM64") {
+                IS_M1_MAC.store(1, Ordering::SeqCst);
+            }
+        }
+    }
 
     // One-time determination of the number of physical and logical cores.
     if NUM_PROCS.load(Ordering::SeqCst) < 0 {
@@ -2984,6 +3353,12 @@ pub fn num_omp_threads(optimal_threads: i32) -> i32 {
     );
     if lim_threads > 0 {
         num_threads = lim_threads.min(num_threads);
+    }
+
+    // Limit to 7 threads on M1, 8 is often counterproductive.
+    #[cfg(target_os = "macos")]
+    if num_threads == 8 && IS_M1_MAC.load(Ordering::SeqCst) != 0 {
+        num_threads = 7;
     }
 
     // Same deviation as above (`coresprocsthreads.c:254-270` caches this).
@@ -3043,17 +3418,41 @@ pub fn b3daddressablememory() -> f64 {
 pub fn standardmemorylimitmb(half_point: &i32) -> f64 {
     standard_memory_limit_mb(*half_point)
 }
-/// Matches C `expandArgList` (`b3dutil.c:1579`).
+/// Matches C `addToArgVector` (`b3dutil.c:1542`): appends `arg` to the
+/// vector, after the first `num_prefix` bytes of `pattern` when a pattern and
+/// prefix are given.  The allocation in steps of 8 is the vector's own.
+/// Reached only from `expandArgList`'s `_WIN32` arm.
+#[cfg(windows)]
+fn add_to_arg_vector(
+    arg: &[u8],
+    arg_vec: &mut Vec<Vec<u8>>,
+    num_in_vec: &mut i32,
+    pattern: Option<&[u8]>,
+    num_prefix: usize,
+) -> i32 {
+    let mut entry = Vec::new();
+    if let Some(pattern) = pattern.filter(|_| num_prefix > 0) {
+        entry.extend_from_slice(&pattern[..num_prefix]);
+    }
+    entry.extend_from_slice(arg);
+    arg_vec.push(entry);
+    *num_in_vec += 1;
+    0
+}
+
+/// Matches C `expandArgList` (`b3dutil.c:1579`): wild-card expansion of
+/// file names, done only on Windows, where the shell does not do it.
 ///
-/// The whole body is inside `#ifdef _WIN32` / `#else`.  This is the `#else`
-/// branch selected on this platform (`b3dutil.c:1712-1716`), which performs no
-/// expansion at all.  The Windows branch walks the argument vector with
-/// `FindFirstFile`/`FindNextFile` to expand `*` and `?` wildcards, and is not
-/// translated: it is unselected here and unreachable on a Unix target.
+/// The whole body is inside `#ifdef _WIN32` / `#else`.  The `_WIN32` arm
+/// expands each argument containing `*` or `?` with
+/// `FindFirstFile`/`FindNextFile`, keeping any path in front of the pattern,
+/// accepting a found name only where it first differs from the pattern at a
+/// wild card, and sorting each argument's matches; an argument with no match
+/// is passed unchanged and its index returned in `no_match`.  The `#else` arm
+/// (`b3dutil.c:1712-1716`) performs no expansion.
 ///
-/// `None` is the source's NULL return, which means the allocation failed; the
-/// `#else` arm hands back the vector it was given, and `*allocated` is 0 so the
-/// caller never looks at the copy.
+/// `None` is the source's NULL return, which means the allocation failed;
+/// with `*allocated` 0 the caller never looks at the vector.
 pub fn expand_arg_list(
     arguments: &[Vec<u8>],
     count: i32,
@@ -3061,18 +3460,153 @@ pub fn expand_arg_list(
     allocated: &mut i32,
     no_match: &mut i32,
 ) -> Option<Vec<Vec<u8>>> {
-    *allocated = 0;
-    *no_match = -1;
-    *new_count = count;
-    Some(arguments.to_vec())
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct Win32FindDataA {
+            dw_file_attributes: u32,
+            ft_creation_time: [u32; 2],
+            ft_last_access_time: [u32; 2],
+            ft_last_write_time: [u32; 2],
+            n_file_size_high: u32,
+            n_file_size_low: u32,
+            dw_reserved0: u32,
+            dw_reserved1: u32,
+            c_file_name: [u8; 260],
+            c_alternate_file_name: [u8; 14],
+        }
+        type Handle = *mut core::ffi::c_void;
+        const INVALID_HANDLE_VALUE: Handle = -1_isize as Handle;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn FindFirstFileA(name: *const core::ffi::c_char, data: *mut Win32FindDataA) -> Handle;
+            fn FindNextFileA(find: Handle, data: *mut Win32FindDataA) -> i32;
+            fn FindClose(find: Handle) -> i32;
+        }
+        let mut new_vec: Vec<Vec<u8>> = Vec::new();
+        *allocated = 0;
+        *new_count = 0;
+        *no_match = -1;
+
+        for ind in 0..count as usize {
+            let arg = &arguments[ind];
+            if arg.contains(&b'*') || arg.contains(&b'?') {
+                // If there is a wild card, look for file(s)
+                let mut pass_no_match = false;
+                // SAFETY: plain data the call fills.
+                let mut find_file_data: Win32FindDataA = unsafe { core::mem::zeroed() };
+                let c_arg = std::ffi::CString::new(arg.clone()).unwrap_or_default();
+                let h_find = unsafe { FindFirstFileA(c_arg.as_ptr(), &mut find_file_data) };
+                if h_find == INVALID_HANDLE_VALUE {
+                    pass_no_match = true;
+                } else {
+                    // Prepare to process this file and additional ones: find a
+                    // path in front of the argument
+                    let mut num_start = *new_count;
+                    let len_arg = arg.len();
+                    let mut num_prefix = 0;
+                    let jnd = arg
+                        .iter()
+                        .rposition(|&c| c == b'\\')
+                        .map_or(-1, |p| p as i64 + 1);
+                    let knd = arg
+                        .iter()
+                        .rposition(|&c| c == b'/')
+                        .map_or(-1, |p| p as i64 + 1);
+                    let jnd = jnd.max(knd);
+                    if jnd > 0 && (jnd as usize) < len_arg {
+                        num_prefix = jnd as usize;
+                    }
+
+                    // Loop on files that are found
+                    loop {
+                        // Find first non-matching character if any and make
+                        // sure it is a ? or *, looking after the path prefix
+                        let name_len = find_file_data
+                            .c_file_name
+                            .iter()
+                            .position(|&c| c == 0)
+                            .unwrap_or(260);
+                        let name = &find_file_data.c_file_name[..name_len];
+                        let mut valid = true;
+                        for jnd in 0..(len_arg - num_prefix).min(name_len) {
+                            let knd = jnd + num_prefix;
+                            if name[jnd] != arg[knd] {
+                                if arg[knd] != b'*' && arg[knd] != b'?' {
+                                    valid = false;
+                                }
+                                break;
+                            }
+                        }
+
+                        // Skip if not a valid match, otherwise add to arguments
+                        if valid {
+                            // If a new list is not allocated yet, get any
+                            // previous args allocated
+                            if *allocated == 0 {
+                                for previous in &arguments[..ind] {
+                                    add_to_arg_vector(previous, &mut new_vec, new_count, None, 0);
+                                }
+                                *allocated = 1;
+                                num_start = *new_count;
+                            }
+                            add_to_arg_vector(name, &mut new_vec, new_count, Some(arg), num_prefix);
+                        }
+                        if unsafe { FindNextFileA(h_find, &mut find_file_data) } == 0 {
+                            break;
+                        }
+                    }
+                    unsafe { FindClose(h_find) };
+
+                    if num_start == *new_count {
+                        pass_no_match = true;
+                    } else {
+                        // If got any, sort the strings
+                        let start = num_start as usize;
+                        for jnd in start..(*new_count as usize).saturating_sub(1) {
+                            for knd in jnd + 1..*new_count as usize {
+                                if new_vec[jnd] > new_vec[knd] {
+                                    new_vec.swap(jnd, knd);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // If all this gave no match, add to vector if already allocating
+                if pass_no_match {
+                    if *no_match < 0 {
+                        *no_match = ind as i32;
+                    }
+                    if *allocated != 0 {
+                        add_to_arg_vector(arg, &mut new_vec, new_count, None, 0);
+                    }
+                }
+            } else if *allocated != 0 {
+                add_to_arg_vector(arg, &mut new_vec, new_count, None, 0);
+            }
+        }
+
+        if *allocated != 0 {
+            return Some(new_vec);
+        }
+        *new_count = count;
+        return Some(arguments.to_vec());
+    }
+    #[cfg(not(windows))]
+    {
+        *allocated = 0;
+        *no_match = -1;
+        *new_count = count;
+        Some(arguments.to_vec())
+    }
 }
 /// Matches C `replaceFileArgVec` (`b3dutil.c:1722`).
 ///
 /// Unlike `expandArgList` this body is not conditionally compiled, so it is
-/// translated in full.  On this platform `expandArgList` returns the original
+/// translated in full.  Off Windows `expandArgList` returns the original
 /// vector with `ifAlloc == 0` and `noMatchInd == -1`, which makes the two error
-/// paths and the replacement path unreachable; they are kept because the source
-/// keeps them.
+/// paths and the replacement path unreachable there.
 pub fn replace_file_arg_vec(
     arguments: &mut Vec<Vec<u8>>,
     count: &mut i32,
@@ -3178,6 +3712,306 @@ pub fn b3dcloselockfile(index: &i32) -> i32 {
     b3d_close_lock_file(*index)
 }
 
+// ---------------------------------------------------------------------------
+// Rust-only platform services.
+//
+// None of these is a translated function.  Each stands for one operating-
+// system service that a translated C, Python or Java unit reaches through its
+// runtime (`system()`, `os.access`, `os.stat`, `socket.gethostname`, ...), and
+// gives it the meaning that runtime has on each platform: on Unix exactly the
+// call the translation made before (`PORTABILITY.md`), on Windows what the C
+// runtime, CPython or the JDK does there.
+// ---------------------------------------------------------------------------
+
+/// `os.access` / POSIX `access` mode bits, with the POSIX values on every
+/// platform.
+pub const R_OK: i32 = 4;
+pub const W_OK: i32 = 2;
+pub const X_OK: i32 = 1;
+
+/// POSIX `access(path, mode) == 0` (also Python `os.access`).  A path with an
+/// interior NUL cannot be passed and is not accessible.  On Windows this is
+/// CPython's `os.access`: the path must exist, and `W_OK` additionally fails
+/// for a read-only file that is not a directory; `R_OK` and `X_OK` add
+/// nothing.
+pub fn os_access(path: &str, mode: i32) -> bool {
+    #[cfg(unix)]
+    {
+        std::ffi::CString::new(path)
+            .map(|path| unsafe { libc::access(path.as_ptr(), mode) } == 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        if path.contains('\0') {
+            return false;
+        }
+        match std::fs::metadata(path) {
+            Ok(meta) => mode & W_OK == 0 || meta.is_dir() || !meta.permissions().readonly(),
+            Err(_) => false,
+        }
+    }
+}
+
+/// C `system(command)` and Python `subprocess` with `shell=True`: on Unix
+/// `execl("/bin/sh", "sh", "-c", command)` (so `argv[0]` is `sh`); on
+/// Windows `%COMSPEC% /c "command"` (`cmd.exe` when `COMSPEC` is unset), the
+/// line CPython's `subprocess` builds there.
+pub fn shell_command(command: &str) -> std::process::Command {
+    #[cfg(unix)]
+    {
+        let mut process = std::process::Command::new("/bin/sh");
+        std::os::unix::process::CommandExt::arg0(&mut process, "sh");
+        process.arg("-c").arg(command);
+        process
+    }
+    #[cfg(windows)]
+    {
+        let comspec = std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into());
+        let mut process = std::process::Command::new(comspec);
+        std::os::windows::process::CommandExt::raw_arg(&mut process, format!("/c \"{command}\""));
+        process
+    }
+}
+
+/// `execv`'s separate `argv[0]`: `CommandExt::arg0` on Unix.  Every caller
+/// uses it to run the `imod` launcher as one of its commands (the launcher
+/// dispatches on the base name of `argv[0]`).  Windows passes one command line
+/// and has no separate `argv[0]`, so there the command is named the other way
+/// the launcher accepts, as the first argument (`imod <name> ...`); call this
+/// before adding the other arguments.
+pub fn command_arg0<S: AsRef<std::ffi::OsStr>>(process: &mut std::process::Command, arg0: S) {
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::arg0(process, arg0);
+    #[cfg(not(unix))]
+    if let Some(name) = std::path::Path::new(arg0.as_ref()).file_stem() {
+        process.arg(name);
+    }
+}
+
+/// The signal that ended a child, as `WTERMSIG`; `None` on Windows, where a
+/// process always has an exit code.
+pub fn exit_signal(status: &std::process::ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        std::os::unix::process::ExitStatusExt::signal(status)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        None
+    }
+}
+
+/// `dup2(fileno(file), target)` for the C runtime's descriptor `target` (0, 1
+/// or 2 here).  On Windows the CRT's descriptor table is separate from the
+/// handles `std` holds, so a duplicate of the handle is given a descriptor
+/// first (`_open_osfhandle`); `_dup2` onto 0-2 also resets the process's
+/// standard handles, which is where `std::io` and child processes look.
+/// Returns `dup2`'s result.
+pub fn dup2_file(file: &std::fs::File, target: i32) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        unsafe { libc::dup2(file.as_raw_fd(), target) }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::IntoRawHandle;
+        let Ok(duplicate) = file.try_clone() else {
+            return -1;
+        };
+        // SAFETY: the handle is owned and handed to the CRT, which closes it
+        // with the descriptor.
+        unsafe {
+            let fd = libc::open_osfhandle(duplicate.into_raw_handle() as libc::intptr_t, 0);
+            if fd < 0 {
+                return -1;
+            }
+            let result = libc::dup2(fd, target);
+            libc::close(fd);
+            result
+        }
+    }
+}
+
+/// Windows `TerminateProcess(OpenProcess(PROCESS_TERMINATE, FALSE, pid),
+/// exit_code)`: what the JDK's `Process.destroy`, Python's `os.kill` and
+/// `taskkill /F` do to a single process there.  Returns whether it was
+/// terminated.
+#[cfg(windows)]
+pub fn terminate_process(pid: u32, exit_code: u32) -> bool {
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut core::ffi::c_void;
+        fn TerminateProcess(process: *mut core::ffi::c_void, exit_code: u32) -> i32;
+        fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
+    }
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    // SAFETY: the handle is checked and closed here.
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        let ok = TerminateProcess(handle, exit_code) != 0;
+        CloseHandle(handle);
+        ok
+    }
+}
+
+/// `gethostname` (also Python `socket.gethostname`).  On Windows the DNS
+/// host name, from `GetComputerNameExW(ComputerNamePhysicalDnsHostname)` as
+/// CPython reads it.
+pub fn host_name() -> String {
+    #[cfg(unix)]
+    {
+        let mut buffer = [0u8; 256];
+        unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
+        let end = buffer.iter().position(|&b| b == 0).unwrap_or(buffer.len());
+        String::from_utf8_lossy(&buffer[..end]).into_owned()
+    }
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetComputerNameExW(name_type: i32, buffer: *mut u16, size: *mut u32) -> i32;
+        }
+        const COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME: i32 = 5;
+        let mut buffer = [0u16; 256];
+        let mut size = buffer.len() as u32;
+        // SAFETY: `size` is the buffer's length in UTF-16 units.
+        if unsafe {
+            GetComputerNameExW(
+                COMPUTER_NAME_PHYSICAL_DNS_HOSTNAME,
+                buffer.as_mut_ptr(),
+                &mut size,
+            )
+        } == 0
+        {
+            return std::env::var("COMPUTERNAME").unwrap_or_default();
+        }
+        String::from_utf16_lossy(&buffer[..size as usize])
+    }
+}
+
+/// Python `os.stat(path).st_mtime` (and `os.path.getmtime`): seconds plus
+/// nanoseconds times 1e-9, as a double, on every platform.
+pub fn py_st_mtime(meta: &std::fs::Metadata) -> f64 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        meta.mtime() as f64 + meta.mtime_nsec() as f64 * 1e-9
+    }
+    #[cfg(not(unix))]
+    {
+        match meta
+            .modified()
+            .map(|time| time.duration_since(std::time::UNIX_EPOCH))
+        {
+            Ok(Ok(since)) => since.as_secs() as f64 + since.subsec_nanos() as f64 * 1e-9,
+            Ok(Err(before)) => {
+                let before = before.duration();
+                -(before.as_secs() as f64 + before.subsec_nanos() as f64 * 1e-9)
+            }
+            Err(_) => 0.,
+        }
+    }
+}
+
+/// Python `os.stat(path).st_mode`.  Windows has no mode bits; CPython makes
+/// them up from the attributes: `S_IFDIR | 0o111` or `S_IFREG`, then `0o444`
+/// or, when not read-only, `0o666`, plus `0o111` for `.exe`, `.bat`, `.cmd`
+/// and `.com` files.
+pub fn py_st_mode(meta: &std::fs::Metadata, path: &std::path::Path) -> u32 {
+    #[cfg(unix)]
+    {
+        let _ = path;
+        std::os::unix::fs::PermissionsExt::mode(&meta.permissions())
+    }
+    #[cfg(not(unix))]
+    {
+        let mut mode: u32 = if meta.is_dir() {
+            0o040000 | 0o111
+        } else {
+            0o100000
+        };
+        mode |= if meta.permissions().readonly() {
+            0o444
+        } else {
+            0o666
+        };
+        if !meta.is_dir()
+            && path.extension().is_some_and(|ext| {
+                let ext = ext.to_string_lossy().to_ascii_lowercase();
+                ext == "exe" || ext == "bat" || ext == "cmd" || ext == "com"
+            })
+        {
+            mode |= 0o111;
+        }
+        mode
+    }
+}
+
+/// Python `os.chmod(path, mode)` (also the permission half of `shutil.copy`
+/// and `copystat`).  On Windows CPython can only set or clear the read-only
+/// attribute, from the owner-write bit `S_IWRITE` (0o200).
+pub fn py_chmod<P: AsRef<std::path::Path>>(path: P, mode: u32) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(mode))
+    }
+    #[cfg(not(unix))]
+    {
+        let mut permissions = std::fs::metadata(path.as_ref())?.permissions();
+        permissions.set_readonly(mode & 0o200 == 0);
+        std::fs::set_permissions(path, permissions)
+    }
+}
+
+/// Python `os.mkdir(path, mode)`: the mode is applied (less the umask) on
+/// Unix and ignored on Windows, as CPython ignores it there.
+pub fn py_mkdir<P: AsRef<std::path::Path>>(path: P, mode: u32) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+    builder.create(path)
+}
+
+/// C `localtime_r` (POSIX) / `localtime_s` (Windows).  Returns the
+/// broken-down local time of `time`, or `None` when the C call fails.
+pub fn local_time(time: libc::time_t) -> Option<libc::tm> {
+    // SAFETY: `tm` is plain data that the call fills.
+    unsafe {
+        let mut tm: libc::tm = core::mem::zeroed();
+        #[cfg(unix)]
+        let ok = !libc::localtime_r(&time, &mut tm).is_null();
+        #[cfg(windows)]
+        let ok = libc::localtime_s(&mut tm, &time) == 0;
+        if ok { Some(tm) } else { None }
+    }
+}
+
+/// C `mktime`.  The Windows CRT's 64-bit `time_t` version is `_mktime64`,
+/// which `<time.h>` maps `mktime` to.
+pub fn c_mktime(tm: &mut libc::tm) -> libc::time_t {
+    #[cfg(unix)]
+    {
+        // SAFETY: `tm` is a valid `struct tm`, normalised in place.
+        unsafe { libc::mktime(tm) }
+    }
+    #[cfg(windows)]
+    {
+        unsafe extern "C" {
+            fn _mktime64(tm: *mut libc::tm) -> libc::time_t;
+        }
+        // SAFETY: as above.
+        unsafe { _mktime64(tm) }
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -3195,7 +4029,7 @@ mod tests {
     fn c_format_matches_the_c_library_over_a_matrix_of_formats_and_values() {
         fn c_double(fmt: &str, v: f64) -> String {
             let cfmt = std::ffi::CString::new(fmt).unwrap();
-            let mut buf = [0i8; 512];
+            let mut buf = [0 as libc::c_char; 512];
             unsafe {
                 libc::snprintf(buf.as_mut_ptr(), buf.len(), cfmt.as_ptr(), v);
                 std::ffi::CStr::from_ptr(buf.as_ptr())
@@ -3205,7 +4039,7 @@ mod tests {
         }
         fn c_long(fmt: &str, v: i64) -> String {
             let cfmt = std::ffi::CString::new(fmt).unwrap();
-            let mut buf = [0i8; 512];
+            let mut buf = [0 as libc::c_char; 512];
             unsafe {
                 libc::snprintf(buf.as_mut_ptr(), buf.len(), cfmt.as_ptr(), v);
                 std::ffi::CStr::from_ptr(buf.as_ptr())
@@ -3216,7 +4050,7 @@ mod tests {
         fn c_str(fmt: &str, v: &str) -> String {
             let cfmt = std::ffi::CString::new(fmt).unwrap();
             let cv = std::ffi::CString::new(v).unwrap();
-            let mut buf = [0i8; 512];
+            let mut buf = [0 as libc::c_char; 512];
             unsafe {
                 libc::snprintf(buf.as_mut_ptr(), buf.len(), cfmt.as_ptr(), cv.as_ptr());
                 std::ffi::CStr::from_ptr(buf.as_ptr())
@@ -3340,7 +4174,7 @@ mod tests {
         // compared stderr as well as stdout.
         fn c_int(fmt: &str, v: i32) -> String {
             let cfmt = std::ffi::CString::new(fmt).unwrap();
-            let mut buf = [0i8; 512];
+            let mut buf = [0 as libc::c_char; 512];
             unsafe {
                 libc::snprintf(buf.as_mut_ptr(), buf.len(), cfmt.as_ptr(), v);
                 std::ffi::CStr::from_ptr(buf.as_ptr())

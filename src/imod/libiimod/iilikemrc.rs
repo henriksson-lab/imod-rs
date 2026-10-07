@@ -4,6 +4,7 @@
 //! Each C definition is retained as one systematic snake-case Rust function,
 //! with the original C identifier named in its doc comment.
 
+use crate::imod::libcfshr::b3dutil::OsStrExt;
 use crate::imod::libcfshr::b3dutil::{
     CArg, ImodFile, SEEK_END, SEEK_SET, b3d_error, b3d_fread, b3d_fseek, b3d_i_min, b3d_rewind,
     c_format_bytes, wall_time,
@@ -20,7 +21,6 @@ use crate::imod::libiimod::mrcfiles::{
 };
 use std::cell::{Cell, RefCell};
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 
 /// C `MAX_EM_MACHINES` (`iilikemrc.c:23`).
 pub const MAX_EM_MACHINES: i32 = 20;

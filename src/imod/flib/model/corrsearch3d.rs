@@ -96,6 +96,10 @@ lowpass:LowPassRadiusSigma:FP:@sigma1:HighPassSigma:F:@\
 messages:FlipYZMessages:B:@invert:InvertYLimits:B:@debug:DebugMode:I:@\
 param:ParameterFile:PF:@help:usage:B:";
 
+// libmvec is glibc's, and the vector ABI below is x86_64's: elsewhere the
+// weights all go through scalar `expf` (`kernel_smooth`), which differs from
+// the vector variant by at most an ulp in four weights (`PORTABILITY.md`).
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
 #[link(name = "mvec")]
 unsafe extern "C" {
     /// glibc libmvec's 4-lane SSE `expf` (`_ZGVbN4v_expf@GLIBC_2.22`), the
@@ -3530,6 +3534,7 @@ fn kernel_smooth(
                     / sig2)
             };
             let mut k = 1;
+            #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
             if isize - 1 > 2 {
                 use core::arch::x86_64::{_mm_setr_ps, _mm_storeu_ps};
                 let mut lanes = [0.0_f32; 4];

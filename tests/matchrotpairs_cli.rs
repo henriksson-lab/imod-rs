@@ -17,6 +17,7 @@
 mod common;
 mod pysetup_common;
 
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 
 #[test]
@@ -48,6 +49,7 @@ fn matchrotpairs_matches_native_goldens() {
             ),
         )
         .unwrap();
+        #[cfg(unix)]
         std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
         let path = std::env::var("PATH").unwrap_or_default();
         // SAFETY: this test binary runs this one test; nothing else reads the

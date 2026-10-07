@@ -31,13 +31,32 @@ pub fn b3dtouch(arguments: &[OsString]) -> i32 {
     let result = if Path::new(fname).exists() {
         mess = "Updating time of existing file ";
         // `os.utime(fname, None)`: access and modification times set to now.
-        let path = std::ffi::CString::new(fname.as_bytes()).unwrap_or_default();
-        // SAFETY: `utime` with a NULL times pointer sets both to the current
-        // time; `path` is a valid C string.
-        if unsafe { libc::utime(path.as_ptr(), std::ptr::null()) } == 0 {
-            Ok(())
-        } else {
-            Err(std::io::Error::last_os_error())
+        #[cfg(unix)]
+        {
+            let path = std::ffi::CString::new(fname.as_bytes()).unwrap_or_default();
+            // SAFETY: `utime` with a NULL times pointer sets both to the current
+            // time; `path` is a valid C string.
+            if unsafe { libc::utime(path.as_ptr(), std::ptr::null()) } == 0 {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        }
+        // CPython's Windows `os.utime(path, None)`: `SetFileTime` to the
+        // current time on a handle opened for writing attributes.
+        #[cfg(not(unix))]
+        {
+            let now = std::time::SystemTime::now();
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(fname)
+                .and_then(|file| {
+                    file.set_times(
+                        std::fs::FileTimes::new()
+                            .set_accessed(now)
+                            .set_modified(now),
+                    )
+                })
         }
     } else {
         mess = "Creating a new empty file ";

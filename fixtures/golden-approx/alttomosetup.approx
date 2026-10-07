@@ -1,0 +1,4 @@
+# imod-rs numeric fingerprints of the digest entries in golden.manifest, for
+# the tolerance mode of tests/common/golden.rs (PORTABILITY.md).  Made by a
+# replay with IMOD_RS_GOLDEN_FINGERPRINT=1 or by recording.
+golden/alt_ctf_erase_filter1/alttomo-002-sync.com	text 2f90fae24c6215f6e5b888d4d1283a21a29bb1f0b5a3fe7a3a3d8a11c79415e4 6 -1.0 1.0 0.0 1 0 0.0 0.0 0.0 0 0 1.0 1.0 0.1 1 0 0.0 0.0 0.0 0 0 0.0 0.0 0.0 0 0 4.5 4.5 0.1 1 0 0.0 0.0 0.0 0 0 0.0 0.0 0.0 0 0 0.0 0.0 0.0 1 0 0.0 0.0 0.0 0 0 0.0 0.0 0.0 1 0 0.0 0.0 0.0 0 0 0.0 0.0 0.0 0 0 1.0 1.0 0.1 1 0 0.0 0.0 0.0 0 0 0.0 0.0 0.0 0 0

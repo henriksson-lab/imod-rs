@@ -364,10 +364,8 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        unsafe {
-            libc::localtime_r(&seconds, &mut tm);
-        }
+        let tm: libc::tm = crate::imod::libcfshr::b3dutil::local_time(seconds as libc::time_t)
+            .unwrap_or_else(|| unsafe { std::mem::zeroed() });
         // Days from the civil date to 1970-01-01 (proleptic Gregorian)
         let days_from_civil = |year: i64, month: i64, day: i64| -> i64 {
             let year = if month <= 2 { year - 1 } else { year };
@@ -787,9 +785,10 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
                 com_dir = String::new();
             }
             // `os.access(comDir, os.W_OK)`: the POSIX `access` call itself
-            let writable = std::ffi::CString::new(com_dir.as_bytes())
-                .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-                .unwrap_or(false);
+            let writable = crate::imod::libcfshr::b3dutil::os_access(
+                &com_dir,
+                crate::imod::libcfshr::b3dutil::W_OK,
+            );
             if !writable {
                 if make_current_dir_writable(&com_dir).is_some() {
                     warning(&format!(
@@ -2546,9 +2545,7 @@ pub fn copytomocoms(arguments: &[OsString]) -> i32 {
         // If it fails fall through to using python method.  Note that if cygwin does not exist
         // vmstopy will run savework explicitly with python
         {
-            use std::os::unix::fs::PermissionsExt as _;
-            if std::fs::set_permissions(backupname, std::fs::Permissions::from_mode(0o755)).is_err()
-            {
+            if crate::imod::libcfshr::b3dutil::py_chmod(backupname, 0o755).is_err() {
                 exit_error(&format!("Setting permissions of {backupname}"));
             }
         }

@@ -21,6 +21,10 @@ static CURRENT_ROOTNAME: LazyLock<Mutex<String>> = LazyLock::new(|| Mutex::new(S
 /// not apply past 3.9, so `10000 * 3 + 100 * 12`).
 const PY_VERSION: i32 = 31200;
 static MOC_RENAMES_OK: AtomicBool = AtomicBool::new(true);
+/// `mocRecursiveCopyOK`, `mocUseXcopy`, `mocXcopyExists` (`imodpy.py:138-141`).
+static MOC_RECURSIVE_COPY_OK: AtomicBool = AtomicBool::new(true);
+static MOC_USE_XCOPY: AtomicBool = AtomicBool::new(false);
+static MOC_XCOPY_EXISTS: AtomicBool = AtomicBool::new(false);
 /// Rust-only: the unit number [`header_in_process`] opens on; `header` itself
 /// always uses unit 1 (`header.f90:132`).
 static HEADER_UNIT: AtomicI32 = AtomicI32::new(1);
@@ -191,7 +195,7 @@ pub fn run_cmd(
     // unchanged.
     let own_child = own_command_words(command, false).and_then(|(_, words)| {
         let exe = std::env::current_exe().ok()?;
-        if exe.file_name()? != "imod" {
+        if exe.file_name()?.to_string_lossy() != format!("imod{}", std::env::consts::EXE_SUFFIX) {
             return None;
         }
         Some((exe, words))
@@ -200,16 +204,14 @@ pub fn run_cmd(
     let mut process = match &own_child {
         Some((exe, words)) => {
             let mut process = Command::new(exe);
-            std::os::unix::process::CommandExt::arg0(&mut process, exe.with_file_name(&words[0]));
+            crate::imod::libcfshr::b3dutil::command_arg0(
+                &mut process,
+                exe.with_file_name(&words[0]),
+            );
             process.args(&words[1..]);
             process
         }
-        None => {
-            let mut process = Command::new("/bin/sh");
-            std::os::unix::process::CommandExt::arg0(&mut process, "sh");
-            process.arg("-c").arg(command);
-            process
-        }
+        None => crate::imod::libcfshr::b3dutil::shell_command(command),
     };
     // `Popen(..., stdin=PIPE)` in all three of the source's forms, so the
     // command reads the given input and then end-of-file, never the caller's
@@ -353,7 +355,7 @@ pub fn run_cmd(
     }
     // `p.returncode` is minus the signal number for a killed command
     let ec = output.status.code().unwrap_or_else(|| {
-        std::os::unix::process::ExitStatusExt::signal(&output.status).map_or(1, |signal| -signal)
+        crate::imod::libcfshr::b3dutil::exit_signal(&output.status).map_or(1, |signal| -signal)
     });
     if ec != 0 {
         *ERR_STATUS.lock().expect("imodpy status mutex") = ec;
@@ -784,11 +786,25 @@ pub fn bkgd_process(
         // `stderr=STDOUT`: the child's standard error duplicates its
         // standard output descriptor, whatever that is
         if err_to_stdout {
-            let duplicate = match &outf {
-                Some(file) => file.try_clone().map(std::os::fd::OwnedFd::from),
+            let duplicate: std::io::Result<std::fs::File> = match &outf {
+                Some(file) => file.try_clone(),
                 None => {
-                    use std::os::fd::AsFd;
-                    std::io::stdout().as_fd().try_clone_to_owned()
+                    #[cfg(unix)]
+                    {
+                        use std::os::fd::AsFd;
+                        std::io::stdout()
+                            .as_fd()
+                            .try_clone_to_owned()
+                            .map(std::fs::File::from)
+                    }
+                    #[cfg(windows)]
+                    {
+                        use std::os::windows::io::AsHandle;
+                        std::io::stdout()
+                            .as_handle()
+                            .try_clone_to_owned()
+                            .map(std::fs::File::from)
+                    }
                 }
             };
             errf = Some(Stdio::from(
@@ -800,6 +816,23 @@ pub fn bkgd_process(
         }
         if let Some(stdio) = errf {
             process.stderr(stdio);
+        }
+        // Use detached flag on Windows, although it may not be needed.  In
+        // fact, unless stderr is going to a file it keeps it from running
+        // there (`imodpy.py:415-420`)
+        #[cfg(windows)]
+        {
+            let err_to_file = (outfile.is_some_and(|name| !name.is_empty())
+                && errfile == Some("stdout"))
+                || errfile
+                    .is_some_and(|name| !name.is_empty() && name != "stdout" && name != "devnull");
+            if err_to_file {
+                const DETACHED_PROCESS: u32 = 0x0000_0008;
+                std::os::windows::process::CommandExt::creation_flags(
+                    &mut process,
+                    DETACHED_PROCESS,
+                );
+            }
         }
         process
             .spawn()
@@ -3313,9 +3346,7 @@ pub fn imod_temp_dir() -> String {
     // `os.access(path, os.W_OK)`: the POSIX `access` call itself, which asks
     // about this process's real user rather than the permission bits alone
     let writable = |path: &str| -> bool {
-        std::ffi::CString::new(path)
-            .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-            .unwrap_or(false)
+        crate::imod::libcfshr::b3dutil::os_access(path, crate::imod::libcfshr::b3dutil::W_OK)
     };
     let windows = cfg!(windows) || cfg!(target_os = "cygwin");
     if let Some(imodtemp) = std::env::var_os("IMOD_TMPDIR") {
@@ -3408,22 +3439,270 @@ pub fn add_imod_bin_ignore_sighup() {
     unsafe {
         std::env::set_var("PATH", path);
     }
-    if !cfg!(windows) {
-        unsafe {
-            libc::signal(libc::SIGHUP, libc::SIG_IGN);
-        }
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGHUP, libc::SIG_IGN);
     }
 }
 
 /// Matches `imodNice` (`IMOD/pysrc/imodpy.py:1463`) at the POSIX process-priority boundary.
 pub fn imod_nice(nice_increment: i32) -> i32 {
-    if cfg!(windows) {
-        return if nice_increment < 4 { 0 } else { 1 };
+    #[cfg(windows)]
+    {
+        // `imodpy.py:1467-1480`: `psutil.Process(os.getpid()).nice(priority)`,
+        // which is `SetPriorityClass` on the current process.
+        if nice_increment < 4 {
+            return 0;
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GetCurrentProcess() -> *mut core::ffi::c_void;
+            fn SetPriorityClass(process: *mut core::ffi::c_void, class: u32) -> i32;
+        }
+        const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+        const IDLE_PRIORITY_CLASS: u32 = 0x0000_0040;
+        let priority = if nice_increment <= 15 {
+            BELOW_NORMAL_PRIORITY_CLASS
+        } else {
+            IDLE_PRIORITY_CLASS
+        };
+        // SAFETY: the pseudo-handle of the current process.
+        unsafe { SetPriorityClass(GetCurrentProcess(), priority) };
+        return 0;
     }
+    #[cfg(unix)]
     unsafe {
         libc::nice(nice_increment);
     }
     0
+}
+
+/// Rust-only: the Win32 calls behind the `psutil` methods IMOD's Windows
+/// Python arms use (`imodkillgroup`, `b3dwinps`, `imodNice`).  `psutil` is a
+/// third-party module that Windows IMOD requires; these are the calls it makes
+/// there.  The `psutil.Process` object is represented by its PID.
+#[cfg(windows)]
+pub mod psutil {
+    type Handle = *mut core::ffi::c_void;
+    const TH32CS_SNAPPROCESS: u32 = 0x0000_0002;
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    const PROCESS_SUSPEND_RESUME: u32 = 0x0800;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const INVALID_HANDLE_VALUE: Handle = -1_isize as Handle;
+
+    #[repr(C)]
+    struct ProcessEntry32W {
+        dw_size: u32,
+        cnt_usage: u32,
+        th32_process_id: u32,
+        th32_default_heap_id: usize,
+        th32_module_id: u32,
+        cnt_threads: u32,
+        th32_parent_process_id: u32,
+        pc_pri_class_base: i32,
+        dw_flags: u32,
+        sz_exe_file: [u16; 260],
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> Handle;
+        fn Process32FirstW(snapshot: Handle, entry: *mut ProcessEntry32W) -> i32;
+        fn Process32NextW(snapshot: Handle, entry: *mut ProcessEntry32W) -> i32;
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+        fn QueryFullProcessImageNameW(
+            process: Handle,
+            flags: u32,
+            name: *mut u16,
+            size: *mut u32,
+        ) -> i32;
+        fn TerminateProcess(process: Handle, exit_code: u32) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
+        fn GetProcessTimes(
+            process: Handle,
+            creation: *mut u64,
+            exit: *mut u64,
+            kernel: *mut u64,
+            user: *mut u64,
+        ) -> i32;
+    }
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn OpenProcessToken(process: Handle, access: u32, token: *mut Handle) -> i32;
+        fn GetTokenInformation(
+            token: Handle,
+            class: i32,
+            information: *mut core::ffi::c_void,
+            length: u32,
+            return_length: *mut u32,
+        ) -> i32;
+        fn LookupAccountSidW(
+            system: *const u16,
+            sid: *mut core::ffi::c_void,
+            name: *mut u16,
+            name_length: *mut u32,
+            domain: *mut u16,
+            domain_length: *mut u32,
+            use_: *mut i32,
+        ) -> i32;
+    }
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        fn NtSuspendProcess(process: Handle) -> i32;
+    }
+
+    /// `psutil.process_iter()` with `ppid()`: (PID, parent PID) pairs.
+    pub fn process_list() -> Vec<(i64, i64)> {
+        let mut list = Vec::new();
+        // SAFETY: the snapshot handle is checked and closed; the entry has
+        // its size set as the API requires.
+        unsafe {
+            let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snapshot == INVALID_HANDLE_VALUE {
+                return list;
+            }
+            let mut entry: ProcessEntry32W = core::mem::zeroed();
+            entry.dw_size = core::mem::size_of::<ProcessEntry32W>() as u32;
+            let mut ok = Process32FirstW(snapshot, &mut entry);
+            while ok != 0 {
+                list.push((
+                    entry.th32_process_id as i64,
+                    entry.th32_parent_process_id as i64,
+                ));
+                ok = Process32NextW(snapshot, &mut entry);
+            }
+            CloseHandle(snapshot);
+        }
+        list
+    }
+
+    /// `proc.exe()`, or `None` for `AccessDenied`/`NoSuchProcess`.
+    pub fn process_exe(pid: i64) -> Option<String> {
+        // SAFETY: the process handle is checked and closed.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+            if handle.is_null() {
+                return None;
+            }
+            let mut name = [0u16; 32768];
+            let mut size = name.len() as u32;
+            let ok = QueryFullProcessImageNameW(handle, 0, name.as_mut_ptr(), &mut size);
+            CloseHandle(handle);
+            if ok == 0 {
+                return None;
+            }
+            Some(String::from_utf16_lossy(&name[..size as usize]))
+        }
+    }
+
+    fn with_process(
+        pid: i64,
+        access: u32,
+        call: impl FnOnce(Handle) -> bool,
+    ) -> Result<(), String> {
+        // SAFETY: the process handle is checked and closed.
+        unsafe {
+            let handle = OpenProcess(access, 0, pid as u32);
+            if handle.is_null() {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+            let ok = call(handle);
+            let error = std::io::Error::last_os_error();
+            CloseHandle(handle);
+            if ok { Ok(()) } else { Err(error.to_string()) }
+        }
+    }
+
+    /// `proc.username()`: `DOMAIN\\user` of the process's token owner, or
+    /// `None` for `AccessDenied`/`NoSuchProcess`.
+    pub fn username(pid: i64) -> Option<String> {
+        const TOKEN_QUERY: u32 = 0x0008;
+        const TOKEN_USER: i32 = 1;
+        // SAFETY: handles are checked and closed; the token buffer is sized
+        // by the first call, and its first field is the SID pointer.
+        unsafe {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+            if process.is_null() {
+                return None;
+            }
+            let mut token: Handle = core::ptr::null_mut();
+            let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token) != 0;
+            CloseHandle(process);
+            if !opened {
+                return None;
+            }
+            let mut length = 0_u32;
+            GetTokenInformation(token, TOKEN_USER, core::ptr::null_mut(), 0, &mut length);
+            let mut buffer = vec![0_usize; (length as usize).div_ceil(8).max(1)];
+            let ok = GetTokenInformation(
+                token,
+                TOKEN_USER,
+                buffer.as_mut_ptr().cast(),
+                length,
+                &mut length,
+            ) != 0;
+            CloseHandle(token);
+            if !ok {
+                return None;
+            }
+            let sid = buffer[0] as *mut core::ffi::c_void;
+            let mut name = [0_u16; 256];
+            let mut domain = [0_u16; 256];
+            let mut name_length = name.len() as u32;
+            let mut domain_length = domain.len() as u32;
+            let mut use_ = 0_i32;
+            if LookupAccountSidW(
+                core::ptr::null(),
+                sid,
+                name.as_mut_ptr(),
+                &mut name_length,
+                domain.as_mut_ptr(),
+                &mut domain_length,
+                &mut use_,
+            ) == 0
+            {
+                return None;
+            }
+            Some(format!(
+                "{}\\{}",
+                String::from_utf16_lossy(&domain[..domain_length as usize]),
+                String::from_utf16_lossy(&name[..name_length as usize])
+            ))
+        }
+    }
+
+    /// `proc.create_time()`: seconds since the epoch, as a float.
+    pub fn create_time(pid: i64) -> Option<f64> {
+        // SAFETY: the process handle is checked and closed.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+            if handle.is_null() {
+                return None;
+            }
+            let (mut creation, mut exit, mut kernel, mut user) = (0_u64, 0_u64, 0_u64, 0_u64);
+            let ok = GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user) != 0;
+            CloseHandle(handle);
+            if !ok {
+                return None;
+            }
+            // FILETIME counts 100 ns from 1601; psutil subtracts the epoch.
+            Some((creation as f64 - 116_444_736_000_000_000.0) / 10_000_000.0)
+        }
+    }
+
+    /// `proc.suspend()`.
+    pub fn suspend(pid: i64) -> Result<(), String> {
+        with_process(pid, PROCESS_SUSPEND_RESUME, |handle| unsafe {
+            NtSuspendProcess(handle) >= 0
+        })
+    }
+
+    /// `proc.kill()`: psutil terminates with exit code `SIGTERM` (15).
+    pub fn kill(pid: i64) -> Result<(), String> {
+        with_process(pid, PROCESS_TERMINATE, |handle| unsafe {
+            TerminateProcess(handle, 15) != 0
+        })
+    }
 }
 
 /// Matches `setLibPath` (`IMOD/pysrc/imodpy.py:1510`).
@@ -3504,21 +3783,52 @@ pub fn make_current_dir_writable(subdirectory: &str) -> Option<String> {
         &[],
     ) {
         Ok(_) => None,
-        Err(error) => Some(error.to_string()),
+        // `imodpy.py:1578-1585`: set the user bits with `os.chmod`, and when
+        // that fails, report whether a file can be written there at all
+        Err(_) => {
+            let mode = fs::metadata(".")
+                .map(|meta| {
+                    crate::imod::libcfshr::b3dutil::py_st_mode(&meta, Path::new(".")) & 0o7777
+                })
+                .unwrap_or(0);
+            if crate::imod::libcfshr::b3dutil::py_chmod(".", mode | 0o400 | 0o200 | 0o100).is_err()
+            {
+                let test_file = format!("{subdirectory}/writetest.tmp");
+                let err_str =
+                    write_text_file(&test_file, &["Test for writability".to_owned()], true).err();
+                cleanup_files(&[test_file]);
+                return err_str;
+            }
+            None
+        }
     }
 }
 
-/// Matches `initializeMoveOrCopy` (`IMOD/pysrc/imodpy.py:1653`).  The
-/// Windows probe for `robocopy`/`xcopy` is not translated: on this platform
-/// only `mocRenamesOK` and `mocXcopyExists` are reset.
-pub fn initialize_move_or_copy(_skip_win_copy: i32) {
+/// Matches `initializeMoveOrCopy` (`IMOD/pysrc/imodpy.py:1653`).  Set
+/// `skip_win_copy` to 1 to not use robocopy, 2 to not use xcopy either.
+pub fn initialize_move_or_copy(skip_win_copy: i32) {
     MOC_RENAMES_OK.store(true, Ordering::SeqCst);
+    MOC_XCOPY_EXISTS.store(false, Ordering::SeqCst);
+
+    // If in Windows, see if recursive copy available with native Windows commands
+    // xcopy is deprecated so prefer robocopy
+    if cfg!(windows) {
+        let xcopy_exists = Path::new("C:/Windows/system32/xcopy.exe").exists() && skip_win_copy < 2;
+        MOC_XCOPY_EXISTS.store(xcopy_exists, Ordering::SeqCst);
+        if skip_win_copy > 0 || !Path::new("C:/Windows/system32/robocopy.exe").exists() {
+            if xcopy_exists {
+                MOC_USE_XCOPY.store(true, Ordering::SeqCst);
+            } else {
+                MOC_RECURSIVE_COPY_OK.store(false, Ordering::SeqCst);
+            }
+        }
+    }
 }
 
-/// Matches `moveOrCopyWithRetry` (`IMOD/pysrc/imodpy.py:1672`) on a
-/// non-Windows platform, where the source's Windows command branch is never
-/// taken and `mocRecursiveCopyOK` stays true.  `cp -rf` is an external
-/// process boundary.
+/// Matches `moveOrCopyWithRetry` (`IMOD/pysrc/imodpy.py:1672`), with its
+/// Windows arm (`ROBOCOPY`/`XCOPY`/`COPY` through `runcmd`); the Cygwin
+/// variants of that arm are not translated.  `cp -rf` is an external process
+/// boundary.
 ///
 /// Not translated: the `numTrials > 1` branch's `shutil.copy`/`shutil.move`
 /// for a **directory** (`shutil.move`'s `copytree` fallback); a file is
@@ -3539,7 +3849,20 @@ pub fn move_or_copy_with_retry(
 
     // If moving and renames have been OK so far or not tested yet, try one os.rename
     // and if anything goes wrong, mark renames as bad and fall back to copy/deletes
-    if MOC_RENAMES_OK.load(Ordering::SeqCst) && !if_copy {
+    let is_windows = cfg!(windows);
+    // `os.stat(...).st_dev`, the volume on Windows: the path's drive prefix
+    let same_device = || -> bool {
+        let prefix = |path: &str| {
+            fs::canonicalize(path).ok().and_then(|full| {
+                full.components()
+                    .next()
+                    .map(|first| first.as_os_str().to_owned())
+            })
+        };
+        prefix(&from_file).is_some() && prefix(&from_file) == prefix(&to_dir)
+    };
+    // But do not try this on Windows unless it is the same file system
+    if MOC_RENAMES_OK.load(Ordering::SeqCst) && !if_copy && (!is_windows || same_device()) {
         if fs::rename(&from_file, format!("{to_dir}/{}", basename(&from_file))).is_ok() {
             return 0;
         }
@@ -3549,8 +3872,9 @@ pub fn move_or_copy_with_retry(
     let mut last_error = String::new();
     for trial in 0..num_trials {
         let attempt: Result<(), String> = (|| {
-            // If multiple trials use the dog-slow shutil
-            if num_trials > 1 {
+            // If multiple trials, or if moving file and no directory copy
+            // available at all, use the dog-slow shutil
+            if num_trials > 1 || (moving_dir && !MOC_RECURSIVE_COPY_OK.load(Ordering::SeqCst)) {
                 let real_dst = format!("{to_dir}/{}", basename(&from_file));
                 if if_copy {
                     // `shutil.copy`: contents and permission bits
@@ -3566,12 +3890,56 @@ pub fn move_or_copy_with_retry(
                     }
                 }
             } else {
-                let command = fmtstr("cp -rf \"{}\" \"{}\"", &[from_file.clone(), to_dir.clone()]);
+                // Otherwise, set up to copy file or directory, using the extended
+                // copy command in Windows for directories
+                let mut ignore: Vec<i32> = Vec::new();
+                let mut move_file_with_robo = false;
+                let mut move_dir_with_robo = false;
+                let command = if is_windows {
+                    let recursive_ok = MOC_RECURSIVE_COPY_OK.load(Ordering::SeqCst);
+                    let use_xcopy = MOC_USE_XCOPY.load(Ordering::SeqCst);
+                    // Move a single file with robocopy if that exists; good exit status is 3
+                    move_file_with_robo = !if_copy && !moving_dir && recursive_ok && !use_xcopy;
+                    if move_file_with_robo {
+                        // `os.path.dirname`
+                        let mut from_dir = Path::new(&from_file)
+                            .parent()
+                            .map(|dir| dir.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if from_dir.is_empty() {
+                            from_dir = ".".to_owned();
+                        }
+                        ignore = vec![1, 3];
+                        fmtstr(
+                            "ROBOCOPY /S /MOV \"{}\" \"{}\" \"{}\"",
+                            &[from_dir, to_dir.clone(), basename(&from_file)],
+                        )
+                    } else if !moving_dir {
+                        // Or copy a single file if copying, or if can't move with robocopy
+                        fmtstr(
+                            "{}COPY /Y \"{}\" \"{}\"",
+                            &[String::new(), from_file.clone(), to_dir.clone()],
+                        )
+                    } else {
+                        // Or copy directory with xcopy or robocopy: the good exit status is 1
+                        let command = if use_xcopy {
+                            "XCOPY /Y /S /I".to_owned()
+                        } else {
+                            ignore = vec![1];
+                            move_dir_with_robo = true;
+                            "ROBOCOPY /S /MOVE".to_owned()
+                        };
+                        let to_file = format!("{to_dir}/{}", basename(&from_file));
+                        fmtstr("{} \"{}\" \"{}\"", &[command, from_file.clone(), to_file])
+                    }
+                } else {
+                    fmtstr("cp -rf \"{}\" \"{}\"", &[from_file.clone(), to_dir.clone()])
+                };
                 // `runcmd` raises a bare `ImodpyError`, whose `str()` is empty
-                run_cmd(&command, None, None, None, &[]).map_err(|_| String::new())?;
+                run_cmd(&command, None, None, None, &ignore).map_err(|_| String::new())?;
 
-                // Now for move, remove the tree or file
-                if !if_copy {
+                // Now for move, remove the tree or file if not done with robocopy
+                if !if_copy && !move_file_with_robo && !move_dir_with_robo {
                     if moving_dir {
                         fs::remove_dir_all(&from_file).map_err(|error| error.to_string())?;
                     } else {

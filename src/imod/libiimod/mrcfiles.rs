@@ -3317,6 +3317,8 @@ mod tests {
 
     /// `mrcfiles.c:537-555`: the label print trims trailing blanks and emits through the C
     /// stdout stream, and rejects an out-of-range index.
+    // POSIX descriptor plumbing (`open`/`read`/`unlink` on fd 1).
+    #[cfg(unix)]
     #[test]
     fn mrc_print_label_string_trims_trailing_blanks_on_c_stdout() {
         unsafe {

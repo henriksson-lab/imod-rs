@@ -400,6 +400,8 @@ pub const COMMANDS: &[Command] = &[
     ),
     cmd("xyzproj", crate::imod::flib::image::xyzproj::xyzproj, true),
     cmd("b3dhostname", b3dhostname, false),
+    cmd("b3dwinps", b3dwinps, false),
+    cmd("imodwincpu", imodwincpu, true),
     cmd("b3dtouch", b3dtouch, false),
     cmd("b3dtomosetexts", b3dtomosetexts, false),
     cmd("startprocess", startprocess, false),
@@ -859,6 +861,24 @@ fn vmstopy() {
 
 fn b3dhostname() {
     exit(crate::imod::pysrc::b3dhostname::b3dhostname())
+}
+
+fn b3dwinps() {
+    exit(crate::imod::pysrc::b3dwinps::b3dwinps(&program_args_os()))
+}
+
+fn imodwincpu() {
+    // Windows-only in the source: it is built from `<windows.h>` and reads
+    // the Windows performance counters.
+    #[cfg(windows)]
+    exit(crate::imod::imodutil::imodwincpu::imodwincpu(
+        &program_args(),
+    ));
+    #[cfg(not(windows))]
+    {
+        eprintln!("ERROR: imodwincpu - not available on this platform");
+        exit(1)
+    }
 }
 
 fn b3dtouch() {

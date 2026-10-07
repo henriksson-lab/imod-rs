@@ -11,7 +11,6 @@
 
 use std::ffi::OsString;
 use std::io::Write as _;
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 
 /// The script's top level (`b3dcopy:9-85`).  Returns the status of its
@@ -123,8 +122,12 @@ pub fn b3dcopy(arguments: &[OsString]) -> i32 {
     let mut set = false;
     for trial in 0..max_trials {
         let result = std::fs::metadata(&tofile).and_then(|meta| {
-            let mode = (meta.permissions().mode() & 0o7777) | 0o400 | 0o200;
-            std::fs::set_permissions(&tofile, std::fs::Permissions::from_mode(mode))
+            let mode =
+                (crate::imod::libcfshr::b3dutil::py_st_mode(&meta, std::path::Path::new(&tofile))
+                    & 0o7777)
+                    | 0o400
+                    | 0o200;
+            crate::imod::libcfshr::b3dutil::py_chmod(&tofile, mode)
         });
         match result {
             Ok(()) => {

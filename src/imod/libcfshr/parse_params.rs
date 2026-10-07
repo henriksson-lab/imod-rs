@@ -55,7 +55,10 @@ const LINE_STR_SIZE: i32 = 102400;
 const ADOC_STR_SIZE: i32 = 10240;
 /* #define PREFIX_SIZE    64 */
 const PREFIX_SIZE: usize = 64;
-/* #define PATH_SEPARATOR '/' on everything but _WIN32 */
+/* `parse_params.c:27-31`: '\\' on _WIN32, '/' on everything else */
+#[cfg(windows)]
+const PATH_SEPARATOR: u8 = b'\\';
+#[cfg(not(windows))]
 const PATH_SEPARATOR: u8 = b'/';
 /* #define OPTFILE_DIR "autodoc" */
 const OPTFILE_DIR: &[u8] = b"autodoc";
@@ -645,7 +648,9 @@ pub fn pip_next_arg(arg_string: &[u8]) -> i32 {
             path comes from `argv` as bytes, so the file is opened from the
             bytes and wrapped in the same type. */
             match std::fs::File::open(std::path::Path::new(
-                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&arg_copy),
+                <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::from_bytes(
+                    &arg_copy,
+                ),
             ))
             .ok()
             .map(ImodFile::from_std)
@@ -727,21 +732,51 @@ pub fn pip_next_arg(arg_string: &[u8]) -> i32 {
     }
 
     /* A non-option argument.
-    `expandArgList` (`b3dutil.c:1702-1707`) is a wild-card expansion that
-    exists only under `_WIN32`; everywhere else it is the `#else` arm, which
-    sets `*ifAlloc = 0`, `*noMatchInd = -1`, `*newNum = numArg` and returns
-    the vector it was given.  Calling the translated `expand_arg_list` would
-    put a `*const *const c_char` back into a converted unit, so the `#else`
-    arm is written out here instead. */
-    let new_num = 1;
-    for _i in 0..new_num {
-        let arg_copy = arg_string.to_vec();
-        let err = add_value_string(S_NON_OPT_IND.get(), &arg_copy);
-        if err != 0 {
-            return err;
+    `expandArgList` (`b3dutil.c:1579`) is a wild-card expansion that exists
+    only under `_WIN32`; everywhere else it is the `#else` arm, which sets
+    `*ifAlloc = 0`, `*noMatchInd = -1`, `*newNum = numArg` and returns the
+    vector it was given, so that arm is written out here off Windows. */
+    #[cfg(not(windows))]
+    {
+        let new_num = 1;
+        for _i in 0..new_num {
+            let arg_copy = arg_string.to_vec();
+            let err = add_value_string(S_NON_OPT_IND.get(), &arg_copy);
+            if err != 0 {
+                return err;
+            }
         }
+        0
     }
-    0
+    // On Windows the expansion is real (`parse_params.c:572-588`).
+    #[cfg(windows)]
+    {
+        let mut new_num = 0;
+        let mut if_alloc = 0;
+        let mut no_match = 0;
+        let Some(new_args) = crate::imod::libcfshr::b3dutil::expand_arg_list(
+            &[arg_string.to_vec()],
+            1,
+            &mut new_num,
+            &mut if_alloc,
+            &mut no_match,
+        ) else {
+            pip_set_error(b"Memory allocation failed when expanding non-option arguments");
+            return -1;
+        };
+        for i in 0..new_num as usize {
+            let arg_copy = if if_alloc == 0 {
+                arg_string.to_vec()
+            } else {
+                new_args[i].clone()
+            };
+            let err = add_value_string(S_NON_OPT_IND.get(), &arg_copy);
+            if err != 0 {
+                return err;
+            }
+        }
+        0
+    }
 }
 
 /// Original C `PipNumberOfArgs` (`parse_params.c:586`).
@@ -1393,10 +1428,13 @@ pub fn pip_print_entries() {
         S_PRINT_ENTRIES.set(0);
         /* name = getenv(PRINTENTRY_VARIABLE); if (name) sPrintEntries = atoi(name); */
         if let Some(name) = std::env::var_os(std::ffi::OsStr::new(
-            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(PRINTENTRY_VARIABLE),
+            <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::from_bytes(
+                PRINTENTRY_VARIABLE,
+            ),
         )) {
-            let bytes =
-                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(name.as_os_str());
+            let bytes = <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::as_bytes(
+                name.as_os_str(),
+            );
             let mut end = 0usize;
             S_PRINT_ENTRIES.set(strtol(bytes, &mut end, 10) as i32);
         }
@@ -1643,11 +1681,14 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
     directly to where the file should be */
     if local_dir == 0 {
         if let Some(pip_dir) = std::env::var_os(std::ffi::OsStr::new(
-            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(OPTDIR_VARIABLE),
+            <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::from_bytes(
+                OPTDIR_VARIABLE,
+            ),
         )) {
-            let pip_dir =
-                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(pip_dir.as_os_str())
-                    .to_vec();
+            let pip_dir = <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::as_bytes(
+                pip_dir.as_os_str(),
+            )
+            .to_vec();
             if pip_dir.len() as i32 > big_size - 100 {
                 pip_set_error(b"AUTODOC_DIR is suspiciously long");
                 return -1;
@@ -1660,7 +1701,7 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
             big_str.push(b'.');
             big_str.extend_from_slice(OPTFILE_EXT);
             opt_file = std::fs::File::open(std::path::Path::new(
-                <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+                <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::from_bytes(&big_str),
             ))
             .ok()
             .map(ImodFile::from_std);
@@ -1668,10 +1709,11 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
 
         if opt_file.is_none() {
             if let Some(pip_dir) = std::env::var_os("IMOD_DIR") {
-                let pip_dir = <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(
-                    pip_dir.as_os_str(),
-                )
-                .to_vec();
+                let pip_dir =
+                    <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::as_bytes(
+                        pip_dir.as_os_str(),
+                    )
+                    .to_vec();
                 if pip_dir.len() as i32 > big_size - 100 {
                     pip_set_error(b"IMOD_DIR is suspiciously long");
                     return -1;
@@ -1686,7 +1728,9 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
                 big_str.push(b'.');
                 big_str.extend_from_slice(OPTFILE_EXT);
                 opt_file = std::fs::File::open(std::path::Path::new(
-                    <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+                    <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::from_bytes(
+                        &big_str,
+                    ),
                 ))
                 .ok()
                 .map(ImodFile::from_std);
@@ -1710,7 +1754,7 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
         big_str.push(b'.');
         big_str.extend_from_slice(OPTFILE_EXT);
         opt_file = std::fs::File::open(std::path::Path::new(
-            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+            <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::from_bytes(&big_str),
         ))
         .ok()
         .map(ImodFile::from_std);
@@ -1723,7 +1767,7 @@ pub fn pip_read_option_file(prog_name: &[u8], help_level: i32, local_dir: i32) -
         big_str.push(b'.');
         big_str.extend_from_slice(OPTFILE_EXT);
         opt_file = std::fs::File::open(std::path::Path::new(
-            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::from_bytes(&big_str),
+            <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::from_bytes(&big_str),
         ))
         .ok()
         .map(ImodFile::from_std);
@@ -2285,7 +2329,8 @@ pub fn pip_read_or_parse_options(
 pub fn pip_read_prog_defaults(prog_name: &[u8]) {
     let pip_dir = match std::env::var_os("IMOD_DIR") {
         Some(d) => {
-            <std::ffi::OsStr as std::os::unix::ffi::OsStrExt>::as_bytes(d.as_os_str()).to_vec()
+            <std::ffi::OsStr as crate::imod::libcfshr::b3dutil::OsStrExt>::as_bytes(d.as_os_str())
+                .to_vec()
         }
         None => return,
     };

@@ -10,6 +10,7 @@ pub mod b3dhostname;
 pub mod b3dremove;
 pub mod b3dtomosetexts;
 pub mod b3dtouch;
+pub mod b3dwinps;
 pub mod batchruntomo;
 pub mod chunksetup;
 pub mod collectmmm;

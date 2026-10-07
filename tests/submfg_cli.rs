@@ -232,7 +232,10 @@ impl Fixture {
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(root.join("imod/bin")).unwrap();
         std::fs::create_dir_all(&run).unwrap();
+        // A native Python stand-in: these comparisons run on Unix only.
+        #[cfg(unix)]
         std::os::unix::fs::symlink("/usr/bin/python3", bin.join("python")).unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("IMOD/pysrc/vmstopy"),
             bin.join("vmstopy"),

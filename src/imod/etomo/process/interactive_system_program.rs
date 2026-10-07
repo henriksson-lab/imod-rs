@@ -212,7 +212,8 @@ impl InteractiveSystemProgram {
             Some(Ok(mut child)) => {
                 // Create a buffered writer to handle the stdin, stdout and stderr
                 // streams of the process
-                *self.input_buffer.lock().unwrap() = child.stdin.take().map(std::io::BufWriter::new);
+                *self.input_buffer.lock().unwrap() =
+                    child.stdin.take().map(std::io::BufWriter::new);
                 *self.output_buffer.lock().unwrap() = child.stdout.take().map(line_channel);
                 *self.error_buffer.lock().unwrap() = child.stderr.take().map(line_channel);
                 process = Some(child);
@@ -228,8 +229,7 @@ impl InteractiveSystemProgram {
                 let status = process.wait();
                 let exit_value = match status {
                     Ok(status) => status.code().unwrap_or_else(|| {
-                        128 + std::os::unix::process::ExitStatusExt::signal(&status)
-                            .unwrap_or(0)
+                        128 + crate::imod::libcfshr::b3dutil::exit_signal(&status).unwrap_or(0)
                     }),
                     Err(_) => i32::MIN,
                 };

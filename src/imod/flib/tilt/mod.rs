@@ -48,8 +48,8 @@
 /// truncating toward zero.  Rust's `as i32` saturates instead, which costs a
 /// clamp and a NaN test per conversion in these loops and differs from native
 /// only where the value is out of `i32` range (NaN or overflow; the Fortran is
-/// undefined there and the instruction returns `i32::MIN`).  Off x86-64 this is
-/// `as i32`.
+/// undefined there and the instruction returns `i32::MIN`).  Off x86-64 the scalar
+/// `gfortran_rt::cvttss2si`/`cvttsd2si` give the same `i32::MIN`.
 macro_rules! fortran_int {
     (f64: $x:expr) => {{
         #[cfg(target_arch = "x86_64")]
@@ -60,7 +60,7 @@ macro_rules! fortran_int {
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
-            ($x) as i32
+            crate::imod::flib::subrs::compat::gfortran_rt::cvttsd2si($x)
         }
     }};
     (f32: $x:expr) => {{
@@ -71,7 +71,7 @@ macro_rules! fortran_int {
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
-            ($x) as i32
+            crate::imod::flib::subrs::compat::gfortran_rt::cvttss2si($x)
         }
     }};
 }

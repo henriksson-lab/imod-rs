@@ -11,11 +11,11 @@
 //! `imodpy`/`prochunks` helpers the script imports.
 #![allow(dead_code)]
 
+use crate::imod::libcfshr::b3dutil::OsStrExt;
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use super::comchanger::abs_template_path;
@@ -1192,7 +1192,17 @@ impl Brt {
     ) -> i32 {
         if Path::new(source).exists() && !Path::new(dest).exists() {
             let result = if self.test_for_sym_link() {
-                std::os::unix::fs::symlink(source, dest)
+                {
+                    // `makeSymLinks` is never set on Windows (`testForSymLink`).
+                    #[cfg(unix)]
+                    {
+                        std::os::unix::fs::symlink(source, dest)
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+                    }
+                }
             } else {
                 std::fs::rename(source, dest)
             };
@@ -1460,7 +1470,17 @@ impl Brt {
             return 1;
         }
         let result = if delivering && self.make_sym_links == Some(true) {
-            std::os::unix::fs::symlink(&source, &dest)
+            {
+                // `makeSymLinks` is never set on Windows (`testForSymLink`).
+                #[cfg(unix)]
+                {
+                    std::os::unix::fs::symlink(&source, &dest)
+                }
+                #[cfg(not(unix))]
+                {
+                    Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+                }
+            }
         } else {
             std::fs::rename(&source, &dest)
         };
@@ -10813,21 +10833,5 @@ pub fn batchruntomo(arguments: &[OsString]) -> i32 {
 
 /// `platform.node()` / `socket.gethostname()`.
 fn hostname_node() -> String {
-    let mut buffer = [0u8; 256];
-    // POSIX `gethostname`; Winsock spells it the same but lives in `ws2_32`
-    // and takes an `i32` length, so the call is named per platform.
-    #[cfg(unix)]
-    let failed = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) } != 0;
-    #[cfg(windows)]
-    let failed = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len() as i32) } != 0;
-    if failed {
-        return String::new();
-    }
-    let end = buffer
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(buffer.len());
-    OsStr::from_bytes(&buffer[..end])
-        .to_string_lossy()
-        .into_owned()
+    crate::imod::libcfshr::b3dutil::host_name()
 }

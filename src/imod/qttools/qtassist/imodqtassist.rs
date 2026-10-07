@@ -274,14 +274,51 @@ impl ImodAssistant {
 
     /// C++ `ImodAssistant::~ImodAssistant` (`imod_assistant.cpp:109`).
     ///
-    /// `QProcess::terminate` sends SIGTERM and does not wait.
+    /// `QProcess::terminate` sends SIGTERM and does not wait.  On Windows it
+    /// posts `WM_CLOSE` to every top-level window of the process instead.
     pub fn close(&mut self) {
         self.m_exiting = true;
         if self.m_assistant {
             if let Some(child) = self.child.as_ref() {
                 // SAFETY: plain kill(2) on the pid of a child this process
                 // spawned and has not reaped.
-                unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGTERM) };
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(child.id() as libc::pid_t, libc::SIGTERM)
+                };
+                #[cfg(windows)]
+                {
+                    type Hwnd = *mut core::ffi::c_void;
+                    #[link(name = "user32")]
+                    unsafe extern "system" {
+                        fn EnumWindows(
+                            callback: unsafe extern "system" fn(Hwnd, isize) -> i32,
+                            lparam: isize,
+                        ) -> i32;
+                        fn GetWindowThreadProcessId(window: Hwnd, pid: *mut u32) -> u32;
+                        fn PostMessageW(
+                            window: Hwnd,
+                            msg: u32,
+                            wparam: usize,
+                            lparam: isize,
+                        ) -> i32;
+                    }
+                    const WM_CLOSE: u32 = 0x0010;
+                    unsafe extern "system" fn close_window(window: Hwnd, pid: isize) -> i32 {
+                        let mut owner = 0_u32;
+                        // SAFETY: `window` comes from `EnumWindows`.
+                        unsafe {
+                            GetWindowThreadProcessId(window, &mut owner);
+                            if owner == pid as u32 {
+                                PostMessageW(window, WM_CLOSE, 0, 0);
+                            }
+                        }
+                        1
+                    }
+                    // SAFETY: the callback only reads and posts to the
+                    // windows it is handed.
+                    unsafe { EnumWindows(close_window, child.id() as isize) };
+                }
             }
         }
     }

@@ -3,11 +3,15 @@
 //! `-t`.
 //!
 //! The script's top level is [`imodkillgroup`]; its functions are
-//! [`process_status`] and [`kill_group`].  Only the Linux/macOS arms are
-//! translated: the Windows (`psutil`) and Cygwin branches are dead on this
-//! platform, and `-s` is refused there by the script itself.  The process
-//! list still comes from the system `ps`, as the script runs it; the group
-//! and signal calls are the POSIX ones Python's `os` module wraps.
+//! [`process_status`] and [`kill_group`].  The Linux/macOS and Windows
+//! (`psutil`) arms are translated; the Cygwin branches are not (Cygwin
+//! Python is not a platform this crate builds for), and `-s` is refused
+//! outside Cygwin by the script itself.  On Unix the process list comes from
+//! the system `ps`, as the script runs it, and the group and signal calls are
+//! the POSIX ones Python's `os` module wraps.  On Windows the `psutil` calls
+//! are the Win32 ones `psutil` makes: a ToolHelp snapshot for the process
+//! list and parents, `QueryFullProcessImageNameW` for `exe()`,
+//! `NtSuspendProcess` for `suspend()` and `TerminateProcess` for `kill()`.
 
 use super::imodpy::{add_imod_bin_ignore_sighup, fmtstr, get_err_strings, prnstr, py_int, run_cmd};
 use super::pip::{exit_error, set_exit_prefix};
@@ -28,9 +32,31 @@ fn os_error_text(errno: i32) -> String {
     format!("[Errno {errno}] {strerror}")
 }
 
+/// `def processStatus(pid = None)` (`imodkillgroup:15`), the Windows arm
+/// (`:14-39`): every process whose parent and executable can be read, with
+/// `AccessDenied`/`NoSuchProcess` entries left out.  The `proc` object of the
+/// source's triple is the PID itself, reopened when it is used.
+#[cfg(windows)]
+fn process_status(pid: Option<i64>) -> Result<PidDict<(i64, String)>, String> {
+    let mut stat_dict: PidDict<(i64, String)> = Vec::new();
+    for (proc_pid, ppid) in super::imodpy::psutil::process_list() {
+        if proc_pid == 0 || pid.is_some_and(|pid| pid != 0 && pid != proc_pid) {
+            continue;
+        }
+        if let Some(exe) = super::imodpy::psutil::process_exe(proc_pid) {
+            match stat_dict.iter_mut().find(|(key, _)| *key == proc_pid) {
+                Some(slot) => slot.1 = (ppid, exe),
+                None => stat_dict.push((proc_pid, (ppid, exe))),
+            }
+        }
+    }
+    Ok(stat_dict)
+}
+
 /// `def processStatus(pid = None)` (`imodkillgroup:15`), the non-Windows,
 /// non-Cygwin arm: a dict of PID to (parent PID, command) from `ps`, or the
 /// first error string when `ps` fails.
+#[cfg(not(windows))]
 fn process_status(pid: Option<i64>) -> Result<PidDict<(i64, String)>, String> {
     let mut stat_dict: PidDict<(i64, String)> = Vec::new();
     let mut command = "ps -aeo pid,ppid,comm".to_owned();
@@ -65,6 +91,7 @@ fn process_status(pid: Option<i64>) -> Result<PidDict<(i64, String)>, String> {
 
 /// `def killGroup(groupid)` (`imodkillgroup:68`): an error message, or
 /// `None` on success.
+#[cfg(unix)]
 fn kill_group(groupid: i64, kill_signal: i32) -> Option<String> {
     // SAFETY: `killpg` takes plain integers.
     if unsafe { libc::killpg(groupid as libc::pid_t, kill_signal) } != 0 {
@@ -107,7 +134,10 @@ pub fn imodkillgroup(arguments: &[OsString]) -> i32 {
     let mut verbose = false;
     let mut get_status = false;
     let mut use_term = false;
-    let mut kill_signal = libc::SIGKILL;
+    // `signal.SIGKILL`/`SIGTERM`; Windows Python has no SIGKILL, and the
+    // signal is used only on the non-Windows arms.
+    let mut kill_signal: i32 = 9;
+    let windows = cfg!(windows);
 
     for arg in argv.iter().skip(1) {
         if arg == "-t" {
@@ -151,11 +181,12 @@ pub fn imodkillgroup(arguments: &[OsString]) -> i32 {
     }
 
     if use_term {
-        kill_signal = libc::SIGTERM;
+        kill_signal = 15;
     }
 
     let mut exit_val: i32 = 0;
-    if !kill_tree {
+    #[cfg(unix)]
+    if !kill_tree && !windows {
         let num_pids = pid_list.len() as i32;
         let mut group_ids: BTreeMap<i64, i64> = BTreeMap::new();
         let mut pid_done: BTreeMap<i64, i32> = BTreeMap::new();
@@ -210,12 +241,36 @@ pub fn imodkillgroup(arguments: &[OsString]) -> i32 {
     // marks a PID that is no longer there
     let mut pid_tree: Vec<PidDict<Option<i64>>> =
         vec![pid_list.iter().map(|pid| (*pid, None)).collect()];
+    // On Windows a value of `Some(pid)` (any non-negative PID) stands for
+    // the saved `psutil.Process` object
     let mut psdict: PidDict<(i64, String)> = Vec::new();
     for level in 0..100 {
+        // Need a ps to get going for windows
+        if level == 0 && windows {
+            psdict = match process_status(None) {
+                Ok(dict) => dict,
+                Err(message) => exit_error(&format!("{prefix}{message}")),
+            };
+        }
+
         // Stop processes for PID's at the current level
-        for (pid, _) in &pid_tree[level] {
+        for (pid, value) in pid_tree[level].iter_mut() {
+            let mut stop_proc = true;
+            if windows {
+                stop_proc = false;
+                if psdict.iter().any(|(key, _)| key == pid) {
+                    stop_proc = windows;
+                    if verbose {
+                        prnstr(&format!("Saving process object for PID {pid}"), "\n", false);
+                    }
+                    *value = Some(*pid);
+                }
+            }
+            if !stop_proc {
+                continue;
+            }
             let mut stopstr = format!("Stopping PID {pid}");
-            if level != 0 {
+            if level != 0 || windows {
                 if let Some((_, (_, comm))) = psdict.iter().find(|(key, _)| key == pid) {
                     stopstr += &format!(": {comm}");
                 }
@@ -223,14 +278,19 @@ pub fn imodkillgroup(arguments: &[OsString]) -> i32 {
             if verbose {
                 prnstr(&stopstr, "\n", false);
             }
+            #[cfg(windows)]
+            let stop_error = super::imodpy::psutil::suspend(*pid).err();
             // SAFETY: `kill` takes plain integers.
-            if unsafe { libc::kill(*pid as libc::pid_t, libc::SIGSTOP) } != 0 {
+            #[cfg(unix)]
+            let stop_error = if unsafe { libc::kill(*pid as libc::pid_t, libc::SIGSTOP) } != 0 {
                 let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                Some(os_error_text(errno))
+            } else {
+                None
+            };
+            if let Some(error) = stop_error {
                 prnstr(
-                    &format!(
-                        "imodkillgroup - Error occurred trying to stop {pid}: {}",
-                        os_error_text(errno)
-                    ),
+                    &format!("imodkillgroup - Error occurred trying to stop {pid}: {error}"),
                     "\n",
                     false,
                 );
@@ -257,7 +317,10 @@ pub fn imodkillgroup(arguments: &[OsString]) -> i32 {
 
         // find children of these processes
         for (pid, (parent, comm)) in &psdict {
-            if pid_tree[level].iter().any(|(key, _)| key == parent) {
+            if pid_tree[level]
+                .iter()
+                .any(|(key, value)| key == parent && (!windows || value.is_some()))
+            {
                 let next = &mut pid_tree[level + 1];
                 if !next.iter().any(|(key, _)| key == pid) {
                     next.push((*pid, None));
@@ -288,25 +351,32 @@ pub fn imodkillgroup(arguments: &[OsString]) -> i32 {
     // Kill all the processes from the bottom level up
     for level in (0..pid_tree.len()).rev() {
         for (pid, value) in &pid_tree[level] {
-            if value.is_some() {
+            if *value == Some(-1) || (!windows && value.is_some()) {
                 continue;
             }
-            if verbose {
+            if verbose && (!windows || value.is_some()) {
                 prnstr(&format!("Killing PID {pid} at level {level}"), "\n", false);
             }
 
+            #[cfg(windows)]
+            let kill_error = match value {
+                Some(proc) => super::imodpy::psutil::kill(*proc).err(),
+                None => None,
+            };
             // SAFETY: `kill` takes plain integers.
-            let failed = unsafe {
+            #[cfg(unix)]
+            let kill_error = if unsafe {
                 (use_term && libc::kill(*pid as libc::pid_t, libc::SIGCONT) != 0)
                     || libc::kill(*pid as libc::pid_t, kill_signal) != 0
-            };
-            if failed {
+            } {
                 let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+                Some(os_error_text(errno))
+            } else {
+                None
+            };
+            if let Some(error) = kill_error {
                 prnstr(
-                    &format!(
-                        "imodkillgroup - Error occurred trying to kill {pid}: {}",
-                        os_error_text(errno)
-                    ),
+                    &format!("imodkillgroup - Error occurred trying to kill {pid}: {error}"),
                     "\n",
                     false,
                 );

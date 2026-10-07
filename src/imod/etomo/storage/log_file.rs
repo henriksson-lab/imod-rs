@@ -2143,13 +2143,24 @@ fn java_nio_file_files_is_same_file(
     path1: &std::path::Path,
     path2: &std::path::Path,
 ) -> std::io::Result<bool> {
-    use std::os::unix::fs::MetadataExt;
     if path1 == path2 {
         return Ok(true);
     }
     let metadata1 = std::fs::metadata(path1)?;
     let metadata2 = std::fs::metadata(path2)?;
-    Ok(metadata1.dev() == metadata2.dev() && metadata1.ino() == metadata2.ino())
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok(metadata1.dev() == metadata2.dev() && metadata1.ino() == metadata2.ino())
+    }
+    // The JVM compares the volume serial number and file index on Windows;
+    // `std` does not expose those, and the canonical paths name the same
+    // file exactly when they do (hard links aside).
+    #[cfg(not(unix))]
+    {
+        let _ = (metadata1, metadata2);
+        Ok(std::fs::canonicalize(path1)? == std::fs::canonicalize(path2)?)
+    }
 }
 
 /// Java `SafeDeleteFlag`.
@@ -3771,7 +3782,14 @@ enum StandardOpenOption {
 /// overlapping lock, and returns null - not an error - when another *process* holds one;
 /// the operating system's own lock cannot carry that distinction, so the same-process
 /// half is this table.
-static FILE_LOCK_TABLE: LazyLock<Mutex<Vec<(u64, u64)>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+/// The JVM's key for a locked file: `(st_dev, st_ino)` on Unix; on Windows
+/// (where `std` does not expose the file index) the canonical path.
+#[cfg(unix)]
+type FileLockKey = (u64, u64);
+#[cfg(not(unix))]
+type FileLockKey = std::path::PathBuf;
+static FILE_LOCK_TABLE: LazyLock<Mutex<Vec<FileLockKey>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 
 /// Java `Lock`.
 #[derive(Debug)]
@@ -4134,19 +4152,28 @@ impl Lock {
                 let mut overlapping_file_lock = false;
                 let mut io_exception: Option<std::io::Error> = None;
                 if let Some(channel) = &channel {
-                    use std::os::unix::fs::MetadataExt;
-                    use std::os::unix::io::AsRawFd;
-                    let key = match channel.metadata() {
-                        Ok(metadata) => (metadata.dev(), metadata.ino()),
+                    #[cfg(unix)]
+                    let key = {
+                        use std::os::unix::fs::MetadataExt;
+                        match channel.metadata() {
+                            Ok(metadata) => (metadata.dev(), metadata.ino()),
+                            Err(_) => return Ok(()),
+                        }
+                    };
+                    #[cfg(not(unix))]
+                    let key = match std::fs::canonicalize(file) {
+                        Ok(path) => path,
                         Err(_) => return Ok(()),
                     };
                     let mut table = FILE_LOCK_TABLE.lock().unwrap();
                     if table.contains(&key) {
                         overlapping_file_lock = true;
                     } else {
-                        table.push(key);
+                        table.push(key.clone());
                         drop(table);
+                        #[cfg(unix)]
                         unsafe {
+                            use std::os::unix::io::AsRawFd;
                             let mut flock = libc::flock {
                                 l_type: if shared {
                                     libc::F_RDLCK as libc::c_short
@@ -4166,6 +4193,19 @@ impl Lock {
                             // of a block whose only statement is `return`.
                             flock.l_type = libc::F_UNLCK as libc::c_short;
                             libc::fcntl(channel.as_raw_fd(), libc::F_SETLK, &flock);
+                        }
+                        // The JVM's `tryLock` on Windows is `LockFileEx`, which
+                        // `std`'s `try_lock`/`try_lock_shared` call.
+                        #[cfg(not(unix))]
+                        {
+                            let acquired = if shared {
+                                channel.try_lock_shared().is_ok()
+                            } else {
+                                channel.try_lock().is_ok()
+                            };
+                            if acquired {
+                                let _ = channel.unlock();
+                            }
                         }
                         FILE_LOCK_TABLE
                             .lock()

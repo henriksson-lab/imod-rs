@@ -714,9 +714,7 @@ pub fn autofidseed(arguments: &[OsString]) -> i32 {
 
     // `os.access(tmpdir, os.W_OK)`: the POSIX `access` call itself
     let writable = |path: &str| -> bool {
-        std::ffi::CString::new(path)
-            .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-            .unwrap_or(false)
+        crate::imod::libcfshr::b3dutil::os_access(&path, crate::imod::libcfshr::b3dutil::W_OK)
     };
     if !(Path::new(&g.tmpdir).is_dir() && writable(&g.tmpdir))
         && make_current_dir_writable(&g.tmpdir).is_some()

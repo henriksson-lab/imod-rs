@@ -178,9 +178,7 @@ Usage:  submfg [options] command_file1 command_file2 ...
     // `-n`: the source nices each job (`imodNice` in the vmstopy script, or
     // `nice +n` in the tcsh file); the jobs run in this process now
     if nice != 0 {
-        unsafe {
-            libc::nice(nice as libc::c_int);
-        }
+        super::imodpy::imod_nice(nice as i32);
     }
 
     // Python raises KeyboardInterrupt on SIGINT; `runcmd` passes it on.

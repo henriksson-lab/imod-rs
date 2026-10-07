@@ -15,7 +15,5 @@ pub mod machinehandler;
 // reapable.  Both are POSIX process/remote-execution services with no Windows
 // counterpart worth inventing (user, 2026-09-23: *"ssh etc is linux only. I
 // dont expect windows portability there, and we can feature gate it"*).
-#[cfg(unix)]
 pub mod processchunks;
-#[cfg(unix)]
 pub mod processhandler;

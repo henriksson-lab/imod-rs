@@ -47,7 +47,10 @@ fn dispatch(name: &str) -> bool {
                 // SAFETY: `signal` with a valid signal number and `SIG_DFL` has
                 // no memory-safety preconditions; it runs before the command
                 // starts any thread.
-                unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+                #[cfg(unix)]
+                unsafe {
+                    libc::signal(libc::SIGPIPE, libc::SIG_DFL)
+                };
             }
             (command.entry)();
             true
@@ -78,17 +81,24 @@ fn main() {
     let argv0 = std::env::args_os().next().unwrap_or_default();
 
     // 1. `basename(argv[0])` names a command: run it with `argv` untouched.
-    if let Some(base) = Path::new(&argv0).file_name().and_then(|n| n.to_str())
-        && dispatch(base)
+    //    On Windows the executable's name ends in `.exe`, which is not part of
+    //    the command name (`imodProgName` strips it the same way).
+    let base_name = |path: &Path| {
+        if cfg!(windows) {
+            path.file_stem()
+        } else {
+            path.file_name()
+        }
+        .and_then(|n| n.to_str())
+        .map(str::to_owned)
+    };
+    if let Some(base) = base_name(Path::new(&argv0))
+        && dispatch(&base)
     {
         return;
     }
 
-    let launcher = Path::new(&argv0)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("imod")
-        .to_string();
+    let launcher = base_name(Path::new(&argv0)).unwrap_or_else(|| "imod".to_string());
 
     // 2. `argv[1]` names a command: run it in-process with the `argv` it would
     //    have had as its own binary.

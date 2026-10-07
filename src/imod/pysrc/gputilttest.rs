@@ -79,8 +79,7 @@ fn uu_decode(in_file: &str, out_file: &str) -> Result<(), ()> {
         }
     };
     let mut fp = std::fs::File::create(out_file).map_err(|_| ())?;
-    use std::os::unix::fs::PermissionsExt as _;
-    std::fs::set_permissions(out_file, std::fs::Permissions::from_mode(mode)).map_err(|_| ())?;
+    crate::imod::libcfshr::b3dutil::py_chmod(out_file, mode).map_err(|_| ())?;
     for line in lines {
         let line = line.map_err(|_| ())?;
         let trimmed: Vec<u8> = {

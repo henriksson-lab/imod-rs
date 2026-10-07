@@ -483,6 +483,14 @@ pub fn java_util_date_to_string(millis: i64) -> String {
     let seconds = millis.div_euclid(1000) as libc::time_t;
     // SAFETY: `tm` is plain data that `localtime_r` fills; `tm_zone` then points
     // at a NUL-terminated string in the C library's static zone table.
+    // Windows' `struct tm` has no `tm_zone`; there the zone is left to
+    // chrono's `%Z`, the offset.
+    #[cfg(not(unix))]
+    let zone: Option<String> = {
+        let _ = seconds;
+        None
+    };
+    #[cfg(unix)]
     let zone = unsafe {
         let mut tm: libc::tm = std::mem::zeroed();
         if libc::localtime_r(&seconds, &mut tm).is_null() || tm.tm_zone.is_null() {
@@ -3917,20 +3925,12 @@ pub fn get_stack_binning_for_file_type(
 
 /// `java.io.File.canRead()`: the file exists and this process may read it.
 pub fn java_io_file_can_read(pathname: &str) -> bool {
-    let Ok(path) = std::ffi::CString::new(pathname) else {
-        return false;
-    };
-    // SAFETY: `path` is a valid NUL-terminated string.
-    unsafe { libc::access(path.as_ptr(), libc::R_OK) == 0 }
+    crate::imod::libcfshr::b3dutil::os_access(pathname, crate::imod::libcfshr::b3dutil::R_OK)
 }
 
 /// `java.io.File.canWrite()`: the file exists and this process may write it.
 pub fn java_io_file_can_write(pathname: &str) -> bool {
-    let Ok(path) = std::ffi::CString::new(pathname) else {
-        return false;
-    };
-    // SAFETY: `path` is a valid NUL-terminated string.
-    unsafe { libc::access(path.as_ptr(), libc::W_OK) == 0 }
+    crate::imod::libcfshr::b3dutil::os_access(pathname, crate::imod::libcfshr::b3dutil::W_OK)
 }
 
 /// Java `isValidStack(File, BaseManager, AxisID)`.  Returns false if MRCHeader

@@ -1157,8 +1157,7 @@ pub fn get_metadata_weighting_doses(
             }
             tim.tm_mon = mon_ind as i32;
             tim.tm_isdst = -1;
-            // SAFETY: `tim` is a valid, exclusively borrowed `tm`.
-            full_times[ind] = unsafe { libc::mktime(&mut tim) };
+            full_times[ind] = crate::imod::libcfshr::b3dutil::c_mktime(&mut tim);
             time_inds[ind] = ind as i32;
         }
     }

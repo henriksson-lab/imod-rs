@@ -234,7 +234,9 @@ fn open_and_get_address(filename: &str, caller: &str, map_file: &mut isize) -> *
                 } else {
                     libc::O_RDWR
                 },
-                libc::S_IRUSR | libc::S_IWUSR,
+                // `mode_t` is `u16` on macOS, where `shm_open` is variadic
+                // and the argument is promoted to `unsigned int` as in C.
+                (libc::S_IRUSR | libc::S_IWUSR) as libc::c_uint,
             );
             if fd < 0 {
                 // `iishrmem.c:196-198`.

@@ -1110,12 +1110,16 @@ impl ProcessHandler {
             None => Command::new(&self.command),
         };
         // A local job is this binary run as `runcom` (see `setup`); the
-        // launcher dispatches on the base name of `argv[0]`
+        // launcher dispatches on the base name of `argv[0]`.  Windows has no
+        // separate `argv[0]`, so there the subcommand form names it.
         if local_runcom {
+            #[cfg(unix)]
             std::os::unix::process::CommandExt::arg0(
                 &mut process,
                 std::path::Path::new(&self.command).with_file_name("runcom"),
             );
+            #[cfg(not(unix))]
+            process.arg("runcom");
         }
         match &param_list {
             Some(param_list) => {
@@ -1212,6 +1216,7 @@ impl ProcessHandler {
             let stamp = Arc::new(Mutex::new(None));
             let writer = Arc::clone(&stamp);
             std::thread::spawn(move || {
+                #[cfg(unix)]
                 unsafe {
                     let mut info: libc::siginfo_t = std::mem::zeroed();
                     libc::waitid(
@@ -1220,6 +1225,27 @@ impl ProcessHandler {
                         &mut info,
                         libc::WEXITED | libc::WNOWAIT,
                     );
+                }
+                // Qt's `QWinEventNotifier` on the process handle: waiting on
+                // a handle never reaps, so this is the same non-consuming
+                // wait.  The `Child` keeps its own handle open, so the PID
+                // cannot be reused while this one is opened.
+                #[cfg(windows)]
+                unsafe {
+                    type Handle = *mut core::ffi::c_void;
+                    #[link(name = "kernel32")]
+                    unsafe extern "system" {
+                        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+                        fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
+                        fn CloseHandle(handle: Handle) -> i32;
+                    }
+                    const SYNCHRONIZE: u32 = 0x0010_0000;
+                    const INFINITE: u32 = 0xFFFF_FFFF;
+                    let handle = OpenProcess(SYNCHRONIZE, 0, pid);
+                    if !handle.is_null() {
+                        WaitForSingleObject(handle, INFINITE);
+                        CloseHandle(handle);
+                    }
                 }
                 if let Ok(mut slot) = writer.lock() {
                     *slot = Some(Instant::now());

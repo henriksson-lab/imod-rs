@@ -1,0 +1,4 @@
+# imod-rs numeric fingerprints of the digest entries in golden.manifest, for
+# the tolerance mode of tests/common/golden.rs (PORTABILITY.md).  Made by a
+# replay with IMOD_RS_GOLDEN_FINGERPRINT=1 or by recording.
+golden/ia_usage.stdout	text 0691a354acac047c1df5c978e24fa7c5260980dc3d4db016da5cd55585516c61 18 4019.0 4019.0 0.0 2 0 1.0 1.0 0.0 1 0 2.0 2.0 0.0 1 0 3.0 3.0 0.0 1 0 0.0 0.0 0.0 1 0 1.0 1.0 0.0 1 0 2.0 2.0 0.0 1 0 3.0 3.0 0.0 1 0 255.0 255.0 1.0 2 0 0.0 0.0 0.0 1 0 0.0 0.0 0.0 1 0 0.0 0.0 0.0 1 0 0.0 0.0 0.0 1 0 1.0 1.0 0.0 1 0 0.0 0.0 0.0 1 0 255.0 255.0 0.0 1 0

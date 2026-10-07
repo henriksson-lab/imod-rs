@@ -4,7 +4,7 @@
 //! The script's top level is [`finishjoin`] and its one function is
 //! [`cleanup`].  `xftoxg`, `xfproduct`, `maxjoinsize` and `newstack` are our
 //! own programs and run in process through `imodpy::run_cmd`.  The
-//! `chmod u+rw` the script runs only on Windows is not reached here.
+//! `chmod u+rw` the script runs only on Windows is translated (`cfg!(windows)`).
 
 use super::imodpy::{
     add_imod_bin_ignore_sighup, dataset_filename, exit_from_imod_error, fmtstr, get_mrc_size,
@@ -353,6 +353,21 @@ pub fn finishjoin(arguments: &[OsString]) -> i32 {
         if xflines.len() as i64 == ntomo || warping {
             if std::fs::copy(format!("{joinroot}.xf"), &tomoxf).is_err() {
                 exit_error(&format!("Copying {joinroot}.xf to {tomoxf}"));
+            }
+
+            // Persistent broken pipes even in RHEL5/python 2.4, so just do in
+            // Windows (`finishjoin:237-246`)
+            if cfg!(windows)
+                && super::imodpy::run_cmd(
+                    &format!("chmod u+rw {tomoxf}"),
+                    None,
+                    None,
+                    Some("stdout"),
+                    &[],
+                )
+                .is_err()
+            {
+                let _ = crate::imod::libcfshr::b3dutil::py_chmod(&tomoxf, 0o644);
             }
 
         // Otherwise, need to start with a unit transform line and

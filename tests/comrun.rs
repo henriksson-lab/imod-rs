@@ -291,6 +291,8 @@ fn runcom_error_paths() {
 /// status and log match native `vmstopy -x` (measured in
 /// `/big/henriksson/realbench/comwire/vx`; native also prints `Python PID:` on
 /// standard error, which the runner does not).
+// Links `/bin/sh` into a scratch `bin`: Unix only.
+#[cfg(unix)]
 #[test]
 fn vmstopy_x_executes_through_the_runner() {
     let work = scratch("vmstopy-x");

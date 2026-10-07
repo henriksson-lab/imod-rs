@@ -42,10 +42,23 @@ pub fn vmstocsh() {
     // Standard input, read directly from descriptor 0 so that nothing a
     // previous in-process command left in a shared buffer is seen.
     let mut input: Vec<u8> = Vec::new();
+    #[cfg(unix)]
     {
         use std::os::fd::FromRawFd as _;
         let mut stdin = std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(0) });
         let _ = stdin.read_to_end(&mut input);
+    }
+    // The handle behind CRT descriptor 0 (`_get_osfhandle`), borrowed.
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::FromRawHandle as _;
+        let handle = unsafe { libc::get_osfhandle(0) };
+        if handle != -1 {
+            let mut stdin = std::mem::ManuallyDrop::new(unsafe {
+                std::fs::File::from_raw_handle(handle as std::os::windows::io::RawHandle)
+            });
+            let _ = stdin.read_to_end(&mut input);
+        }
     }
     // Records of the formatted sequential input: each ends at a newline; a
     // last line without one is still a record.
@@ -71,7 +84,7 @@ pub fn vmstocsh() {
     let arguments = program_args_os();
     if arguments.len() > 1 {
         // call getarg(1,logfile)
-        use std::os::unix::ffi::OsStrExt as _;
+        use crate::imod::libcfshr::b3dutil::OsStrExt as _;
         logfile = assign(arguments[1].as_bytes());
         lenlog = len_trim(&logfile);
         let name = logfile[..lenlog].to_vec();

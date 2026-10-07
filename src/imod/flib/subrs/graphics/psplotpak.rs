@@ -200,9 +200,7 @@ pub fn pltout(meta_screen: i32) {
     );
     let _ = std::io::stdout().flush();
     // `call system(comstr)`
-    let mut shell = std::process::Command::new("/bin/sh");
-    std::os::unix::process::CommandExt::arg0(&mut shell, "sh");
-    let _ = shell.arg("-c").arg(&comstr).status();
+    let _ = crate::imod::libcfshr::b3dutil::shell_command(&comstr).status();
     if meta_screen != 0 {
         // `101 format(/,' WARNING: ...')`
         print!(

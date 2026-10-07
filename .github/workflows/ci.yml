@@ -1,0 +1,143 @@
+# Portability CI (PORTABILITY.md, items 1 and 7).
+#
+# check: `cargo check --release --all-targets`, with and without the `gui`
+#        feature, on Linux x86_64 and arm64, macOS arm64 and x86_64, and
+#        Windows (MSVC).
+# test:  Linux x86_64 runs the whole suite: byte parity with native IMOD is
+#        the acceptance target there.  Every other platform runs the library
+#        tests and the native-golden replays, which accept floating-point
+#        differences within the tolerance stated in tests/common/golden.rs
+#        (`REL_TOL`); that mode switches itself on off Linux x86_64.
+#
+# The libtiff and zlib boundaries are linked from the platform's packages
+# (apt, Homebrew, vcpkg); HDF5 is loaded only on Linux.  The vendored IMOD
+# source (IMOD/, untracked in this repository) is fetched at its pinned
+# Mercurial revision for the test jobs; the build itself does not read it.
+#
+# Do not set RUSTFLAGS anywhere here: it would replace the flags in
+# .cargo/config.toml instead of adding to them (CLAUDE.md).
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  IMOD_REPO: http://bio3d.colorado.edu/imod/nightlyBuilds/IMOD/
+  IMOD_REV: 1da960f68556
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: System packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libtiff-dev zlib1g-dev libhdf5-dev \
+            libfontconfig1-dev libxkbcommon-dev libudev-dev libinput-dev libgbm-dev libdrm-dev
+
+      - name: System packages (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install libtiff
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+
+      - name: System packages (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install tiff:x64-windows zlib:x64-windows
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows'
+          # archiveorig.rs links zlib as `z` (#[link(name = "z")]); vcpkg names it zlib.lib
+          Copy-Item (Join-Path $vcpkg 'lib\zlib.lib') (Join-Path $vcpkg 'lib\z.lib')
+          "LIB=$(Join-Path $vcpkg 'lib');$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Join-Path $vcpkg 'bin' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: cargo check (default features)
+        run: cargo check --release --all-targets
+
+      - name: cargo check (gui)
+        run: cargo check --release --all-targets --features gui
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, macos-15-intel, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: System packages (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libtiff-dev zlib1g-dev libhdf5-dev \
+            libfontconfig1-dev libxkbcommon-dev libudev-dev libinput-dev libgbm-dev libdrm-dev \
+            tcsh python3
+
+      - name: System packages (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install libtiff
+          echo "LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+
+      - name: System packages (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install tiff:x64-windows zlib:x64-windows
+          $vcpkg = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows'
+          Copy-Item (Join-Path $vcpkg 'lib\zlib.lib') (Join-Path $vcpkg 'lib\z.lib')
+          "LIB=$(Join-Path $vcpkg 'lib');$env:LIB" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Join-Path $vcpkg 'bin' | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Cache the IMOD source
+        id: imod-cache
+        uses: actions/cache@v4
+        with:
+          path: IMOD
+          key: imod-${{ runner.os }}-${{ env.IMOD_REV }}
+
+      - name: Fetch the IMOD source at its pinned revision
+        if: steps.imod-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [ ! -f IMOD/setup ]; then
+            pipx run --spec mercurial hg clone -u "$IMOD_REV" "$IMOD_REPO" IMOD
+            rm -rf IMOD/.hg
+          fi
+
+      - name: Build the tests
+        run: cargo test --release --no-run
+
+      - name: Full suite (Linux x86_64, byte parity)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --release --no-fail-fast -- --test-threads=1
+
+      - name: Library tests
+        if: matrix.os != 'ubuntu-latest'
+        run: cargo test --release --lib -- --test-threads=1
+
+      - name: Golden replays (tolerance mode)
+        if: matrix.os != 'ubuntu-latest'
+        shell: bash
+        run: |
+          suites=$(grep -l 'golden::' tests/*.rs | sed 's|^tests/||; s|\.rs$||; s|^|--test |' | tr '\n' ' ')
+          cargo test --release --no-fail-fast $suites -- --test-threads=1

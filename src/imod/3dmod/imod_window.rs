@@ -769,10 +769,10 @@ pub fn run_native_image_host(
     for requested in std::mem::take(&mut host.initial_tools) {
         let (kind, controller_index, tool) = match requested {
             InitialToolWindow::Zap => {
-                zap_controllers.push(ZapFuncs::new(
-                    host.view.as_mut() as *mut ImodView,
-                    ZAP_WINDOW_TYPE,
-                ));
+                zap_controllers.push(
+                    // SAFETY: the view outlives every controller made from it.
+                    unsafe { ZapFuncs::new(host.view.as_mut() as *mut ImodView, ZAP_WINDOW_TYPE) },
+                );
                 (ToolKind::Zap, zap_controllers.len() - 1, "Zap")
             }
             InitialToolWindow::Slicer => {
@@ -991,10 +991,15 @@ pub fn run_native_image_host(
                 if let Some(tool) = tool {
                     let (kind, controller_index) = match tool {
                         "Zap" => {
-                            zap_controllers.push(ZapFuncs::new(
-                                host.view.as_mut() as *mut ImodView,
-                                ZAP_WINDOW_TYPE,
-                            ));
+                            zap_controllers.push(
+                                // SAFETY: the view outlives every controller made from it.
+                                unsafe {
+                                    ZapFuncs::new(
+                                        host.view.as_mut() as *mut ImodView,
+                                        ZAP_WINDOW_TYPE,
+                                    )
+                                },
+                            );
                             (ToolKind::Zap, zap_controllers.len() - 1)
                         }
                         "Slicer" => {

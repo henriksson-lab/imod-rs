@@ -1025,7 +1025,7 @@ pub fn warpvol() {
                                     }
                                     #[cfg(not(target_arch = "x86_64"))]
                                     {
-                                        x as i32
+                                        crate::imod::flib::subrs::compat::gfortran_rt::cvttss2si(x)
                                     }
                                 }
                                 for ix in inner_start..=inner_end {
@@ -1465,7 +1465,7 @@ pub fn interp_inv(
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
-            x as i32
+            crate::imod::flib::subrs::compat::gfortran_rt::cvttss2si(x)
         }
     }
     if num_loc_y > 1 {

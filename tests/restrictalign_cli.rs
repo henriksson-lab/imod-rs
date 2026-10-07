@@ -43,7 +43,13 @@ fn install() -> PathBuf {
         "patch2imod",
         "header",
     ] {
+        #[cfg(unix)]
         let _ = std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_imod"), bin.join(command));
+        #[cfg(not(unix))]
+        let _ = std::fs::hard_link(
+            env!("CARGO_BIN_EXE_imod"),
+            bin.join(format!("{command}{}", std::env::consts::EXE_SUFFIX)),
+        );
     }
     dir.join("imod")
 }

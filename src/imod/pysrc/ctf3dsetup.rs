@@ -253,9 +253,10 @@ pub fn ctf3dsetup(arguments: &[OsString]) -> i32 {
     // `os.path.isdir(tempDir)` and `os.access(tempDir, os.W_OK)`: the POSIX
     // `access` call itself
     let writable = Path::new(&temp_dir).is_dir()
-        && std::ffi::CString::new(temp_dir.as_str())
-            .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-            .unwrap_or(false);
+        && crate::imod::libcfshr::b3dutil::os_access(
+            temp_dir.as_str(),
+            crate::imod::libcfshr::b3dutil::W_OK,
+        );
     if !writable {
         exit_error(&format!(
             "Cannot write to {temp_dir} as a temporary directory"

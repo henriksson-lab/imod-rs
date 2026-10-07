@@ -2428,21 +2428,7 @@ impl EtomoDirector {
         // System.err.println("max= " + Runtime.getRuntime().maxMemory());
         // System.err.println("total=" + Runtime.getRuntime().totalMemory());
         // System.err.println("free= " + Runtime.getRuntime().freeMemory());
-        #[cfg(unix)]
-        {
-            // SAFETY: `sysconf` reads a system constant.
-            let pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
-            let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-            if pages <= 0 || page_size <= 0 {
-                0
-            } else {
-                (pages as i64).saturating_mul(page_size as i64)
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            0
-        }
+        host_physical_memory().1
     }
 
     /// Java `isImodBriefHeader()`.
@@ -2459,16 +2445,10 @@ impl EtomoDirector {
         let available_memory = self.get_available_memory();
         // Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory():
         // the physical memory in use (see getAvailableMemory).
-        #[cfg(unix)]
         let used_memory: i64 = {
-            // SAFETY: `sysconf` reads a system constant.
-            let physical_pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
-            let available_pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
-            let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-            ((physical_pages - available_pages) as i64).saturating_mul(page_size as i64)
+            let (total, available) = host_physical_memory();
+            total - available
         };
-        #[cfg(not(unix))]
-        let used_memory: i64 = 0;
         // System.out.println();
         // System.out.println("Available memory = " + availableMemory);
         // System.out.println("Memory in use = " + usedMemory);
@@ -2667,5 +2647,103 @@ impl UtilityThread {
             self.interrupted.store(true, Ordering::SeqCst);
             utility_thread.unpark();
         }
+    }
+}
+
+/// Rust-only stand-in for the JVM's `java.lang.Runtime` memory figures used by
+/// `getAvailableMemory`/`isMemoryAvailable`: the host's physical memory as
+/// `(total, available)` in bytes, `(0, 0)` where it cannot be read.  A
+/// native program has no heap limit, so the host's memory is the room it has.
+/// Each platform reads it the way the JDK's `OperatingSystemMXBean` does
+/// there: `sysconf` on Linux, `host_statistics64` on macOS,
+/// `GlobalMemoryStatusEx` on Windows.
+fn host_physical_memory() -> (i64, i64) {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: `sysconf` reads a system constant.
+        let physical_pages = unsafe { libc::sysconf(libc::_SC_PHYS_PAGES) };
+        let available_pages = unsafe { libc::sysconf(libc::_SC_AVPHYS_PAGES) };
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if physical_pages <= 0 || available_pages < 0 || page_size <= 0 {
+            return (0, 0);
+        }
+        (
+            (physical_pages as i64).saturating_mul(page_size as i64),
+            (available_pages as i64).saturating_mul(page_size as i64),
+        )
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: `sysconf` reads a system constant; `host_statistics64`
+        // fills at most `count` 32-bit words of the `vm_statistics64` it is
+        // given, and `count` is that structure's size in those words.
+        unsafe {
+            let physical_pages = libc::sysconf(libc::_SC_PHYS_PAGES);
+            let page_size = libc::sysconf(libc::_SC_PAGESIZE);
+            if physical_pages <= 0 || page_size <= 0 {
+                return (0, 0);
+            }
+            let mut stats: libc::vm_statistics64 = std::mem::zeroed();
+            let mut count = (std::mem::size_of::<libc::vm_statistics64>()
+                / std::mem::size_of::<libc::integer_t>())
+                as libc::mach_msg_type_number_t;
+            #[allow(deprecated)]
+            let host = libc::mach_host_self();
+            let free_pages = if libc::host_statistics64(
+                host,
+                libc::HOST_VM_INFO64,
+                (&mut stats as *mut libc::vm_statistics64).cast(),
+                &mut count,
+            ) == libc::KERN_SUCCESS
+            {
+                stats.free_count as i64
+            } else {
+                0
+            };
+            (
+                (physical_pages as i64).saturating_mul(page_size as i64),
+                free_pages.saturating_mul(page_size as i64),
+            )
+        }
+    }
+    #[cfg(windows)]
+    {
+        #[repr(C)]
+        struct MemoryStatusEx {
+            dw_length: u32,
+            dw_memory_load: u32,
+            ull_total_phys: u64,
+            ull_avail_phys: u64,
+            ull_total_page_file: u64,
+            ull_avail_page_file: u64,
+            ull_total_virtual: u64,
+            ull_avail_virtual: u64,
+            ull_avail_extended_virtual: u64,
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+        }
+        let mut status = MemoryStatusEx {
+            dw_length: std::mem::size_of::<MemoryStatusEx>() as u32,
+            dw_memory_load: 0,
+            ull_total_phys: 0,
+            ull_avail_phys: 0,
+            ull_total_page_file: 0,
+            ull_avail_page_file: 0,
+            ull_total_virtual: 0,
+            ull_avail_virtual: 0,
+            ull_avail_extended_virtual: 0,
+        };
+        // SAFETY: `status` is a correctly sized `MEMORYSTATUSEX` with its
+        // length field set, as the API requires.
+        if unsafe { GlobalMemoryStatusEx(&mut status) } == 0 {
+            return (0, 0);
+        }
+        (status.ull_total_phys as i64, status.ull_avail_phys as i64)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        (0, 0)
     }
 }

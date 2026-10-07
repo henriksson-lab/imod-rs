@@ -25,9 +25,9 @@
 //! the source leaves uninitialised start at zero here -- see the notes at
 //! each one.
 
+use crate::imod::libcfshr::b3dutil::OsStrExt as _;
 use std::ffi::OsString;
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
-use std::os::unix::ffi::OsStrExt as _;
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use crate::imod::libcfshr::b3dutil::{CArg, ImodFile, b3d_fread, b3d_rewind, c_format_bytes, exit};

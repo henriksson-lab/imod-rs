@@ -72,7 +72,7 @@ macro_rules! b3dnint_cvtt {
         }
         #[cfg(not(target_arch = "x86_64"))]
         {
-            v as i32
+            crate::imod::flib::subrs::compat::gfortran_rt::cvttsd2si(v)
         }
     }};
 }

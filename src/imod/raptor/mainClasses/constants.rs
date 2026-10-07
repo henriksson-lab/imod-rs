@@ -50,13 +50,8 @@ pub fn get_date() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as libc::time_t)
         .unwrap_or(0);
-    let mut timeinfo = std::mem::MaybeUninit::<libc::tm>::zeroed();
-    // SAFETY: `localtime_r` fills the `tm` it is given from a valid
-    // `time_t`; the all-zero `tm` is a valid value of the plain C struct.
-    let timeinfo = unsafe {
-        libc::localtime_r(&rawtime, timeinfo.as_mut_ptr());
-        timeinfo.assume_init()
-    };
+    let timeinfo = crate::imod::libcfshr::b3dutil::local_time(rawtime)
+        .unwrap_or_else(|| unsafe { std::mem::zeroed() });
     format!(
         "{} {} {:2} {:02}:{:02}:{:02} {}",
         DAYS[timeinfo.tm_wday as usize],

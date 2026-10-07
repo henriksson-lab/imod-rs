@@ -16,5 +16,12 @@
 # not merge.  `-Awarnings` therefore lives here rather than in the documented
 # command lines; setting `RUSTFLAGS=-Awarnings` by hand silently discards
 # `+sse4.1` and costs ~8% on the byte/short output paths with no visible sign.
+#
+# The flag is x86-only, so it is set for x86_64 targets alone.  Cargo does not
+# merge the two tables: when a `[target.<cfg>]` rustflags entry matches, the
+# `[build]` entry is ignored, so `-Awarnings` is repeated in both.
 [build]
+rustflags = ["-Awarnings"]
+
+[target.'cfg(target_arch = "x86_64")']
 rustflags = ["-Awarnings", "-C", "target-feature=+sse4.1"]

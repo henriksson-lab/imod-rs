@@ -18,6 +18,8 @@ fn serieswatcher_matches_native_goldens() {
 /// first pass (`NameError` on `topCheckFile`); here the stack is delivered
 /// with its `.mdoc`, and an interrupt ends the watcher as the source's
 /// `except KeyboardInterrupt` does.
+// Ends the watcher with SIGINT: Unix only.
+#[cfg(unix)]
 #[test]
 fn serieswatcher_deliver_only() {
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));

@@ -100,6 +100,7 @@ use crate::imod::libwarp::maggradfield::mag_gradient_shift;
 use crate::imod::libwarp::warputils::interpolate_grid;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
+#[cfg(unix)]
 use std::os::unix::fs::FileExt;
 
 // ---------------------------------------------------------------------------
@@ -143,8 +144,18 @@ impl DirectUnit {
     /// record past the end of the file is an error.
     pub fn read_record(&self, rec: i32) -> std::io::Result<Vec<u8>> {
         let mut buf = vec![0u8; self.recl];
-        self.file
-            .read_exact_at(&mut buf, (rec as u64 - 1) * self.recl as u64)?;
+        let offset = (rec as u64 - 1) * self.recl as u64;
+        #[cfg(unix)]
+        self.file.read_exact_at(&mut buf, offset)?;
+        // Windows has no `pread` that leaves the file position alone; nothing
+        // else reads this unit's position, so seek-then-read is the same.
+        #[cfg(not(unix))]
+        {
+            use std::io::{Read, Seek, SeekFrom};
+            let mut file = &self.file;
+            file.seek(SeekFrom::Start(offset))?;
+            file.read_exact(&mut buf)?;
+        }
         Ok(buf)
     }
 
@@ -155,8 +166,16 @@ impl DirectUnit {
         }
         let mut buf = data.to_vec();
         buf.resize(self.recl, 0);
-        self.file
-            .write_all_at(&buf, (rec as u64 - 1) * self.recl as u64)
+        let offset = (rec as u64 - 1) * self.recl as u64;
+        #[cfg(unix)]
+        return self.file.write_all_at(&buf, offset);
+        #[cfg(not(unix))]
+        {
+            use std::io::{Seek, SeekFrom};
+            let mut file = &self.file;
+            file.seek(SeekFrom::Start(offset))?;
+            file.write_all(&buf)
+        }
     }
 
     /// A transfer with no `err=`/`iostat=` that fails is a gfortran runtime

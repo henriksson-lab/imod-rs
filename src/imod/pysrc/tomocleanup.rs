@@ -108,9 +108,8 @@ pub fn tomocleanup(arguments: &[OsString]) -> i32 {
         }
         // `os.access(tdir, os.W_OK)`: the POSIX `access` call itself, which asks
         // with the real uid and gid, not a reading of the permission bits
-        let writable = std::ffi::CString::new(tdir.as_bytes())
-            .map(|path| unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
-            .unwrap_or(false);
+        let writable =
+            crate::imod::libcfshr::b3dutil::os_access(&tdir, crate::imod::libcfshr::b3dutil::W_OK);
         if !writable {
             exit_error(&format!(
                 "You do not have permission to remove files in the directory {tdir}"

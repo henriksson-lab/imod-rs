@@ -4311,7 +4311,11 @@ fn brightness_writes_source_serialemccd_tiff_description() {
         let file = ii_open(name.to_bytes(), "rb");
         let mut description = core::ptr::null_mut();
         assert_ne!(
-            tiff_get_field(file, 270, (&mut description as *mut *mut i8).cast()),
+            tiff_get_field(
+                file,
+                270,
+                (&mut description as *mut *mut core::ffi::c_char).cast()
+            ),
             0
         );
         assert!(

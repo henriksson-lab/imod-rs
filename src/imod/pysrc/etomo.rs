@@ -32,10 +32,12 @@ pub fn which(prog: &str) -> Option<String> {
     for dir in std::env::split_paths(&path) {
         let full = dir.join(&prog);
         // `os.path.exists(full) and os.access(full, os.X_OK)`
-        let Ok(c_full) = std::ffi::CString::new(full.to_string_lossy().into_owned()) else {
-            continue;
-        };
-        if full.exists() && unsafe { libc::access(c_full.as_ptr(), libc::X_OK) } == 0 {
+        if full.exists()
+            && crate::imod::libcfshr::b3dutil::os_access(
+                &full.to_string_lossy(),
+                crate::imod::libcfshr::b3dutil::X_OK,
+            )
+        {
             return Some(full.to_string_lossy().into_owned());
         }
     }
@@ -152,10 +154,9 @@ pub fn etomo(arguments: &[OsString]) -> i32 {
 
     // Python `os.path.getmtime`: seconds as a double
     let getmtime = |path: &str| -> Option<f64> {
-        use std::os::unix::fs::MetadataExt;
         fs::metadata(path)
             .ok()
-            .map(|meta| meta.mtime() as f64 + meta.mtime_nsec() as f64 * 1e-9)
+            .map(|meta| crate::imod::libcfshr::b3dutil::py_st_mtime(&meta))
     };
 
     let mut no_java = false;
@@ -662,8 +663,10 @@ and put it on your command search path, or point IMOD_JAVADIR to it"
 
     // `os.access(ETOMO_LOG_DIR, os.W_OK)`
     let writable = !etomo_log_dir.is_empty()
-        && std::ffi::CString::new(etomo_log_dir.clone())
-            .is_ok_and(|c_dir| unsafe { libc::access(c_dir.as_ptr(), libc::W_OK) } == 0);
+        && crate::imod::libcfshr::b3dutil::os_access(
+            &etomo_log_dir,
+            crate::imod::libcfshr::b3dutil::W_OK,
+        );
     if writable {
         // purge the directory to 30 sessions or whatever user chooses
         let mut purgenum = 31;
@@ -694,8 +697,7 @@ and put it on your command search path, or point IMOD_JAVADIR to it"
             let full = Path::new(&etomo_log_dir).join(&x);
             match fs::metadata(&full) {
                 Ok(meta) => {
-                    use std::os::unix::fs::MetadataExt;
-                    tmplist.push((meta.mtime() as f64 + meta.mtime_nsec() as f64 * 1e-9, x));
+                    tmplist.push((crate::imod::libcfshr::b3dutil::py_st_mtime(&meta), x));
                 }
                 Err(error) => {
                     eprintln!("OSError: {error}: '{}'", full.display());

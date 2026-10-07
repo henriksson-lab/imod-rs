@@ -11,6 +11,10 @@
 //! holds a link per command of our `imod` binary (the launcher dispatches on
 //! the link name), plus the Python scripts eTomo runs that are not translated
 //! (`imodkillgroup`), with `pylib` for them.
+//!
+//! The installation is built from symbolic links and the Python scripts: Unix
+//! only.
+#![cfg(unix)]
 use imod_rs::imod::etomo::base_manager::{BaseManager, BaseManagerBase};
 use imod_rs::imod::etomo::etomo_director;
 use imod_rs::imod::etomo::process::base_process_manager::BaseProcessManager;
